@@ -76,7 +76,7 @@ base_system_message:
            - When behavior is repeatable, write a helper in agent_lib.py.
            - Helpers should be feature/effect based, not coordinate-hardcoded for prior levels.
         3) Composition:
-           - Build future run_script calls by combining helper calls + minimal manual actions.
+           - Build future arc_repl exec scripts by combining helper calls + minimal manual actions.
 
         Turn timebox and stop protocol:
         - End your turn as soon as the active mode goal is achieved.
@@ -87,40 +87,40 @@ base_system_message:
         - Do not keep calling tools after mode goal or 5-minute limit; return control.
 
         Tool contract:
-        - Use shell to execute CLI commands `arc_action` and `arc_get_state`.
-        - There is no custom MCP arc_action tool in this run.
+        - Use shell to execute CLI command `arc_repl`.
+        - There is no MCP arc tool in this run.
         - Turn chunking: keep turns short so supervisor can run frequently.
         - Default shell budget per turn:
-          - explore/plan: at most 2 shell commands total, with at most 1 `arc_action` command.
-          - act/recover: at most 1 `arc_action` command total.
-        - Preferred cadence: one primary `arc_action` command per turn unless supervisor explicitly authorizes more.
-        - Avoid chaining multiple `arc_action` commands with shell operators in one line.
-        - Preferred cadence: after the primary `arc_action` command and its JSON result, summarize and return control.
+          - explore/plan: at most 2 shell commands total, with at most 1 `arc_repl` command.
+          - act/recover: at most 1 `arc_repl` command total.
+        - Preferred cadence: one primary `arc_repl` command per turn unless supervisor explicitly authorizes more.
+        - Avoid chaining multiple `arc_repl` commands with shell operators in one line.
+        - Preferred cadence: after the primary `arc_repl` command and its JSON result, summarize and return control.
         - If extra analysis is needed, keep it minimal and prioritize next-turn correctness over same-turn verbosity.
-        - `arc_action` stdout is always exactly one JSON object (no trailing plain-text blocks).
-        - `arc_get_state` stdout is always exactly one JSON object with current state and optional grid rows.
+        - `arc_repl` stdout is always exactly one JSON object (no trailing plain-text blocks).
         - On failures, JSON still returns with `ok=false` and an `error` object; command exit may be non-zero.
         - If tool output is persisted/truncated preview, prefer preview fields first; if still needed, do at most one focused pagination/read and then return control.
         - If you use `jq`, parse only that JSON object and branch on `.ok`.
         - Safe jq examples:
-          - `arc_action status | jq '{ok, state, current_level, levels_completed, full_reset}'`
-          - `... | arc_action run_script | jq '{ok, state, levels_gained_in_call, steps_executed, step_results: [.step_results[] | {step, action, changed_pixels, levels_gained_in_step}]}'`
-        - run_script script must be provided via stdin (heredoc/pipe); `--script` is unsupported.
-        - Required run_script form:
-          - `cat <<'PY' | arc_action run_script`
+          - `arc_repl status | jq '{ok, state, current_level, levels_completed, full_reset}'`
+          - `cat <<'PY' | arc_repl exec | jq '{ok, state, levels_gained_in_call, steps_executed, step_results: [.step_results[] | {step, action, changed_pixels, levels_gained_in_step}]}'`
+          - `print(get_state())` from inside `arc_repl exec` when you need in-turn state details.
+        - exec script must be provided via stdin (heredoc/pipe).
+        - Required exec form:
+          - `cat <<'PY' | arc_repl exec`
           - ...python with env.step(GameAction.ACTION1)...
           - `PY`
-        - Default run_script budget is <=20 env.step actions per call.
+        - Default exec budget is <=20 env.step actions per call.
         - Exception: you may exceed 20 only when replaying a known solution sequence from prior validated evidence
           (for example prior validated level completion evidence or an explicitly validated prior turn trace).
         - When using the exception, explicitly state the replay source and why longer length is necessary.
-        - arc_action always executes from CURRENT game state.
-        - arc_action does not reset unless you call action=reset_level.
-        - A single arc_action command is single-level scoped; do not attempt to span multiple level completions.
-        - After each arc_action call, analyze its returned JSON directly before deciding the next action.
+        - arc_repl always executes from CURRENT game state.
+        - arc_repl does not reset unless you call action=reset_level.
+        - A single arc_repl command is single-level scoped; do not attempt to span multiple level completions.
+        - After each arc_repl call, analyze its returned JSON directly before deciding the next action.
         - Prefer JSON fields over trace mining for immediate decisions: `ok`, `state`, `levels_completed`,
           `levels_gained_in_call`, `state_changed_in_call`, `steps_executed`, `step_results`, `step_diffs`, `aggregate_diff`.
-        - arc_action result schema (top-level):
+        - arc_repl result schema (top-level):
           - `schema_version` (string), `ok` (bool), `action` (string), `game_id` (string)
           - state summary: `state`, `current_level`, `levels_completed`, `levels_gained_in_call`, `full_reset`
           - execution summary: `steps_executed`, `step_results[]`, `step_diffs[]`, `aggregate_diff`
@@ -129,6 +129,25 @@ base_system_message:
           - `step`, `action`, `changed_pixels`, `change_bbox`, `levels_gained_in_step`, `state_changed_in_step`
           - Use this for fast reasoning; use `step_diffs[]` when you need full cell-level changes.
         - In act mode, do not mine old traces (`turn-traces`, `rg/sed` over history) unless supervisor explicitly asks.
+
+        arc_repl interfaces:
+        - `arc_repl status`:
+          - Returns JSON status for current conversation REPL session and current game state.
+        - `arc_repl reset_level`:
+          - Resets current level from the active game state and returns JSON diff/state summary.
+        - `arc_repl exec`:
+          - Executes Python from stdin inside a conversation-scoped stateful REPL.
+          - REPL globals persist within the same conversation and reset when conversation_id changes.
+          - REPL starts with env injected at current game state when that conversation session starts.
+          - Available REPL globals:
+            - `env` and `current`: active toolkit environment object (same step API as ARC docs minimal example).
+            - `GameAction` / `GA`: arcengine action enum (`GameAction.ACTION1`, etc.).
+            - `diff(before_state, after_state, output=\"json\"|\"text\", pad=0)`:
+              - `output=\"json\"` returns changed-pixel summary plus `before`/`after` chunks.
+              - `output=\"text\"` returns explicit `(row,col): before->after` diff text.
+            - `get_state()`: returns current state metadata plus `grid_hex_rows`.
+            - helper functions from `agent_lib.py` (auto-loaded each exec call).
+          - Manage state directly with `env.step(...)`; do not call `env.reset()` inside exec scripts.
 
         Diff interpretation contract:
         - Per-step diffs are authoritative and complete.
@@ -139,20 +158,21 @@ base_system_message:
 
         Runtime state access:
         - State/history artifacts are outside the agent workspace.
-        - Use `arc_get_state` to fetch current state JSON (and grid rows when needed).
-        - Use `arc_action` return JSON as the primary source of truth for recent transitions.
+        - Use `arc_repl` return JSON as the primary source of truth for recent transitions.
+        - For additional state inspection, use `get_state()` inside `arc_repl exec`.
+        - `arc_get_state` is not available in this run.
         - Do not attempt to import harness/repo modules or inspect parent directories from shell.
-        - In recover mode, do not spend shell calls on workspace probing before the required `arc_action` probe.
+        - In recover mode, do not spend shell calls on workspace probing before the required `arc_repl` probe.
 
         agent_lib.py behavior:
-        - Every run_script auto-loads agent_lib.py first.
+        - Every exec call auto-loads agent_lib.py first.
         - Helpers in agent_lib.py are directly callable from inline script.
-        - Do NOT `import agent_lib` inside run_script; call helpers directly.
+        - Do NOT `import agent_lib` inside exec script; call helpers directly.
 
         Script notes:
-        - run_script executes via exec(); top-level code runs.
+        - exec executes via exec(); top-level code runs.
         - env and GameAction are already in scope.
-        - Do not call env.reset() in script; use action=reset_level.
+        - Do not call env.reset() in script; use `arc_repl reset_level`.
     - literal: |
         Harness renderer palette (canonical numeric IDs):
         0=#FFFFFF 1=#CCCCCC 2=#999999 3=#666666 4=#333333 5=#000000 6=#E53AA3 7=#FF7BCC
@@ -173,13 +193,13 @@ base_user_message:
         - Features should be reasoned about visually (possibly multi-color/multi-part), not as single-color tokens.
         - Stop as soon as this mode's goal is achieved, or when 5 minutes have elapsed from turn start (whichever comes first).
         - Track turn start time in reasoning notes; do not spend a shell call only to fetch time.
-        - Prefer one `arc_action` command this turn unless supervisor explicitly authorizes more.
-        - After the primary `arc_action` result, summarize evidence and return control.
+        - Prefer one `arc_repl` command this turn unless supervisor explicitly authorizes more.
+        - After the primary `arc_repl` result, summarize evidence and return control.
 
 base_agent_rules:
   operation: append
   values:
-    - "Use `arc_action` for environment interaction (status/run_script/reset_level)."
+    - "Use `arc_repl` for environment interaction (status/exec/reset_level)."
     - "Keep reasoning evidence-grounded: tie claims to observed transitions and explicitly note uncertainty."
     - "When proposing next actions, prioritize the highest-information unresolved uncertainty."
     - "Update a compact causal ledger each turn (trigger -> effect -> confidence -> contradictions)."
@@ -203,11 +223,14 @@ base_supervisor_instructions:
     - "Avoid over-prescriptive action scripts unless the agent is repeatedly stuck with no new evidence."
     - "Prefer simple explanations first, but revise quickly when contradicted."
     - "Ensure feature reasoning is visual/object-based (multi-color/multi-part allowed), not color-token based."
-    - "Treat run_script budget and turn chunking as soft optimization constraints."
-    - "Treat `import agent_lib` inside run_script as soft guidance only; critique and continue instead of rewrite loops."
+    - "Treat exec-script budget and turn chunking as soft optimization constraints."
+    - "Treat `import agent_lib` inside exec script as soft guidance only; critique and continue instead of rewrite loops."
     - "Enforce mode switch_when limits operationally: if explore repeats the same unresolved uncertainty for >=3 turns or exceeds 4 turns on one level, force a mode transition (plan or recover) instead of another same-mode continue."
     - "If the same critique text is being repeated for >=3 consecutive turns without new evidence, switch mode."
-    - "If a turn includes >1 arc_action command without explicit supervisor authorization, critique it and request a one-command next turn; do not rewrite solely for that."
+    - "If a turn includes >1 arc_repl command without explicit supervisor authorization, critique it and request a one-command next turn; do not rewrite solely for that."
+    - "Audit tool quality rigorously: verify whether command pipelines (jq/grep/head/tail/pagination) could have dropped or distorted evidence before trusting conclusions."
+    - "When tool misuse or misinterpretation is present, use `advice` to provide detailed corrective notes (what was wrong, why it matters, and the exact next safer command/parse strategy)."
+    - "In `advice`, prioritize diagnosing interpretation errors over style issues."
     - "When entering recover, include a recover entry snapshot in mode_payload: `recover_entry_theory`, `recover_entry_key_assumptions`, `recover_entry_falsifier`, and optional `user_message`."
     - "Recover exit gate: do not fork from recover to act/plan/explore unless at least one entry assumption was explicitly falsified and a materially different replacement theory is stated."
     - "A recover turn that only restores baseline without theory revision is not sufficient for recover exit; keep recover active with one bounded disambiguation probe."
@@ -306,8 +329,8 @@ modes:
         - literal: |
             Act mode guidance:
             - Execute the shortest credible solve attempt.
-            - Keep run_script at <=20 actions unless replaying a cited known solution.
-            - Analyze the returned arc_action JSON immediately and decide from that evidence before extra shell analysis.
+            - Keep exec scripts at <=20 actions unless replaying a cited known solution.
+            - Analyze the returned arc_repl JSON immediately and decide from that evidence before extra shell analysis.
             - If it fails, identify the first contradiction and update the causal ledger.
             - State immediate corrective next step.
             - Stop once act goal is met or 5 minutes elapsed from turn start.
@@ -347,7 +370,7 @@ modes:
             - Replace it only with evidence-backed alternatives.
             - Do not exit recover until the replacement theory is materially different from entry.
             - On proposed exit, explicitly report: entry theory, falsified assumption, new theory, and supporting evidence.
-            - Start recover turns with the required `arc_action` recovery probe; avoid pre-probe shell analysis.
+            - Start recover turns with the required `arc_repl` recovery probe; avoid pre-probe shell analysis.
             - Stop once recover goal is met or 5 minutes elapsed from turn start.
         - template: |
             Recover entry snapshot:

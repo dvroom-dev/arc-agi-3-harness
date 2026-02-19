@@ -95,10 +95,10 @@ LEVEL_COMPLETIONS_TEMPLATE = textwrap.dedent("""\
 """)
 
 AGENT_LIB_TEMPLATE = textwrap.dedent("""\
-    \"\"\"Persistent helper library for ARC run_script turns.
+    \"\"\"Persistent helper library for ARC REPL exec turns.
 
     Put reusable game-agnostic helpers here.
-    Every arc_action run_script call auto-loads this module before executing
+    Every arc_repl exec call auto-loads this module before executing
     the turn script, so functions defined here are directly callable.
     \"\"\"
 
@@ -1008,7 +1008,7 @@ def setup_run_dir(run_dir: Path, agent_dir: Path, supervisor_dir: Path, log) -> 
     supervisor_dir.mkdir(parents=True, exist_ok=True)
 
     # Do not copy environment source into run workspace.
-    # arc_action loads environments from shared project-level environment_files.
+    # arc_repl loads environments from shared project-level environment_files.
 
     # Seed supervisor-side knowledge files. Supervisor can reference these via
     # supervisor_file scope without exposing them to the agent filesystem.
@@ -1040,30 +1040,25 @@ def setup_run_config_dir(run_config_dir: Path) -> tuple[Path, Path]:
     tools_dir.mkdir(parents=True, exist_ok=True)
     bin_dir.mkdir(parents=True, exist_ok=True)
 
-    for filename in ("arc_action.py", "arc_action_cli.py", "arc_get_state.py"):
+    for filename in (
+        "arc_action.py",  # dependency module used by arc_repl.py helpers
+        "arc_repl.py",
+        "arc_repl_cli.py",
+    ):
         src = PROJECT_ROOT / "tools" / filename
         dst = tools_dir / filename
         shutil.copyfile(src, dst)
 
     py = str(PROJECT_VENV_PYTHON)
-    arc_action_wrapper = f"""#!/usr/bin/env bash
+    arc_repl_wrapper = f"""#!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 CONFIG_DIR="$(cd "${{SCRIPT_DIR}}/.." && pwd)"
-exec "{py}" "${{CONFIG_DIR}}/tools/arc_action_cli.py" "$@"
+exec "{py}" "${{CONFIG_DIR}}/tools/arc_repl_cli.py" "$@"
 """
-    arc_get_state_wrapper = f"""#!/usr/bin/env bash
-set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
-CONFIG_DIR="$(cd "${{SCRIPT_DIR}}/.." && pwd)"
-exec "{py}" "${{CONFIG_DIR}}/tools/arc_get_state.py" "$@"
-"""
-    arc_action_path = bin_dir / "arc_action"
-    arc_action_path.write_text(arc_action_wrapper)
-    arc_action_path.chmod(0o755)
-    arc_get_state_path = bin_dir / "arc_get_state"
-    arc_get_state_path.write_text(arc_get_state_wrapper)
-    arc_get_state_path.chmod(0o755)
+    arc_repl_path = bin_dir / "arc_repl"
+    arc_repl_path.write_text(arc_repl_wrapper)
+    arc_repl_path.chmod(0o755)
     return bin_dir, tools_dir
 
 
@@ -1115,9 +1110,9 @@ def main() -> None:
         log(f"[harness] missing python runtime: {PROJECT_VENV_PYTHON}")
         log("[harness] run `uv sync` in project root and retry")
         sys.exit(1)
-    run_arc_action_tool = run_tools_dir / "arc_action.py"
-    if not run_arc_action_tool.exists():
-        log(f"[harness] missing tool script: {run_arc_action_tool}")
+    run_arc_repl_tool = run_tools_dir / "arc_repl.py"
+    if not run_arc_repl_tool.exists():
+        log(f"[harness] missing tool script: {run_arc_repl_tool}")
         sys.exit(1)
 
     arc_state_dir = supervisor_dir / "arc"
@@ -1166,6 +1161,24 @@ def main() -> None:
         except Exception as exc:
             raise RuntimeError(f"Failed to parse engine history JSON: {history_json}: {exc}") from exc
 
+    def load_conversation_id(doc_path: Path) -> str | None:
+        if not doc_path.exists():
+            return None
+        try:
+            text = doc_path.read_text()
+        except Exception:
+            return None
+        lines = text.splitlines()
+        if not lines or lines[0].strip() != "---":
+            return None
+        for line in lines[1:80]:
+            if line.strip() == "---":
+                break
+            m = re.match(r"^\s*conversation_id\s*:\s*(.+?)\s*$", line)
+            if m:
+                return m.group(1).strip()
+        return None
+
     def format_state_summary(state: dict | None) -> str:
         if not state:
             return "State unavailable."
@@ -1182,13 +1195,16 @@ def main() -> None:
         )
 
     active_game_id = str(args.game_id).strip()
+    active_conversation_id = "harness_bootstrap"
+    active_actual_conversation_id: str | None = None
+    conversation_aliases: dict[str, str] = {}
 
-    def run_arc_action(payload: dict) -> tuple[dict | None, str, int]:
-        nonlocal active_game_id
+    def run_arc_repl(payload: dict) -> tuple[dict | None, str, int]:
+        nonlocal active_game_id, active_conversation_id
         request = dict(payload)
         requested_game_id = str(request.get("game_id", "")).strip()
         # Keep all harness-side calls on one canonical game_id lineage.
-        # After the first status call, arc_action returns a resolved id
+        # After the first status call, arc_repl returns a resolved id
         # (e.g. ls20-<hash>). Reusing that id avoids replay-history forks.
         if requested_game_id:
             if (
@@ -1201,12 +1217,13 @@ def main() -> None:
             request["game_id"] = active_game_id
         cmd = [
             str(PROJECT_VENV_PYTHON),
-            str(run_arc_action_tool),
+            str(run_arc_repl_tool),
         ]
         child_env = dict(os.environ)
         child_env["ARC_OPERATION_MODE"] = str(args.operation_mode).strip().upper()
         child_env.setdefault("ARC_ENVIRONMENTS_DIR", str(arc_env_dir))
         child_env["ARC_STATE_DIR"] = str(arc_state_dir)
+        child_env["ARC_CONVERSATION_ID"] = active_conversation_id
         proc = subprocess.run(
             cmd,
             input=json.dumps(request),
@@ -1217,7 +1234,7 @@ def main() -> None:
         )
         if proc.stderr.strip():
             for line in proc.stderr.strip().splitlines():
-                log(f"[arc_action] {line}")
+                log(f"[arc_repl] {line}")
         stdout = proc.stdout.strip()
         parsed: dict | None = None
         if stdout:
@@ -1227,7 +1244,7 @@ def main() -> None:
                 if proc.returncode == 0:
                     preview = stdout[:800].replace("\n", "\\n")
                     raise RuntimeError(
-                        "arc_action returned non-JSON stdout despite success status: "
+                        "arc_repl returned non-JSON stdout despite success status: "
                         f"{exc}. stdout_preview={preview}"
                     ) from exc
             else:
@@ -1238,11 +1255,33 @@ def main() -> None:
                         active_game_id = resolved_game_id
                 elif proc.returncode == 0:
                     raise RuntimeError(
-                        "arc_action returned JSON that is not an object on success."
+                        "arc_repl returned JSON that is not an object on success."
                     )
         elif proc.returncode == 0:
-            raise RuntimeError("arc_action returned empty stdout on success.")
+            raise RuntimeError("arc_repl returned empty stdout on success.")
         return parsed, stdout, proc.returncode
+
+    def sync_active_conversation_id_from_session() -> None:
+        nonlocal active_conversation_id, active_actual_conversation_id
+        parsed = load_conversation_id(session_file)
+        if not parsed:
+            return
+        alias = conversation_aliases.get(parsed)
+        if alias is None:
+            if active_actual_conversation_id is None and active_conversation_id == "harness_bootstrap":
+                # Preserve first-turn REPL state by aliasing the first real
+                # conversation id to the bootstrap key used during `super new`.
+                alias = active_conversation_id
+            else:
+                alias = parsed
+            conversation_aliases[parsed] = alias
+        if parsed != active_actual_conversation_id:
+            log(
+                "[harness] conversation update: "
+                f"actual={parsed} repl_session={alias}"
+            )
+        active_actual_conversation_id = parsed
+        active_conversation_id = alias
 
     def load_current_pixels() -> np.ndarray | None:
         grid_path = arc_state_dir / "current_grid.npy"
@@ -1287,8 +1326,8 @@ def main() -> None:
         color component centroid.
         """
         # Force reset baseline before probing a level.
-        run_arc_action({"action": "reset_level", "game_id": args.game_id})
-        status_result, status_stdout, status_rc = run_arc_action(
+        run_arc_repl({"action": "reset_level", "game_id": args.game_id})
+        status_result, status_stdout, status_rc = run_arc_repl(
             {"action": "status", "game_id": args.game_id}
         )
         if status_rc != 0 or not status_result:
@@ -1324,8 +1363,8 @@ def main() -> None:
                         f"(id={color_id:X}, size={size})"
                     )
                     script = f"env.step(6, data={{'x': {x}, 'y': {y}}})"
-                    result, stdout, rc = run_arc_action(
-                        {"action": "run_script", "game_id": args.game_id, "script": script}
+                    result, stdout, rc = run_arc_repl(
+                        {"action": "exec", "game_id": args.game_id, "script": script}
                     )
                     if rc == 0 and result:
                         motion_palette.update(_collect_diff_palette(result))
@@ -1335,15 +1374,15 @@ def main() -> None:
                         else:
                             no_effect.append(label)
                     else:
-                        error_text = stdout.strip() if stdout.strip() else "run_script failed"
+                        error_text = stdout.strip() if stdout.strip() else "exec failed"
                         no_effect.append(f"{label} (error: {error_text})")
-                    run_arc_action({"action": "reset_level", "game_id": args.game_id})
+                    run_arc_repl({"action": "reset_level", "game_id": args.game_id})
                 continue
 
             label = f"ACTION{action_id}"
             script = f"env.step({action_id})"
-            result, stdout, rc = run_arc_action(
-                {"action": "run_script", "game_id": args.game_id, "script": script}
+            result, stdout, rc = run_arc_repl(
+                {"action": "exec", "game_id": args.game_id, "script": script}
             )
             if rc == 0 and result:
                 motion_palette.update(_collect_diff_palette(result))
@@ -1353,9 +1392,9 @@ def main() -> None:
                 else:
                     no_effect.append(label)
             else:
-                error_text = stdout.strip() if stdout.strip() else "run_script failed"
+                error_text = stdout.strip() if stdout.strip() else "exec failed"
                 no_effect.append(f"{label} (error: {error_text})")
-            run_arc_action({"action": "reset_level", "game_id": args.game_id})
+            run_arc_repl({"action": "reset_level", "game_id": args.game_id})
 
         parts = [
             "## Input Exploration Results (auto)",
@@ -1471,6 +1510,8 @@ def main() -> None:
     super_env["PATH"] = f"{run_bin_dir}:{os.environ.get('PATH', '')}"
 
     def resume_super(prompt: str | None = None, *, image_paths: list[Path] | None = None) -> str:
+        nonlocal active_conversation_id
+        super_env["ARC_CONVERSATION_ID"] = active_conversation_id
         resume_args: list[str] = [
             "resume",
             str(session_file),
@@ -1507,19 +1548,19 @@ def main() -> None:
         log("[harness] auto input exploration is enabled.")
 
     # Initialize state artifacts before first agent turn.
-    init_result, _, init_rc = run_arc_action({"action": "status", "game_id": args.game_id})
+    init_result, _, init_rc = run_arc_repl({"action": "status", "game_id": args.game_id})
     if init_rc != 0:
-        log("[harness] failed to initialize state with arc_action status")
+        log("[harness] failed to initialize state with arc_repl status")
         sys.exit(1)
     log(f"[harness] active game id: {active_game_id}")
     log(f"[harness] initialized: {format_state_summary(load_state())}")
 
     initial_prompt = (
-        "Game state initialized. Use shell exactly once this turn to execute arc_action "
-        "(status, run_script, or reset_level). "
-        "For run_script, pass script via stdin heredoc (do not use --script), e.g. "
-        "`cat <<'PY' | arc_action run_script` ... `PY`. "
-        "Use arc_get_state to read current machine state, then continue solving. "
+        "Game state initialized. Use shell exactly once this turn to execute arc_repl "
+        "(status, exec, or reset_level). "
+        "For exec, pass Python via stdin heredoc, e.g. "
+        "`cat <<'PY' | arc_repl exec` ... `PY`. "
+        "Inside exec scripts, use `get_state()` and `env` for state inspection and actions. "
         "Use agent_lib.py for persistent reusable helper functions."
     )
     if init_result and isinstance(init_result.get("state"), str):
@@ -1549,6 +1590,7 @@ def main() -> None:
 
     log("[harness] starting super new...")
     init_images = _level_start_prompt_images(init_state, initial=True)
+    super_env["ARC_CONVERSATION_ID"] = active_conversation_id
     run_super([
         "new",
         "--config", str(super_config),
@@ -1562,6 +1604,7 @@ def main() -> None:
         *_prompt_args(initial_prompt, prompt_kind="new", image_paths=init_images),
         "--output", str(session_file),
     ], stream=args.verbose, cwd=run_dir, env=super_env)
+    sync_active_conversation_id_from_session()
 
     super_turn = 1
     stale_turns = 0
@@ -1600,7 +1643,7 @@ def main() -> None:
             if game_over_resets > args.max_game_over_resets:
                 log("[harness] max GAME_OVER auto-resets reached, stopping")
                 break
-            reset_result, reset_stdout, reset_rc = run_arc_action(
+            reset_result, reset_stdout, reset_rc = run_arc_repl(
                 {"action": "reset_level", "game_id": args.game_id}
             )
             if reset_rc != 0:
@@ -1618,8 +1661,8 @@ def main() -> None:
 
         if stale_turns >= 2:
             prompt_lines.append(
-                "No arc_action execution was detected in recent turns. "
-                "Execute exactly one shell command invoking arc_action this turn."
+                "No arc_repl execution was detected in recent turns. "
+                "Execute exactly one shell command invoking arc_repl this turn."
             )
         if pending_auto_explore_summary.strip():
             prompt_lines.append(pending_auto_explore_summary.strip())
@@ -1633,12 +1676,13 @@ def main() -> None:
         stdout = resume_super(prompt, image_paths=prompt_images)
         if not stdout.strip():
             raise RuntimeError("super returned empty assistant response")
+        sync_active_conversation_id_from_session()
 
         # Record level completions based on authoritative post-turn state.
         post_state = load_state()
         post_completed = int(post_state.get("levels_completed", 0)) if post_state else 0
         if post_completed > prev_completed:
-            # If arc_action already recorded completions directly, refresh and
+            # If arc_repl already recorded completions directly, refresh and
             # avoid duplicate append blocks in harness.
             last_recorded_completed_level = max(
                 last_recorded_completed_level,
@@ -1675,7 +1719,7 @@ def main() -> None:
                     f"level={completed_level} actions_in_level_window={len(level_actions)}"
                 )
             if not args.no_explore and (post_state and post_state.get("state") != "WIN"):
-                # Do not auto-explore here: arc_action reset_level resets campaign
+                # Do not auto-explore here: arc_repl reset_level resets campaign
                 # progress (levels_completed), so probing after a level completion
                 # would destroy run progress.
                 log(
