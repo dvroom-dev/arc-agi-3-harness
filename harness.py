@@ -23,9 +23,10 @@ import numpy as np
 try:
     from arcengine import GameAction
     from arcengine.enums import FrameDataRaw
-except Exception:  # pragma: no cover - optional at harness import time
-    GameAction = Any  # type: ignore[assignment]
-    FrameDataRaw = Any  # type: ignore[assignment]
+except Exception as exc:  # pragma: no cover - fail fast
+    raise RuntimeError(
+        "Failed to import arcengine dependencies (GameAction/FrameDataRaw)."
+    ) from exc
 
 try:
     from game_state import (
@@ -144,6 +145,7 @@ def format_change_records(changes: list[dict]) -> str:
         f"changed_pixels={len(changes)}",
         "format: (row,col): before->after",
     ]
+    skipped = 0
     for ch in changes:
         try:
             row = int(ch.get("row"))
@@ -151,8 +153,13 @@ def format_change_records(changes: list[dict]) -> str:
             before = str(ch.get("before", "?"))
             after = str(ch.get("after", "?"))
         except Exception:
+            skipped += 1
             continue
         lines.append(f"({row},{col}): {before}->{after}")
+    if len(lines) <= 2:
+        return "(invalid change records)"
+    if skipped:
+        lines.append(f"note: skipped_malformed_change_records={skipped}")
     return "\n".join(lines)
 
 
@@ -631,13 +638,13 @@ def load_history_events(history_json: Path) -> list[dict[str, Any]]:
         return []
     try:
         data = json.loads(history_json.read_text())
-    except Exception:
-        return []
+    except Exception as exc:
+        raise RuntimeError(f"Failed to parse history JSON: {history_json}: {exc}") from exc
     if not isinstance(data, dict):
-        return []
+        raise RuntimeError(f"Invalid history JSON shape in {history_json}: expected object")
     events = data.get("events")
     if not isinstance(events, list):
-        return []
+        raise RuntimeError(f"Invalid history JSON shape in {history_json}: expected events[]")
     out: list[dict[str, Any]] = []
     for e in events:
         if isinstance(e, dict):
@@ -1139,19 +1146,25 @@ def main() -> None:
             return None
         try:
             data = json.loads(state_json.read_text())
-            return data if isinstance(data, dict) else None
-        except Exception:
-            return None
+            if not isinstance(data, dict):
+                raise RuntimeError("state.json must contain a JSON object")
+            return data
+        except Exception as exc:
+            raise RuntimeError(f"Failed to parse state JSON: {state_json}: {exc}") from exc
 
     def load_engine_turn() -> int:
         if not history_json.exists():
             return 0
         try:
             data = json.loads(history_json.read_text())
+            if not isinstance(data, dict):
+                raise RuntimeError("tool-engine-history.json must contain a JSON object")
             turn = data.get("turn", 0)
-            return int(turn) if isinstance(turn, int) else 0
-        except Exception:
-            return 0
+            if not isinstance(turn, int):
+                raise RuntimeError("tool-engine-history.json turn must be an integer")
+            return int(turn)
+        except Exception as exc:
+            raise RuntimeError(f"Failed to parse engine history JSON: {history_json}: {exc}") from exc
 
     def format_state_summary(state: dict | None) -> str:
         if not state:
@@ -1207,17 +1220,28 @@ def main() -> None:
                 log(f"[arc_action] {line}")
         stdout = proc.stdout.strip()
         parsed: dict | None = None
-        json_blob = extract_json(stdout) if stdout else None
-        if json_blob:
+        if stdout:
             try:
-                maybe = json.loads(json_blob)
+                maybe = json.loads(stdout)
+            except Exception as exc:
+                if proc.returncode == 0:
+                    preview = stdout[:800].replace("\n", "\\n")
+                    raise RuntimeError(
+                        "arc_action returned non-JSON stdout despite success status: "
+                        f"{exc}. stdout_preview={preview}"
+                    ) from exc
+            else:
                 if isinstance(maybe, dict):
                     parsed = maybe
                     resolved_game_id = str(parsed.get("game_id", "")).strip()
                     if resolved_game_id:
                         active_game_id = resolved_game_id
-            except Exception:
-                pass
+                elif proc.returncode == 0:
+                    raise RuntimeError(
+                        "arc_action returned JSON that is not an object on success."
+                    )
+        elif proc.returncode == 0:
+            raise RuntimeError("arc_action returned empty stdout on success.")
         return parsed, stdout, proc.returncode
 
     def load_current_pixels() -> np.ndarray | None:
@@ -1226,8 +1250,8 @@ def main() -> None:
             return None
         try:
             return np.load(grid_path)
-        except Exception:
-            return None
+        except Exception as exc:
+            raise RuntimeError(f"Failed to load current grid file: {grid_path}: {exc}") from exc
 
     def summarize_tool_diff(result: dict | None) -> tuple[int, str]:
         if not result:
@@ -1394,13 +1418,19 @@ def main() -> None:
     def _level_start_prompt_images(state: dict | None, *, initial: bool = False) -> list[Path]:
         nonlocal last_prompted_image_level
         if not state:
-            return []
+            raise RuntimeError(
+                "Cannot determine level-start prompt image: state is unavailable."
+            )
         try:
             level = int(state.get("current_level", 0) or 0)
         except Exception:
-            return []
+            raise RuntimeError(
+                "Cannot determine level-start prompt image: invalid current_level in state."
+            )
         if level <= 0:
-            return []
+            raise RuntimeError(
+                f"Cannot determine level-start prompt image: invalid current_level={level}."
+            )
 
         per_level_image = level_start_images_dir / f"level_{level:02d}-start.png"
         if not per_level_image.exists():
@@ -1602,7 +1632,7 @@ def main() -> None:
         prompt_images = _level_start_prompt_images(state)
         stdout = resume_super(prompt, image_paths=prompt_images)
         if not stdout.strip():
-            log("[harness] warning: empty super response")
+            raise RuntimeError("super returned empty assistant response")
 
         # Record level completions based on authoritative post-turn state.
         post_state = load_state()

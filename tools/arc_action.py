@@ -60,41 +60,26 @@ ARC_COLORS_RGB = {
 
 
 def _resolve_environments_dir() -> Path:
-    """Resolve shared environment store across current and legacy run layouts."""
+    """Resolve shared environment directory with fail-fast validation."""
     env_value = os.getenv("ARC_ENVIRONMENTS_DIR", "").strip()
-    if env_value:
-        from_env = Path(env_value).expanduser()
-        if from_env.is_dir():
-            return from_env
-
-    candidates: list[Path] = []
-
-    # Prefer cwd-relative discovery because tool cwd is run agent dir.
-    cwd = Path.cwd().resolve()
-    for base in [cwd, *cwd.parents]:
-        candidates.append(base / "environment_files")
-
-    # Back-compat for older layouts that inferred from script location.
-    for base in [RUN_ROOT, *RUN_ROOT.parents]:
-        candidates.append(base / "environment_files")
-
-    seen: set[Path] = set()
-    for candidate in candidates:
-        if candidate in seen:
-            continue
-        seen.add(candidate)
-        if candidate.is_dir():
-            return candidate
-
-    # Last-resort fallback.
-    return cwd / "environment_files"
+    if not env_value:
+        raise RuntimeError("ARC_ENVIRONMENTS_DIR is required in OFFLINE mode")
+    from_env = Path(env_value).expanduser()
+    if not from_env.is_dir():
+        raise RuntimeError(
+            f"ARC_ENVIRONMENTS_DIR does not exist or is not a directory: {from_env}"
+        )
+    return from_env
 
 
 def _resolve_operation_mode() -> OperationMode:
     value = os.getenv("ARC_OPERATION_MODE", "NORMAL").strip().upper()
     if value in OperationMode.__members__:
         return OperationMode[value]
-    return OperationMode.NORMAL
+    raise RuntimeError(
+        f"Invalid ARC_OPERATION_MODE={value!r}. "
+        f"Expected one of: {', '.join(OperationMode.__members__.keys())}"
+    )
 
 
 def _make_id_candidates(game_id: str) -> list[str]:
@@ -227,9 +212,10 @@ def _hex_to_rgb(h: str) -> tuple[int, int, int]:
 
 
 def render_grid_to_image(pixels: np.ndarray, path: Path, scale: int = 8) -> None:
-    # Disabled by default: numeric diff/state artifacts are authoritative and
-    # image generation adds cost/noise without improving tool-grounded reasoning.
-    return
+    raise RuntimeError(
+        "render_grid_to_image() is not available in arc_action.py; "
+        "use game_state.render_grid_to_image from harness paths."
+    )
 
 
 def write_machine_state(
@@ -322,7 +308,7 @@ def write_game_state(
 def _read_args() -> dict:
     raw = io.TextIOWrapper(buffer=getattr(__import__("sys"), "stdin").buffer, encoding="utf-8").read().strip()
     if not raw:
-        return {}
+        return {"_error": "missing JSON args on stdin"}
     try:
         parsed = json.loads(raw)
     except Exception as exc:
@@ -363,10 +349,9 @@ def _error_payload(
 
 def _arc_dir(cwd: Path) -> Path:
     state_dir_env = os.getenv("ARC_STATE_DIR", "").strip()
-    if state_dir_env:
-        arc = Path(state_dir_env).expanduser()
-    else:
-        arc = cwd / ".ai-supervisor" / "arc"
+    if not state_dir_env:
+        raise RuntimeError("ARC_STATE_DIR is required")
+    arc = Path(state_dir_env).expanduser()
     arc.mkdir(parents=True, exist_ok=True)
     return arc
 
@@ -501,11 +486,13 @@ def _default_game_id(cwd: Path) -> str:
     if state.is_file():
         try:
             data = json.loads(state.read_text())
+            if not isinstance(data, dict):
+                raise RuntimeError("state.json must contain a JSON object")
             gid = str(data.get("game_id", "")).strip()
             if gid:
                 return gid
-        except Exception:
-            pass
+        except Exception as exc:
+            raise RuntimeError(f"failed reading default game_id from {state}: {exc}") from exc
     return ""
 
 
@@ -515,18 +502,27 @@ def _load_history(cwd: Path, game_id: str) -> dict:
         return {"game_id": game_id, "events": [], "turn": 0}
     try:
         data = json.loads(path.read_text())
-    except Exception:
-        return {"game_id": game_id, "events": [], "turn": 0}
+    except Exception as exc:
+        raise RuntimeError(f"failed to parse history file {path}: {exc}") from exc
     if not isinstance(data, dict):
-        return {"game_id": game_id, "events": [], "turn": 0}
-    if str(data.get("game_id", "")).strip() != game_id:
-        return {"game_id": game_id, "events": [], "turn": 0}
+        raise RuntimeError(f"invalid history file {path}: expected JSON object")
+    history_game_id = str(data.get("game_id", "")).strip()
+    if history_game_id != game_id:
+        # Accept base/resolved-id lineage continuity (e.g., ls20 vs ls20-cb3b57cc),
+        # but fail fast for unrelated game switches in the same state dir.
+        hist_candidates = set(_make_id_candidates(history_game_id))
+        req_candidates = set(_make_id_candidates(game_id))
+        if hist_candidates.isdisjoint(req_candidates):
+            raise RuntimeError(
+                "history game_id mismatch: "
+                f"history has {history_game_id!r}, requested {game_id!r}"
+            )
     events = data.get("events")
     if not isinstance(events, list):
-        events = []
+        raise RuntimeError(f"invalid history file {path}: events must be a list")
     turn = data.get("turn")
     if not isinstance(turn, int):
-        turn = 0
+        raise RuntimeError(f"invalid history file {path}: turn must be an int")
     return {"game_id": game_id, "events": events, "turn": turn}
 
 
@@ -541,14 +537,14 @@ def _get_pixels(env, frame: FrameDataRaw | None = None) -> np.ndarray:
     depletion/refill), so diffs should prefer `FrameDataRaw.frame[0]`.
     """
     if frame is not None:
-        try:
-            data = frame.frame
-            if isinstance(data, list) and data:
-                pixels = data[0]
-                if isinstance(pixels, np.ndarray):
-                    return pixels
-        except Exception:
-            pass
+        data = getattr(frame, "frame", None)
+        if isinstance(data, (list, tuple)) and data:
+            pixels = data[0]
+            if isinstance(pixels, np.ndarray):
+                return pixels
+        raise RuntimeError(
+            "FrameDataRaw.frame[0] is unavailable; cannot compute authoritative diff/state grid."
+        )
 
     game = env._game
     return game.get_pixels(
@@ -836,10 +832,7 @@ def _execute_script(
             )
             desc = f"{action_name}{' data=' + str(data) if data else ''} -> state={frame.state.value} levels={frame.levels_completed}/{frame.win_levels}"
             transition_log.append(desc)
-            try:
-                step_snapshots.append((desc, current_pixels))
-            except Exception:
-                pass
+            step_snapshots.append((desc, current_pixels))
             if frame.state.value in {"WIN", "GAME_OVER"}:
                 terminal_halt = True
                 raise _TerminalStateReached()
@@ -995,7 +988,7 @@ def _write_turn_trace(
 def main() -> int:
     cwd = Path.cwd().resolve()
     args = _read_args()
-    action = str(args.get("action", "status")).strip() if isinstance(args, dict) else "status"
+    action = str(args.get("action", "")).strip() if isinstance(args, dict) else ""
     requested_game_id = str(args.get("game_id", "")).strip() if isinstance(args, dict) else ""
 
     if "_error" in args:
@@ -1005,6 +998,16 @@ def main() -> int:
                 requested_game_id=requested_game_id,
                 message=str(args["_error"]),
                 error_type="invalid_args",
+            )
+        )
+        return 1
+    if not action:
+        _emit_json(
+            _error_payload(
+                action="",
+                requested_game_id=requested_game_id,
+                message="missing required `action` (expected: status|run_script|reset_level)",
+                error_type="missing_action",
             )
         )
         return 1
@@ -1140,6 +1143,7 @@ def main() -> int:
         final_pixels = _get_pixels(env, frame)
         resolved_game_id = str(getattr(frame, "game_id", "")).strip() or game_id
         turn += 1
+        history["game_id"] = resolved_game_id
         history["events"] = events
         history["turn"] = turn
         _save_history(cwd, history)

@@ -148,7 +148,6 @@ base_system_message:
         - Every run_script auto-loads agent_lib.py first.
         - Helpers in agent_lib.py are directly callable from inline script.
         - Do NOT `import agent_lib` inside run_script; call helpers directly.
-        - If you need filesystem fallback loading, use absolute-path importlib and continue without failing hard.
 
         Script notes:
         - run_script executes via exec(); top-level code runs.

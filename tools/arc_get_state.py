@@ -14,9 +14,9 @@ import numpy as np
 
 def _state_dir() -> Path:
     raw = os.getenv("ARC_STATE_DIR", "").strip()
-    if raw:
-        return Path(raw).expanduser()
-    return Path.cwd() / ".ai-supervisor" / "arc"
+    if not raw:
+        raise RuntimeError("ARC_STATE_DIR is required")
+    return Path(raw).expanduser()
 
 
 def _grid_to_hex_rows(grid: np.ndarray) -> list[str]:
@@ -39,7 +39,18 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    arc_dir = _state_dir()
+    try:
+        arc_dir = _state_dir()
+    except Exception as exc:
+        return _emit(
+            {
+                "ok": False,
+                "error": {
+                    "type": "missing_state_dir",
+                    "message": str(exc),
+                },
+            }
+        )
     state_file = arc_dir / "state.json"
     grid_file = arc_dir / "current_grid.npy"
     game_state_file = arc_dir / "game-state.md"
@@ -85,7 +96,27 @@ def main() -> int:
             grid = np.load(grid_file)
             payload["grid_hex_rows"] = _grid_to_hex_rows(grid)
         except Exception as exc:
-            payload["grid_error"] = str(exc)
+            return _emit(
+                {
+                    "ok": False,
+                    "error": {
+                        "type": "invalid_grid_file",
+                        "message": str(exc),
+                    },
+                    "artifacts": payload["artifacts"],
+                }
+            )
+    elif not args.no_grid and not grid_file.exists():
+        return _emit(
+            {
+                "ok": False,
+                "error": {
+                    "type": "missing_grid",
+                    "message": f"grid file not found: {grid_file}",
+                },
+                "artifacts": payload["artifacts"],
+            }
+        )
 
     return _emit(payload)
 

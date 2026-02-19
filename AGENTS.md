@@ -21,6 +21,16 @@ Hard rules:
 
 If leakage is found, fix the setup/root cause (what gets mounted/copied into run filesystems). Do not rely on prompt warnings as primary protection.
 
+## No silent fallback policy (harness/tooling)
+
+Benchmark-critical features must fail loudly if broken. Do not silently degrade or no-op when these fail:
+- image generation used in prompts,
+- machine/state artifact reads and writes,
+- tool JSON parsing/contract validation,
+- environment setup and game loading.
+
+Allowed soft-fail behavior should be rare and explicitly marked as non-critical observability only.
+
 ## Supervisor rule design (no time-travel rules)
 
 The supervisor runs after an agent turn. It cannot undo prior actions already present in the conversation context.
