@@ -1381,7 +1381,7 @@ def main() -> None:
             "resume",
             str(session_file),
             "--config", str(super_config),
-            "--workspace", str(agent_dir),
+            "--workspace", str(run_dir),
             "--config-dir", str(PROJECT_ROOT),
             "--agent-dir", str(agent_dir),
             "--supervisor-dir", str(supervisor_dir),
@@ -1393,9 +1393,9 @@ def main() -> None:
             resume_args += _prompt_args(prompt, prompt_kind="resume", image_paths=image_paths)
         if args.verbose:
             resume_args += ["--output", str(session_file)]
-            return run_super(resume_args, stream=True, cwd=agent_dir, env=super_env)
+            return run_super(resume_args, stream=True, cwd=run_dir, env=super_env)
         resume_args += ["--output", str(tmp_session)]
-        stdout = run_super(resume_args, cwd=agent_dir, env=super_env)
+        stdout = run_super(resume_args, cwd=run_dir, env=super_env)
         shutil.move(str(tmp_session), str(session_file))
         return stdout
 
@@ -1458,7 +1458,7 @@ def main() -> None:
     run_super([
         "new",
         "--config", str(super_config),
-        "--workspace", str(agent_dir),
+        "--workspace", str(run_dir),
         "--config-dir", str(PROJECT_ROOT),
         "--agent-dir", str(agent_dir),
         "--supervisor-dir", str(supervisor_dir),
@@ -1467,7 +1467,7 @@ def main() -> None:
         "--cycle-limit", str(cycle_limit),
         *_prompt_args(initial_prompt, prompt_kind="new", image_paths=init_images),
         "--output", str(session_file),
-    ], stream=args.verbose, cwd=agent_dir, env=super_env)
+    ], stream=args.verbose, cwd=run_dir, env=super_env)
 
     super_turn = 1
     stale_turns = 0
