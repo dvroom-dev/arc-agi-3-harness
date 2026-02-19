@@ -65,7 +65,6 @@ except Exception:  # pragma: no cover - optional for tool-driven mode
 PROJECT_ROOT = Path(__file__).resolve().parent
 CTXS = PROJECT_ROOT / ".ctxs"
 PROJECT_VENV_PYTHON = PROJECT_ROOT / ".venv" / "bin" / "python"
-PROJECT_ARC_ACTION_TOOL = PROJECT_ROOT / "tools" / "arc_action.py"
 
 LEVEL_KNOWLEDGE_TEMPLATE = textwrap.dedent("""\
     # Level Knowledge (Current Level Only)
@@ -107,11 +106,11 @@ LEVEL_COMPLETIONS_TEMPLATE = textwrap.dedent("""\
     # Level Completions
 
     Canonical record of completed levels and the exact action sequence
-    executed since the most recent reset at the time of completion.
+    for each completed level window.
 """)
 
 PLACEHOLDER_LEVEL_START_PNG_BASE64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO2vLx8AAAAASUVORK5CYII="
+    "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAYUlEQVR4nO3PQQ0AIBDAMMDS+feGCB4Nyapg2zOzfnZ0wKsGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAsXtQEZ/OW10wAAAABJRU5ErkJggg=="
 )
 
 AGENT_LIB_TEMPLATE = textwrap.dedent("""\
@@ -666,20 +665,40 @@ def load_history_events(history_json: Path) -> list[dict[str, Any]]:
     return out
 
 
-def actions_since_last_reset(events: list[dict[str, Any]]) -> list[str]:
-    """Return action names from last reset (exclusive) to latest event."""
-    last_reset_idx = -1
-    for idx, event in enumerate(events):
-        if str(event.get("kind", "")).strip() == "reset":
-            last_reset_idx = idx
-    actions: list[str] = []
-    for event in events[last_reset_idx + 1 :]:
-        if str(event.get("kind", "")).strip() != "step":
+def completion_action_windows_by_level(events: list[dict[str, Any]]) -> dict[int, list[str]]:
+    """Return per-level action windows split by reset/completion boundaries."""
+    windows: dict[int, list[str]] = {}
+    current_actions: list[str] = []
+    prev_levels = 0
+
+    for event in events:
+        kind = str(event.get("kind", "")).strip()
+        if kind == "reset":
+            current_actions = []
+            prev_levels = 0
             continue
+        if kind != "step":
+            continue
+
         action_name = str(event.get("action", "")).strip()
         if action_name:
-            actions.append(action_name)
-    return actions
+            current_actions.append(action_name)
+
+        levels_now = event.get("levels_completed")
+        if not isinstance(levels_now, int):
+            continue
+
+        if levels_now < prev_levels:
+            current_actions = []
+        elif levels_now > prev_levels:
+            window = list(current_actions)
+            for completed_level in range(prev_levels + 1, levels_now + 1):
+                windows[completed_level] = window
+            current_actions = []
+
+        prev_levels = levels_now
+
+    return windows
 
 
 def append_level_completion_record(
@@ -700,8 +719,8 @@ def append_level_completion_record(
         f"- harness_turn: {harness_turn}",
         f"- tool_turn: {tool_turn}",
         f"- winning_script: {winning_script_relpath or '(not available)'}",
-        f"- action_count_since_last_reset: {len(actions)}",
-        f"- actions_since_last_reset: {actions_preview}",
+        f"- action_count_in_level_window: {len(actions)}",
+        f"- actions_in_level_window: {actions_preview}",
     ]
     with open(completions_file, "a") as f:
         f.write("\n".join(block) + "\n")
@@ -1024,12 +1043,72 @@ def setup_run_dir(run_dir: Path, agent_dir: Path, supervisor_dir: Path, log) -> 
     # Keep a valid image path available for mode templates that reference
     # ./supervisor/arc/current-level-start.png at conversation start.
     current_level_start = supervisor_arc / "current-level-start.png"
-    if not current_level_start.exists():
-        current_level_start.write_bytes(base64.b64decode(PLACEHOLDER_LEVEL_START_PNG_BASE64))
+    placeholder_bytes = base64.b64decode(PLACEHOLDER_LEVEL_START_PNG_BASE64)
+    # Some providers reject tiny placeholder images (e.g., 1x1). Keep a sane
+    # minimum file in place whenever the run starts.
+    if (not current_level_start.exists()) or current_level_start.stat().st_size < 128:
+        current_level_start.write_bytes(placeholder_bytes)
 
     agent_lib = agent_dir / "agent_lib.py"
     if not agent_lib.exists():
         agent_lib.write_text(AGENT_LIB_TEMPLATE)
+
+
+def setup_run_config_dir(run_config_dir: Path) -> tuple[Path, Path]:
+    """Create run-local config/bin/tools so agent shell stays in run workspace."""
+    run_config_dir.mkdir(parents=True, exist_ok=True)
+    tools_dir = run_config_dir / "tools"
+    bin_dir = run_config_dir / "bin"
+    tools_dir.mkdir(parents=True, exist_ok=True)
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    for filename in ("arc_action.py", "arc_action_cli.py", "arc_get_state.py"):
+        src = PROJECT_ROOT / "tools" / filename
+        dst = tools_dir / filename
+        shutil.copyfile(src, dst)
+
+    py = str(PROJECT_VENV_PYTHON)
+    arc_action_wrapper = f"""#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+CONFIG_DIR="$(cd "${{SCRIPT_DIR}}/.." && pwd)"
+exec "{py}" "${{CONFIG_DIR}}/tools/arc_action_cli.py" "$@"
+"""
+    arc_get_state_wrapper = f"""#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+CONFIG_DIR="$(cd "${{SCRIPT_DIR}}/.." && pwd)"
+exec "{py}" "${{CONFIG_DIR}}/tools/arc_get_state.py" "$@"
+"""
+    arc_action_path = bin_dir / "arc_action"
+    arc_action_path.write_text(arc_action_wrapper)
+    arc_action_path.chmod(0o755)
+    arc_get_state_path = bin_dir / "arc_get_state"
+    arc_get_state_path.write_text(arc_get_state_wrapper)
+    arc_get_state_path.chmod(0o755)
+    return bin_dir, tools_dir
+
+
+def assert_no_game_files_in_agent_dir(agent_dir: Path) -> None:
+    """Fail fast if game/environment source appears in the agent filesystem."""
+    forbidden: list[Path] = []
+    for path in agent_dir.rglob("*"):
+        rel = path.relative_to(agent_dir)
+        if "environment_files" in rel.parts:
+            forbidden.append(rel)
+            continue
+        if path.name in {"game_state.py", "ls20.py"}:
+            forbidden.append(rel)
+            continue
+        if path.suffix == ".zip" and "environment" in path.name.lower():
+            forbidden.append(rel)
+            continue
+    if forbidden:
+        preview = ", ".join(str(p) for p in sorted(set(forbidden))[:8])
+        raise RuntimeError(
+            "agent filesystem contains forbidden game/environment artifacts: "
+            f"{preview}"
+        )
 
 
 def main() -> None:
@@ -1047,7 +1126,10 @@ def main() -> None:
     log = lambda msg: print(msg, file=sys.stderr, flush=True)
     agent_dir = run_dir / "agent"
     supervisor_dir = run_dir / "supervisor"
+    run_config_dir = run_dir / "config"
     setup_run_dir(run_dir, agent_dir, supervisor_dir, log)
+    run_bin_dir, run_tools_dir = setup_run_config_dir(run_config_dir)
+    assert_no_game_files_in_agent_dir(agent_dir)
     run_super_config = run_dir / "super.yaml"
     run_super_config.write_text((PROJECT_ROOT / "super.yaml").read_text())
     super_config = run_super_config
@@ -1055,11 +1137,16 @@ def main() -> None:
         log(f"[harness] missing python runtime: {PROJECT_VENV_PYTHON}")
         log("[harness] run `uv sync` in project root and retry")
         sys.exit(1)
-    if not PROJECT_ARC_ACTION_TOOL.exists():
-        log(f"[harness] missing tool script: {PROJECT_ARC_ACTION_TOOL}")
+    run_arc_action_tool = run_tools_dir / "arc_action.py"
+    if not run_arc_action_tool.exists():
+        log(f"[harness] missing tool script: {run_arc_action_tool}")
         sys.exit(1)
 
     arc_state_dir = supervisor_dir / "arc"
+    # Keep environment source/cache outside BOTH agent and supervisor filesystems.
+    # This prevents benchmark solution leakage through either role's file access.
+    arc_env_dir = Path("/tmp/arc-agi-env-cache") / session_name
+    arc_env_dir.mkdir(parents=True, exist_ok=True)
     state_json = arc_state_dir / "state.json"
     history_json = arc_state_dir / "tool-engine-history.json"
     completions_md = arc_state_dir / "level_completions.md"
@@ -1130,12 +1217,11 @@ def main() -> None:
             request["game_id"] = active_game_id
         cmd = [
             str(PROJECT_VENV_PYTHON),
-            str(PROJECT_ARC_ACTION_TOOL),
+            str(run_arc_action_tool),
         ]
         child_env = dict(os.environ)
         child_env["ARC_OPERATION_MODE"] = str(args.operation_mode).strip().upper()
-        # Keep downloaded/sourced environment files out of the agent cwd.
-        child_env.setdefault("ARC_ENVIRONMENTS_DIR", str(PROJECT_ROOT / "environment_files"))
+        child_env.setdefault("ARC_ENVIRONMENTS_DIR", str(arc_env_dir))
         child_env["ARC_STATE_DIR"] = str(arc_state_dir)
         proc = subprocess.run(
             cmd,
@@ -1371,10 +1457,9 @@ def main() -> None:
 
     super_env = dict(os.environ)
     super_env["ARC_OPERATION_MODE"] = str(args.operation_mode).strip().upper()
-    super_env.setdefault("ARC_ENVIRONMENTS_DIR", str(PROJECT_ROOT / "environment_files"))
+    super_env.setdefault("ARC_ENVIRONMENTS_DIR", str(arc_env_dir))
     super_env["ARC_STATE_DIR"] = str(arc_state_dir)
-    bin_dir = PROJECT_ROOT / "bin"
-    super_env["PATH"] = f"{bin_dir}:{os.environ.get('PATH', '')}"
+    super_env["PATH"] = f"{run_bin_dir}:{os.environ.get('PATH', '')}"
 
     def resume_super(prompt: str | None = None, *, image_paths: list[Path] | None = None) -> str:
         resume_args: list[str] = [
@@ -1382,7 +1467,7 @@ def main() -> None:
             str(session_file),
             "--config", str(super_config),
             "--workspace", str(run_dir),
-            "--config-dir", str(PROJECT_ROOT),
+            "--config-dir", str(run_config_dir),
             "--agent-dir", str(agent_dir),
             "--supervisor-dir", str(supervisor_dir),
             *_provider_args(),
@@ -1423,7 +1508,7 @@ def main() -> None:
     initial_prompt = (
         "Game state initialized. Use shell exactly once this turn to execute arc_action "
         "(status, run_script, or reset_level). "
-        "For run_script, use inline script text, e.g. "
+        "For run_script, pass script via stdin heredoc (do not use --script), e.g. "
         "`cat <<'PY' | arc_action run_script` ... `PY`. "
         "Use arc_get_state to read current machine state, then continue solving. "
         "Use agent_lib.py for persistent reusable helper functions."
@@ -1459,7 +1544,7 @@ def main() -> None:
         "new",
         "--config", str(super_config),
         "--workspace", str(run_dir),
-        "--config-dir", str(PROJECT_ROOT),
+        "--config-dir", str(run_config_dir),
         "--agent-dir", str(agent_dir),
         "--supervisor-dir", str(supervisor_dir),
         *_provider_args(),
@@ -1551,7 +1636,7 @@ def main() -> None:
                 read_max_recorded_completion_level(completions_md),
             )
             events = load_history_events(history_json)
-            recent_actions = actions_since_last_reset(events)
+            completion_windows = completion_action_windows_by_level(events)
             tool_turn = load_engine_turn()
             win_script = (
                 arc_state_dir / "script-history" / f"turn_{tool_turn:03d}_script.py"
@@ -1566,10 +1651,11 @@ def main() -> None:
                 # Avoid duplicate writes if loop restarts or state is re-read.
                 if completed_level <= last_recorded_completed_level:
                     continue
+                level_actions = completion_windows.get(completed_level, [])
                 append_level_completion_record(
                     completions_file=completions_md,
                     completed_level=completed_level,
-                    actions=recent_actions,
+                    actions=level_actions,
                     harness_turn=super_turn,
                     tool_turn=tool_turn,
                     winning_script_relpath=win_script_rel,
@@ -1577,7 +1663,7 @@ def main() -> None:
                 last_recorded_completed_level = completed_level
                 log(
                     "[harness] level completion recorded: "
-                    f"level={completed_level} actions_since_last_reset={len(recent_actions)}"
+                    f"level={completed_level} actions_in_level_window={len(level_actions)}"
                 )
             if not args.no_explore and (post_state and post_state.get("state") != "WIN"):
                 # Do not auto-explore here: arc_action reset_level resets campaign
