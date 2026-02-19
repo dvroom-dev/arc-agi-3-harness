@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import io
 import json
 import os
@@ -38,26 +37,11 @@ try:
         write_machine_state,
         render_grid_to_terminal,
     )
-except Exception:  # pragma: no cover - optional for tool-driven mode
-    COLOR_NAMES = {}
-
-    def _connected_components_8(mask):  # type: ignore[no-redef]
-        return []
-
-    def pixels_to_hex_grid(pixels):  # type: ignore[no-redef]
-        return ""
-
-    def render_grid_to_image(*args, **kwargs):  # type: ignore[no-redef]
-        return None
-
-    def write_game_state(*args, **kwargs):  # type: ignore[no-redef]
-        return None
-
-    def write_machine_state(*args, **kwargs):  # type: ignore[no-redef]
-        return None
-
-    def render_grid_to_terminal(*args, **kwargs):  # type: ignore[no-redef]
-        return None
+except Exception as exc:  # pragma: no cover - fail fast
+    raise RuntimeError(
+        "Failed to import required game_state helpers. "
+        "This harness now requires working game-state rendering/state helpers."
+    ) from exc
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -108,10 +92,6 @@ LEVEL_COMPLETIONS_TEMPLATE = textwrap.dedent("""\
     Canonical record of completed levels and the exact action sequence
     for each completed level window.
 """)
-
-PLACEHOLDER_LEVEL_START_PNG_BASE64 = (
-    "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAYUlEQVR4nO3PQQ0AIBDAMMDS+feGCB4Nyapg2zOzfnZ0wKsGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAa0BrQGtAsXtQEZ/OW10wAAAABJRU5ErkJggg=="
-)
 
 AGENT_LIB_TEMPLATE = textwrap.dedent("""\
     \"\"\"Persistent helper library for ARC run_script turns.
@@ -1040,15 +1020,6 @@ def setup_run_dir(run_dir: Path, agent_dir: Path, supervisor_dir: Path, log) -> 
     if not lc.exists():
         lc.write_text(LEVEL_COMPLETIONS_TEMPLATE)
 
-    # Keep a valid image path available for mode templates that reference
-    # ./supervisor/arc/current-level-start.png at conversation start.
-    current_level_start = supervisor_arc / "current-level-start.png"
-    placeholder_bytes = base64.b64decode(PLACEHOLDER_LEVEL_START_PNG_BASE64)
-    # Some providers reject tiny placeholder images (e.g., 1x1). Keep a sane
-    # minimum file in place whenever the run starts.
-    if (not current_level_start.exists()) or current_level_start.stat().st_size < 128:
-        current_level_start.write_bytes(placeholder_bytes)
-
     agent_lib = agent_dir / "agent_lib.py"
     if not agent_lib.exists():
         agent_lib.write_text(AGENT_LIB_TEMPLATE)
@@ -1435,13 +1406,21 @@ def main() -> None:
         if not per_level_image.exists():
             pixels = load_current_pixels()
             if pixels is None:
-                return []
+                raise RuntimeError(
+                    "Unable to generate level-start image: missing current grid "
+                    f"at {arc_state_dir / 'current_grid.npy'}."
+                )
             try:
                 render_grid_to_image(pixels, per_level_image, scale=8, grid_lines=False)
-            except Exception:
-                return []
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to render level-start image for level {level}: {exc}"
+                ) from exc
             if not per_level_image.exists():
-                return []
+                raise RuntimeError(
+                    f"Level-start image generation failed for level {level}: "
+                    f"{per_level_image} was not created."
+                )
 
         if (
             (not current_level_start_image.exists())

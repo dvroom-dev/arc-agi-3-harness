@@ -8,9 +8,18 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from rich.console import Console
-from rich.style import Style
-from rich.text import Text
+
+try:
+    from rich.console import Console
+    from rich.style import Style
+    from rich.text import Text
+
+    RICH_AVAILABLE = True
+except Exception:
+    Console = None  # type: ignore[assignment]
+    Style = None  # type: ignore[assignment]
+    Text = None  # type: ignore[assignment]
+    RICH_AVAILABLE = False
 
 if TYPE_CHECKING:
     from arcengine.enums import FrameDataRaw
@@ -391,6 +400,26 @@ def render_grid_to_terminal(
     """
     if file is None:
         file = sys.stderr
+    if not RICH_AVAILABLE:
+        # Keep this utility available even when rich is not installed.
+        header_parts = []
+        if label:
+            header_parts.append(label)
+        header_parts.append(f"state={frame.state.value}")
+        header_parts.append(f"levels={frame.levels_completed}/{frame.win_levels}")
+        actions_str = ",".join(str(a) for a in frame.available_actions)
+        header_parts.append(f"actions=[{actions_str}]")
+        if last_action:
+            header_parts.append(f"last={last_action}")
+        print("  ".join(header_parts), file=file)
+        print(pixels_to_hex_grid(pixels), file=file)
+        if transition_log:
+            print(f"transitions: {len(transition_log)} steps", file=file)
+            for entry in transition_log:
+                print(f"  {entry}", file=file)
+        if error:
+            print(f"ERROR: {error.splitlines()[0]}", file=file)
+        return
     console = Console(file=file, highlight=False)
 
     # Header
