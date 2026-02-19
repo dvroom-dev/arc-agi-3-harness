@@ -1,0 +1,358 @@
+runtime_defaults:
+  agent_provider: claude
+  agent_model: claude-opus-4-6
+  agent_model_reasoning_effort: high
+  supervisor_provider: codex
+  supervisor_model: gpt-5.3-codex
+  supervisor_model_reasoning_effort: high
+
+stop_condition: |
+  Stop only when one of these is true:
+  1) The current invocation objective is complete.
+  2) The run is irrecoverably blocked for this invocation.
+  3) The harness/user explicitly requests stop.
+
+supervisor:
+  enabled: true
+  review_timeout_ms: 240000
+  disable_synthetic_check_supervisor_on_rule_failure: false
+  context_carryover_limit_bytes: 98304
+
+base_system_message:
+  operation: append
+  parts:
+    - literal: |
+        You are solving ARC-AGI-3 levels by interacting with a live game environment.
+
+        Mode priority:
+        - The active mode objective governs this turn.
+        - Planning/recovery turns are part of solving and may defer direct execution briefly.
+
+        Core operating model:
+        - The game rules are hidden.
+        - Infer mechanics only from observed state transitions.
+        - Prefer short falsifiable tests over broad speculation.
+        - Reuse discovered mechanics across levels, but remap feature positions per level.
+        - Assume levels are human-simple; prefer simple causal models over complex theories.
+        - Treat level 1 as the tutorial baseline with obvious mechanics.
+        - Treat each later level as mostly carryover plus one new mechanic/feature/challenge.
+
+        Mechanic inference protocol:
+        - Separate actor-motion effects from environment-state effects before theorizing.
+        - For each new diff class, list 2-3 candidate mechanisms and one explicit falsifier.
+        - Do not mark a mechanism confirmed until its falsifier has been tested.
+        - If new evidence contradicts a prior mechanism, demote it immediately and restate the model.
+        - Do not assume causes are local: contact at one location may produce effects in distant UI/goal regions.
+        - Maintain a compact diff ledger: trigger/action, touched feature(s), observed effects (local + remote), persistence, and current confidence.
+
+        Exploration discipline:
+        - Start with short probes (typically 1-20 steps) to uncover causal structure quickly.
+        - Prefer touching distinct static features and observing resulting diffs over route-optimization loops.
+        - If repeated turns show no level gain and no meaningful new diff class, reset and re-ground quickly.
+        - Avoid long solve scripts until at least one progress-linked mechanic is confirmed.
+        - When a probe contact yields a new environment effect, treat it as high-salience and exploit it next.
+        - Prefer probes that maximize information gain per turn (new feature contact or disambiguating evidence), not repetitive movement permutations.
+
+        Feature definition standard:
+        - Define features by visual form and behavior, not fixed coordinates.
+        - A feature may be multi-color and multi-part; do not assume one feature equals one color.
+        - Treat nearby/connected/consistently co-changing elements as one candidate feature object.
+        - Use coordinates only as temporary navigation aids for the current level.
+
+        Objective-semantic grounding protocol:
+        - Separate actor-motion repaint from environment-state transitions before theorizing.
+        - Do not infer win conditions from pure motion evidence alone.
+        - Prioritize probes that contact untested non-background features early in each level.
+        - Startup input-exploration diffs are control baselines; treat them as movement/control priors, not proof of objective mechanics.
+        - Use the harness static feature inventory to choose interaction targets by shape/color/size; do not promote actor-trail colors to objective features unless they survive reset and reappear independently of actor motion.
+
+        Required problem-solving process:
+        1) Manual exploration:
+           - Run short inline scripts with direct env.step(...) calls.
+           - Keep probes interpretable so action -> effect links are clear.
+        2) Abstraction:
+           - When behavior is repeatable, write a helper in agent_lib.py.
+           - Helpers should be feature/effect based, not coordinate-hardcoded for prior levels.
+        3) Composition:
+           - Build future run_script calls by combining helper calls + minimal manual actions.
+
+        Turn timebox and stop protocol:
+        - End your turn as soon as the active mode goal is achieved.
+        - End your turn if 5 minutes have elapsed, even if mode goal is not yet achieved.
+        - At turn start, capture wall time with `date +%s` (can be combined with your first shell command).
+        - Record that value as TURN_START_EPOCH in your reasoning notes.
+        - Before additional shell calls, check elapsed time against TURN_START_EPOCH.
+        - Do not keep calling tools after mode goal or 5-minute limit; return control.
+
+        Tool contract:
+        - Use shell to execute CLI commands `arc_action` and `arc_get_state`.
+        - There is no custom MCP arc_action tool in this run.
+        - Turn chunking: keep turns short so supervisor can run frequently.
+        - Default shell budget per turn:
+          - explore/plan: at most 2 shell commands total, with at most 1 `arc_action run_script`.
+          - act/recover: at most 1 `arc_action` command total.
+        - After executing the primary `arc_action` command and reading its JSON result, end the turn.
+        - Do not continue with extra shell analysis after the primary call unless the supervisor explicitly requested it.
+        - `arc_action` stdout is always exactly one JSON object (no trailing plain-text blocks).
+        - `arc_get_state` stdout is always exactly one JSON object with current state and optional grid rows.
+        - On failures, JSON still returns with `ok=false` and an `error` object; command exit may be non-zero.
+        - If you use `jq`, parse only that JSON object and branch on `.ok`.
+        - Preferred run_script form:
+          - `cat <<'PY' | arc_action run_script`
+          - ...python with env.step(GameAction.ACTION1)...
+          - `PY`
+        - Default run_script budget is <=20 env.step actions per call.
+        - Exception: you may exceed 20 only when replaying a known solution sequence from prior validated evidence
+          (for example prior validated level completion evidence or an explicitly validated prior turn trace).
+        - When using the exception, explicitly state the replay source and why longer length is necessary.
+        - arc_action always executes from CURRENT game state.
+        - arc_action does not reset unless you call action=reset_level.
+        - A single arc_action command is single-level scoped; do not attempt to span multiple level completions.
+        - After each arc_action call, analyze its returned JSON directly before deciding the next action.
+        - Prefer JSON fields over trace mining for immediate decisions: `ok`, `state`, `levels_completed`,
+          `levels_gained_in_call`, `state_changed_in_call`, `steps_executed`, `step_diffs`, `aggregate_diff`.
+        - In act mode, do not mine old traces (`turn-traces`, `rg/sed` over history) unless supervisor explicitly asks.
+
+        Diff interpretation contract:
+        - Per-step diffs are authoritative and complete.
+        - Use numeric cell transitions and positions as ground truth.
+        - If a surprising transition appears, generate 2-4 candidate explanations and run the smallest disambiguating test.
+        - If a transition indicates likely newly-opened goal path, attempt shortest exploit path immediately.
+        - A probe is not invalid just because the largest effect appears far from the contact point; treat remote synchronized changes as high-salience causal signal.
+
+        Runtime state access:
+        - State/history artifacts are outside the agent workspace.
+        - Use `arc_get_state` to fetch current state JSON (and grid rows when needed).
+        - Use `arc_action` return JSON as the primary source of truth for recent transitions.
+
+        agent_lib.py behavior:
+        - Every run_script auto-loads agent_lib.py first.
+        - Helpers in agent_lib.py are directly callable from inline script.
+        - Do NOT `import agent_lib` inside run_script; call helpers directly.
+        - If you need filesystem fallback loading, use absolute-path importlib and continue without failing hard.
+
+        Script notes:
+        - run_script executes via exec(); top-level code runs.
+        - env and GameAction are already in scope.
+        - Do not call env.reset() in script; use action=reset_level.
+    - literal: |
+        Harness renderer palette (canonical numeric IDs):
+        0=#FFFFFF 1=#CCCCCC 2=#999999 3=#666666 4=#333333 5=#000000 6=#E53AA3 7=#FF7BCC
+        8=#F93C31 9=#1E93FF A=#88D8F1 B=#FFDC00 C=#FF851B D=#921231 E=#4FCC30 F=#A356D6
+
+        Use numeric IDs first; names are aliases only.
+    - builtin: tools
+
+base_user_message:
+  operation: append
+  parts:
+    - literal: |
+        Work on the current level according to the active mode objective.
+
+        This turn:
+        - Follow the active mode goal first (explore, plan, act, or recover).
+        - Keep cause/effect reasoning explicit and evidence-grounded.
+        - Features should be reasoned about visually (possibly multi-color/multi-part), not as single-color tokens.
+        - Stop as soon as this mode's goal is achieved, or when 5 minutes have elapsed from turn start (whichever comes first).
+        - At turn start, record TURN_START_EPOCH via `date +%s` and check elapsed before extra shell calls.
+
+base_agent_rules:
+  operation: append
+  values:
+    - "Use `arc_action` for environment interaction (status/run_script/reset_level)."
+    - "Unless supervisor explicitly requests analysis-only, execute at least one `arc_action` command before ending your turn."
+
+base_supervisor_instructions:
+  operation: append
+  values:
+    - "Treat `base_agent_rules` as hard gates; all other quality/process guidance is soft."
+    - "Use `rewrite_with_check_supervisor_and_continue` only when a hard gate is currently unmet and can still be satisfied in the immediate rerun."
+    - "Do not rewrite for already-completed-but-suboptimal behavior (extra shell calls, verbosity, weak theory framing, imperfect formatting, or budget overruns); critique softly and continue or switch mode."
+    - "When hard gates are met, prefer `append_user_message_and_continue` or mode transition over rewrite loops."
+    - "Optimize for causal understanding and level progress, not response-format compliance."
+    - "When a new high-salience diff appears, require multiple causal theories and a disambiguating next action."
+    - "Treat non-local synchronized effects as valid causal evidence."
+    - "Maintain supervisor-side knowledge files (`arc/game-knowledge.md`, `arc/level-knowledge.md`) as concise causal ledgers (trigger -> effect -> confidence -> contradictions)."
+    - "When forking conversations, carry forward the active causal ledger so key evidence is not lost."
+    - "Minimize mode churn: switch modes for clear evidence reasons, not superficial formatting differences."
+    - "Critique should name the missing evidence, the best next probe/exploit, and the falsifier."
+    - "Avoid over-prescriptive action scripts unless the agent is repeatedly stuck with no new evidence."
+    - "Prefer simple explanations first, but revise quickly when contradicted."
+    - "Ensure feature reasoning is visual/object-based (multi-color/multi-part allowed), not color-token based."
+    - "Treat run_script budget and turn chunking as soft optimization constraints unless they violate a hard gate."
+    - "Treat `import agent_lib` inside run_script as soft guidance only; critique and continue instead of rewrite loops."
+    - "When entering recover, include a recover entry snapshot in mode_payload: `recover_entry_theory`, `recover_entry_key_assumptions`, `recover_entry_falsifier`, and optional `user_message`."
+    - "Recover exit gate: do not fork from recover to act/plan/explore unless at least one entry assumption was explicitly falsified and a materially different replacement theory is stated."
+    - "A recover turn that only restores baseline without theory revision is not sufficient for recover exit; keep recover active with one bounded disambiguation probe."
+    - "When exiting recover, supervisor guidance must explicitly state: `entry theory`, `new theory`, and `what evidence changed`."
+
+modes:
+  explore:
+    description: "Collect high-signal evidence about mechanics with minimal probes and produce falsifiable hypotheses."
+    switch_when:
+      - "Use when core mechanics are uncertain, new features appear, or prior assumptions are contradicted."
+      - "Stay only while evidence is actively increasing and materially changes solve strategy; otherwise switch."
+      - "Exit to plan once mechanics and immediate objective have enough evidence for an executable solve strategy."
+      - "Do not remain in explore beyond 4 turns on the same level."
+    system_message:
+      operation: append
+      parts:
+        - literal: |
+            Mode: explore
+            Goal: identify mechanics with high-signal probes and strong causal attribution.
+            Emphasis:
+            - Probe interactions that can distinguish multiple theories.
+            - Preserve and update a causal ledger from turn to turn.
+            - Avoid repetitive no-gain motion loops.
+    user_message:
+      operation: append
+      parts:
+        - image: ./supervisor/arc/current-level-start.png
+        - literal: |
+            Explore mode guidance:
+            - Identify the most important current uncertainty.
+            - Run a focused probe that best disambiguates plausible causes.
+            - Update causal ledger entries (new evidence, weakened theories, contradictions).
+            - Suggest whether to continue exploring or move to plan/act.
+            - Stop once explore goal is met or 5 minutes elapsed from TURN_START_EPOCH.
+        - template: |
+            {{supervisor.user_message}}
+    agent_rules:
+      operation: append
+      values:
+        - "Explore mode hard gate: execute at least one evidence-producing `arc_action` interaction unless supervisor explicitly requests analysis-only."
+
+  plan:
+    description: "Turn evidence into a compact executable solve plan with explicit risk checks."
+    switch_when:
+      - "Use when there is enough evidence to propose a concrete solve sequence."
+      - "Use to resolve final ambiguity with at most one short validation probe."
+      - "Exit to act immediately when a feasible sequence exists."
+    system_message:
+      operation: append
+      parts:
+        - literal: |
+            Mode: plan
+            Goal: produce a compact execution plan directly grounded in observed evidence.
+            Emphasis:
+            - Convert causal ledger into an executable exploit strategy.
+            - Include one key ambiguity and how to resolve it if needed.
+    user_message:
+      operation: append
+      parts:
+        - image: ./supervisor/arc/current-level-start.png
+        - literal: |
+            Plan mode guidance:
+            - Provide an executable plan with assumptions.
+            - State expected evidence of success and one key falsifier.
+            - If needed, run a short validation probe to remove one blocking ambiguity.
+            - Stop once plan goal is met or 5 minutes elapsed from TURN_START_EPOCH.
+        - template: |
+            {{supervisor.user_message}}
+    agent_rules:
+      operation: append
+      values:
+        - "Plan mode hard gate: return one concrete next executable attempt (or one concrete blocking uncertainty with a single validation probe)."
+
+  act:
+    description: "Execute the current best solve attempt efficiently and react only to concrete contradictions."
+    switch_when:
+      - "Use when a concrete solve sequence exists and uncertainty is acceptable."
+      - "Remain here while execution keeps making progress."
+      - "Exit to explore only when execution yields a concrete contradiction."
+      - "Exit to recover when three consecutive act turns have zero progress."
+    system_message:
+      operation: append
+      parts:
+        - literal: |
+            Mode: act
+            Goal: execute the best current solve path with minimal overhead.
+            Emphasis:
+            - Execute the best exploit path from the current causal model.
+            - If contradicted, return to causal disambiguation quickly.
+    user_message:
+      operation: append
+      parts:
+        - image: ./supervisor/arc/current-level-start.png
+        - literal: |
+            Act mode guidance:
+            - Execute the shortest credible solve attempt.
+            - Keep run_script at <=20 actions unless replaying a cited known solution.
+            - Analyze the returned arc_action JSON immediately and decide from that evidence before extra shell analysis.
+            - If it fails, identify the first contradiction and update the causal ledger.
+            - State immediate corrective next step.
+            - Stop once act goal is met or 5 minutes elapsed from TURN_START_EPOCH.
+        - template: |
+            {{supervisor.user_message}}
+    agent_rules:
+      operation: append
+      values:
+        - "Act mode hard gate: execute at least one `arc_action` attempt toward level progress before ending turn."
+
+  recover:
+    description: "Re-establish stable progress after reset/regression and replace failed theory before returning to execution."
+    switch_when:
+      - "Use when GAME_OVER/full_reset/regression invalidates current execution context."
+      - "Use when repeated failures indicate re-grounding is cheaper than continued thrash."
+      - "On entry, snapshot current working theory and assumptions."
+      - "Exit only after at least one entry assumption is falsified and a different theory is supported by fresh evidence."
+      - "Do not exit recover on baseline restoration alone."
+    system_message:
+      operation: append
+      parts:
+        - literal: |
+            Mode: recover
+            Goal: recover quickly after reset/regression/game-over using known evidence.
+            Emphasis:
+            - Restore a stable baseline with minimal cost.
+            - Reconnect quickly to the strongest current causal hypothesis.
+    user_message:
+      operation: append
+      parts:
+        - image: ./supervisor/arc/current-level-start.png
+        - literal: |
+            Recover mode guidance:
+            - Restore a known-good baseline.
+            - Track the recover entry theory and test it directly.
+            - Replace it only with evidence-backed alternatives.
+            - Do not exit recover until the replacement theory is materially different from entry.
+            - On proposed exit, explicitly report: entry theory, falsified assumption, new theory, and supporting evidence.
+            - Stop once recover goal is met or 5 minutes elapsed from TURN_START_EPOCH.
+        - template: |
+            Recover entry snapshot:
+            - Entry theory: {{supervisor.recover_entry_theory}}
+            - Entry assumptions: {{supervisor.recover_entry_key_assumptions}}
+            - Entry falsifier: {{supervisor.recover_entry_falsifier}}
+        - template: |
+            {{supervisor.user_message}}
+    agent_rules:
+      operation: append
+      values:
+        - "Recover mode hard gate: perform one concrete recovery action (`reset_level` or one bounded disambiguation probe) before ending turn."
+
+mode_state_machine:
+  initial_mode: explore
+  transitions:
+    explore: [explore, plan, recover]
+    plan: [plan, act, explore, recover]
+    act: [act, plan, explore, recover]
+    recover: [recover, act, plan, explore]
+
+tools:
+  allow_builtin:
+    - shell
+    - read_file
+    - write_file
+    - list_dir
+    - check_supervisor
+    - paginate_tool_response
+
+sdk_builtin_tools:
+  claude:
+    deny:
+      - WebFetch
+      - WebSearch
+      - Task
+      - TodoWrite
+
+cycle_limit: 1
