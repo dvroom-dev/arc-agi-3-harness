@@ -93,14 +93,14 @@ base_system_message:
         - Default shell budget per turn:
           - explore/plan: at most 2 shell commands total, with at most 1 `arc_action` command.
           - act/recover: at most 1 `arc_action` command total.
-        - Do not run multiple `arc_action` commands in one turn unless supervisor explicitly authorizes it for that turn.
-        - Do not chain multiple `arc_action` commands with shell operators.
-        - After executing the primary `arc_action` command and reading its JSON result, end the turn.
-        - Do not continue with extra shell analysis after the primary call unless the supervisor explicitly requested it.
+        - Preferred cadence: one primary `arc_action` command per turn unless supervisor explicitly authorizes more.
+        - Avoid chaining multiple `arc_action` commands with shell operators in one line.
+        - Preferred cadence: after the primary `arc_action` command and its JSON result, summarize and return control.
+        - If extra analysis is needed, keep it minimal and prioritize next-turn correctness over same-turn verbosity.
         - `arc_action` stdout is always exactly one JSON object (no trailing plain-text blocks).
         - `arc_get_state` stdout is always exactly one JSON object with current state and optional grid rows.
         - On failures, JSON still returns with `ok=false` and an `error` object; command exit may be non-zero.
-        - If tool output is persisted/truncated preview, do not open the persisted file in the same turn; use preview fields and end turn.
+        - If tool output is persisted/truncated preview, prefer preview fields first; if still needed, do at most one focused pagination/read and then return control.
         - If you use `jq`, parse only that JSON object and branch on `.ok`.
         - Safe jq examples:
           - `arc_action status | jq '{ok, state, current_level, levels_completed, full_reset}'`
@@ -174,24 +174,26 @@ base_user_message:
         - Features should be reasoned about visually (possibly multi-color/multi-part), not as single-color tokens.
         - Stop as soon as this mode's goal is achieved, or when 5 minutes have elapsed from turn start (whichever comes first).
         - Track turn start time in reasoning notes; do not spend a shell call only to fetch time.
-        - Run at most one `arc_action` command this turn unless supervisor explicitly authorizes more.
-        - After the first `arc_action` result, return control immediately.
+        - Prefer one `arc_action` command this turn unless supervisor explicitly authorizes more.
+        - After the primary `arc_action` result, summarize evidence and return control.
 
 base_agent_rules:
   operation: append
   values:
     - "Use `arc_action` for environment interaction (status/run_script/reset_level)."
-    - "Unless supervisor explicitly requests analysis-only, execute at least one `arc_action` command before ending your turn."
-    - "Hard gate: execute at most one `arc_action` command per turn unless supervisor explicitly authorizes multiple in this turn."
-    - "Hard gate: after the first `arc_action` result, end the turn immediately with a concise evidence summary."
+    - "Keep reasoning evidence-grounded: tie claims to observed transitions and explicitly note uncertainty."
+    - "When proposing next actions, prioritize the highest-information unresolved uncertainty."
+    - "Update a compact causal ledger each turn (trigger -> effect -> confidence -> contradictions)."
 
 base_supervisor_instructions:
   operation: append
   values:
-    - "Treat `base_agent_rules` as hard gates; all other quality/process guidance is soft."
-    - "Use `rewrite_with_check_supervisor_and_continue` only when a hard gate is currently unmet and can still be satisfied in the immediate rerun."
-    - "Do not rewrite for already-completed-but-suboptimal behavior (extra shell calls, verbosity, weak theory framing, imperfect formatting, or budget overruns); critique softly and continue or switch mode."
-    - "When hard gates are met, prefer `append_user_message_and_continue` or mode transition over rewrite loops."
+    - "Treat `base_agent_rules` and mode `agent_rules` as forward guidance, not post-hoc hard gates."
+    - "Never require undoing or erasing already-completed actions from prior turns; only request next-turn-correctable behavior."
+    - "Only apply evaluative rules that can be satisfied in a future turn with prior conversation history unchanged."
+    - "Do not use same-turn tool-count/stop-timing behavior as rewrite criteria."
+    - "Do not rewrite for already-completed-but-suboptimal behavior (extra shell calls, verbosity, weak theory framing, imperfect formatting, or budget overruns). Prefer critique + continue or mode switch."
+    - "Use `rewrite_with_check_supervisor_and_continue` only for immediate, in-turn repairable failures (for example missing/empty assistant output), not behavioral rule compliance."
     - "Optimize for causal understanding and level progress, not response-format compliance."
     - "When a new high-salience diff appears, require multiple causal theories and a disambiguating next action."
     - "Treat non-local synchronized effects as valid causal evidence."
@@ -202,11 +204,11 @@ base_supervisor_instructions:
     - "Avoid over-prescriptive action scripts unless the agent is repeatedly stuck with no new evidence."
     - "Prefer simple explanations first, but revise quickly when contradicted."
     - "Ensure feature reasoning is visual/object-based (multi-color/multi-part allowed), not color-token based."
-    - "Treat run_script budget and turn chunking as soft optimization constraints unless they violate a hard gate."
+    - "Treat run_script budget and turn chunking as soft optimization constraints."
     - "Treat `import agent_lib` inside run_script as soft guidance only; critique and continue instead of rewrite loops."
     - "Enforce mode switch_when limits operationally: if explore repeats the same unresolved uncertainty for >=3 turns or exceeds 4 turns on one level, force a mode transition (plan or recover) instead of another same-mode continue."
     - "If the same critique text is being repeated for >=3 consecutive turns without new evidence, switch mode."
-    - "If a turn includes >1 arc_action command without explicit supervisor authorization, treat that as a hard-gate failure and rewrite."
+    - "If a turn includes >1 arc_action command without explicit supervisor authorization, critique it and request a one-command next turn; do not rewrite solely for that."
     - "When entering recover, include a recover entry snapshot in mode_payload: `recover_entry_theory`, `recover_entry_key_assumptions`, `recover_entry_falsifier`, and optional `user_message`."
     - "Recover exit gate: do not fork from recover to act/plan/explore unless at least one entry assumption was explicitly falsified and a materially different replacement theory is stated."
     - "A recover turn that only restores baseline without theory revision is not sufficient for recover exit; keep recover active with one bounded disambiguation probe."
@@ -246,8 +248,8 @@ modes:
     agent_rules:
       operation: append
       values:
-        - "Explore mode hard gate: execute at least one evidence-producing `arc_action` interaction unless supervisor explicitly requests analysis-only."
-        - "Explore mode hard gate: run at most one `arc_action` command and then stop the turn."
+        - "Explore: identify the highest-value unresolved uncertainty and state 2-3 candidate mechanisms."
+        - "Explore: include one explicit falsifier and how the next probe would discriminate candidates."
 
   plan:
     description: "Turn evidence into a compact executable solve plan with explicit risk checks."
@@ -279,8 +281,8 @@ modes:
     agent_rules:
       operation: append
       values:
-        - "Plan mode hard gate: return one concrete next executable attempt (or one concrete blocking uncertainty with a single validation probe)."
-        - "Plan mode hard gate: if you run a validation probe, run at most one `arc_action` command and then stop."
+        - "Plan: return one concrete next executable attempt with expected success evidence and one key risk."
+        - "Plan: if ambiguity blocks execution, specify one discriminating validation probe and what outcome would change the plan."
 
   act:
     description: "Execute the current best solve attempt efficiently and react only to concrete contradictions."
@@ -315,8 +317,8 @@ modes:
     agent_rules:
       operation: append
       values:
-        - "Act mode hard gate: execute at least one `arc_action` attempt toward level progress before ending turn."
-        - "Act mode hard gate: run at most one `arc_action` command and then stop the turn."
+        - "Act: execute the current best strategy and report the first contradiction or progress signal that matters."
+        - "Act: on contradiction, state the immediate corrective next step or the required mode transition."
 
   recover:
     description: "Re-establish stable progress after reset/regression and replace failed theory before returning to execution."
@@ -358,8 +360,8 @@ modes:
     agent_rules:
       operation: append
       values:
-        - "Recover mode hard gate: perform one concrete recovery action (`reset_level` or one bounded disambiguation probe) before ending turn."
-        - "Recover mode hard gate: run at most one `arc_action` command and then stop the turn."
+        - "Recover: explicitly compare entry theory vs current evidence and name the assumption that failed."
+        - "Recover: propose a materially different replacement theory with concrete supporting evidence."
 
 mode_state_machine:
   initial_mode: explore
