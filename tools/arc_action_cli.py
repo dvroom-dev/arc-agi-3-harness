@@ -4,7 +4,7 @@
 Usage:
   arc_action status [--game-id GAME]
   arc_action reset_level [--game-id GAME]
-  arc_action run_script [--game-id GAME] [--script TEXT]
+  arc_action run_script [--game-id GAME]
   arc_action run_script [--game-id GAME] < script.py
 """
 
@@ -30,6 +30,7 @@ class JsonArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> None:
         _emit_json(
             {
+                "schema_version": "arc_action.v2",
                 "ok": False,
                 "action": "",
                 "requested_game_id": "",
@@ -73,7 +74,6 @@ def main() -> int:
 
     p_run = sub.add_parser("run_script")
     p_run.add_argument("--game-id", default="")
-    p_run.add_argument("--script", default="")
 
     args = parser.parse_args()
 
@@ -83,18 +83,31 @@ def main() -> int:
         payload["game_id"] = game_id
 
     if args.action == "run_script":
-        script = str(getattr(args, "script", "") or "")
-        if not script.strip() and not sys.stdin.isatty():
-            script = sys.stdin.read()
-        if not script.strip():
+        if sys.stdin.isatty():
             _emit_json(
                 {
+                    "schema_version": "arc_action.v2",
                     "ok": False,
                     "action": "run_script",
                     "requested_game_id": game_id,
                     "error": {
                         "type": "invalid_run_script_args",
-                        "message": "run_script requires --script or script content on stdin",
+                        "message": "run_script requires script content on stdin",
+                    },
+                }
+            )
+            return 2
+        script = sys.stdin.read()
+        if not script.strip():
+            _emit_json(
+                {
+                    "schema_version": "arc_action.v2",
+                    "ok": False,
+                    "action": "run_script",
+                    "requested_game_id": game_id,
+                    "error": {
+                        "type": "invalid_run_script_args",
+                        "message": "run_script stdin script is empty",
                     },
                 }
             )

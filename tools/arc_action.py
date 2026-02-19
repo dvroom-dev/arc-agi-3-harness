@@ -17,12 +17,14 @@ from __future__ import annotations
 
 import io
 import json
+import multiprocessing
 import os
 import re
 import sys
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -122,6 +124,28 @@ def diff_grids(before: np.ndarray, after: np.ndarray) -> np.ndarray:
 def _iter_cell_changes(before: np.ndarray, after: np.ndarray) -> list[tuple[int, int, int, int]]:
     changed = np.argwhere(before != after)
     return [(int(r), int(c), int(before[r, c]), int(after[r, c])) for r, c in changed]
+
+
+def _change_bbox(changes: list[tuple[int, int, int, int]]) -> dict | None:
+    if not changes:
+        return None
+    rows = [r for r, _, _, _ in changes]
+    cols = [c for _, c, _, _ in changes]
+    return {
+        "min_row": min(rows),
+        "max_row": max(rows),
+        "min_col": min(cols),
+        "max_col": max(cols),
+    }
+
+
+def _changes_sample(changes: list[tuple[int, int, int, int]], limit: int = 24) -> list[dict]:
+    out: list[dict] = []
+    for row, col, before, after in changes[:limit]:
+        out.append(
+            {"row": row, "col": col, "before": f"{before:X}", "after": f"{after:X}"}
+        )
+    return out
 
 
 def format_diff_minimal(before: np.ndarray, after: np.ndarray) -> str:
@@ -323,6 +347,7 @@ def _error_payload(
     details: str | None = None,
 ) -> dict:
     payload = {
+        "schema_version": "arc_action.v2",
         "ok": False,
         "action": action,
         "requested_game_id": requested_game_id or "",
@@ -353,7 +378,7 @@ def _history_path(cwd: Path) -> Path:
 LEVEL_COMPLETIONS_TEMPLATE = """# Level Completions
 
 Canonical record of completed levels and the exact action sequence
-executed since the most recent reset at the time of completion.
+for each completed level window.
 """
 
 AGENT_LIB_TEMPLATE = """\"\"\"Persistent helper library for ARC scripts.
@@ -392,7 +417,7 @@ def _ensure_agent_lib_file(cwd: Path) -> Path:
 
 
 def _read_max_recorded_completion_level(path: Path) -> int:
-    pattern = re.compile(r"^## Level (\d+) Completion\\s*$")
+    pattern = re.compile(r"^## Level (\d+) Completion\s*$")
     max_level = 0
     if not path.exists():
         return max_level
@@ -408,19 +433,46 @@ def _read_max_recorded_completion_level(path: Path) -> int:
     return max_level
 
 
-def _actions_since_last_reset(events: list[dict]) -> list[str]:
-    last_reset_idx = -1
-    for idx, event in enumerate(events):
-        if str(event.get("kind", "")).strip() == "reset":
-            last_reset_idx = idx
-    actions: list[str] = []
-    for event in events[last_reset_idx + 1 :]:
-        if str(event.get("kind", "")).strip() != "step":
+def _completion_action_windows_by_level(events: list[dict]) -> dict[int, list[str]]:
+    """Return per-level action windows from reset/completion boundaries.
+
+    Boundary rules:
+    - `reset` starts a new window at level 0.
+    - A step that increases `levels_completed` closes the current level window;
+      subsequent actions begin a new window for the next level.
+    """
+    windows: dict[int, list[str]] = {}
+    current_actions: list[str] = []
+    prev_levels = 0
+
+    for event in events:
+        kind = str(event.get("kind", "")).strip()
+        if kind == "reset":
+            current_actions = []
+            prev_levels = 0
             continue
-        name = str(event.get("action", "")).strip()
-        if name:
-            actions.append(name)
-    return actions
+        if kind != "step":
+            continue
+
+        action_name = str(event.get("action", "")).strip()
+        if action_name:
+            current_actions.append(action_name)
+
+        levels_now = event.get("levels_completed")
+        if not isinstance(levels_now, int):
+            continue
+
+        if levels_now < prev_levels:
+            # Defensive boundary for unexpected campaign regression.
+            current_actions = []
+        elif levels_now > prev_levels:
+            window = list(current_actions)
+            for completed_level in range(prev_levels + 1, levels_now + 1):
+                windows[completed_level] = window
+            current_actions = []
+
+        prev_levels = levels_now
+    return windows
 
 
 def _append_level_completion(
@@ -437,8 +489,8 @@ def _append_level_completion(
         f"## Level {completed_level} Completion",
         f"- tool_turn: {tool_turn}",
         f"- winning_script: {winning_script_relpath or '(not available)'}",
-        f"- action_count_since_last_reset: {len(actions)}",
-        f"- actions_since_last_reset: {actions_preview}",
+        f"- action_count_in_level_window: {len(actions)}",
+        f"- actions_in_level_window: {actions_preview}",
     ]
     with open(path, "a") as f:
         f.write("\n".join(block) + "\n")
@@ -575,16 +627,137 @@ def _replay_history(env, events: list[dict]) -> FrameDataRaw:
     return frame
 
 
+def _script_worker_main(conn, script_source: str, agent_lib_source: str, script_label: str) -> None:
+    class _StopScript(Exception):
+        pass
+
+    class _FrameView:
+        def __init__(self, payload: dict):
+            self.state = SimpleNamespace(value=str(payload.get("state", "")))
+            self.levels_completed = int(payload.get("levels_completed", 0))
+            self.win_levels = int(payload.get("win_levels", 0))
+            self.current_level = int(payload.get("current_level", self.levels_completed + 1))
+            self.full_reset = bool(payload.get("full_reset", False))
+            self.available_actions = list(payload.get("available_actions", []))
+            self.action_input_id = payload.get("action_input_id", 0)
+            self.action_input_name = payload.get("action_input_name", "")
+            # Surface all payload keys directly for script ergonomics.
+            for key, value in payload.items():
+                if not hasattr(self, key):
+                    setattr(self, key, value)
+
+        def get(self, key, default=None):
+            return getattr(self, key, default)
+
+    class _ScriptEnv:
+        __slots__ = ()
+
+        def step(self, action, data=None, reasoning=None):
+            conn.send({"op": "step", "action": action, "data": data, "reasoning": reasoning})
+            resp = conn.recv()
+            if not isinstance(resp, dict):
+                raise RuntimeError("invalid step response")
+            if resp.get("terminal"):
+                raise _StopScript()
+            if not resp.get("ok", False):
+                raise RuntimeError(str(resp.get("error", "step failed")))
+            return _FrameView(resp.get("frame", {}))
+
+        def reset(self):
+            raise RuntimeError("env.reset() cannot be called inside run_script; use action=reset_level")
+
+        def state(self):
+            conn.send({"op": "get_state"})
+            resp = conn.recv()
+            if not isinstance(resp, dict) or not resp.get("ok", False):
+                raise RuntimeError(str(resp.get("error", "state unavailable")))
+            return dict(resp.get("state", {}))
+
+    game_action = SimpleNamespace(**{member.name: int(member.value) for member in GameAction})
+    safe_builtins = {
+        "abs": abs,
+        "all": all,
+        "any": any,
+        "bool": bool,
+        "dict": dict,
+        "dir": dir,
+        "enumerate": enumerate,
+        "Exception": Exception,
+        "filter": filter,
+        "float": float,
+        "getattr": getattr,
+        "hasattr": hasattr,
+        "int": int,
+        "isinstance": isinstance,
+        "issubclass": issubclass,
+        "len": len,
+        "list": list,
+        "map": map,
+        "max": max,
+        "min": min,
+        "print": print,
+        "range": range,
+        "reversed": reversed,
+        "round": round,
+        "set": set,
+        "sorted": sorted,
+        "str": str,
+        "sum": sum,
+        "tuple": tuple,
+        "vars": vars,
+        "zip": zip,
+    }
+
+    stdout_capture = io.StringIO()
+    stderr_capture = io.StringIO()
+    worker_error = ""
+    script_globals = {
+        "__builtins__": safe_builtins,
+        "env": _ScriptEnv(),
+        "GameAction": game_action,
+    }
+
+    try:
+        with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+            if agent_lib_source.strip():
+                exec(compile(agent_lib_source, "agent_lib.py", "exec"), script_globals)
+            exec(compile(script_source, script_label, "exec"), script_globals)
+    except _StopScript:
+        pass
+    except BaseException:
+        worker_error = traceback.format_exc()
+    finally:
+        conn.send(
+            {
+                "op": "done",
+                "stdout": stdout_capture.getvalue(),
+                "stderr": stderr_capture.getvalue(),
+                "error": worker_error,
+            }
+        )
+        conn.close()
+
+
 def _execute_script(
     script_source: str,
     env,
     *,
     script_label: str,
+    initial_frame: FrameDataRaw,
     agent_lib_source: str = "",
-) -> tuple[FrameDataRaw | None, str, str, list[str], list[tuple[str, np.ndarray]], list[dict]]:
+) -> tuple[
+    FrameDataRaw | None,
+    str,
+    str,
+    list[str],
+    list[tuple[str, np.ndarray]],
+    list[dict],
+    list[dict],
+]:
     transition_log: list[str] = []
     step_snapshots: list[tuple[str, np.ndarray]] = []
     executed_events: list[dict] = []
+    step_results: list[dict] = []
     last_frame: FrameDataRaw | None = None
     terminal_halt = False
 
@@ -592,45 +765,67 @@ def _execute_script(
         pass
 
     original_step = env.step
-    original_reset = env.reset
+
+    def _normalize_action(action) -> tuple[GameAction, str]:
+        if isinstance(action, GameAction):
+            return action, action.name
+        candidate = action
+        if hasattr(candidate, "value"):
+            try:
+                candidate = int(getattr(candidate, "value"))
+            except Exception:
+                candidate = getattr(candidate, "value")
+        if isinstance(candidate, int):
+            for member in GameAction:
+                try:
+                    if int(member.value) == int(candidate):
+                        return member, member.name
+                except Exception:
+                    continue
+            raise ValueError(f"unknown action id: {candidate}")
+        name = str(candidate).strip()
+        if re.fullmatch(r"-?\d+", name):
+            return _normalize_action(int(name))
+        if hasattr(GameAction, name):
+            member = getattr(GameAction, name)
+            return member, member.name
+        upper = name.upper()
+        if hasattr(GameAction, upper):
+            member = getattr(GameAction, upper)
+            return member, member.name
+        raise ValueError(f"unknown action: {candidate}")
+
+    last_pixels = _get_pixels(env, initial_frame)
 
     def logging_step(action, data=None, reasoning=None):
-        nonlocal last_frame, terminal_halt
+        nonlocal last_frame, terminal_halt, last_pixels
         if terminal_halt:
             raise _TerminalStateReached()
-        frame = original_step(action, data=data, reasoning=reasoning)
+        action_enum, action_name = _normalize_action(action)
+        prev_state = str(last_frame.state.value if last_frame is not None else initial_frame.state.value)
+        prev_levels = int(last_frame.levels_completed if last_frame is not None else initial_frame.levels_completed)
+        frame = original_step(action_enum, data=data, reasoning=reasoning)
         if frame is not None:
             last_frame = frame
-            # Persist canonical action names so replay is stable even when
-            # scripts pass numeric ids to env.step(...).
-            action_name = str(action)
-            try:
-                if isinstance(action, GameAction):
-                    action_name = action.name
-                elif isinstance(action, int):
-                    for member in GameAction:
-                        try:
-                            if int(member.value) == int(action):
-                                action_name = member.name
-                                break
-                        except Exception:
-                            continue
-                else:
-                    candidate = str(action).strip()
-                    if re.fullmatch(r"-?\d+", candidate):
-                        for member in GameAction:
-                            try:
-                                if int(member.value) == int(candidate):
-                                    action_name = member.name
-                                    break
-                            except Exception:
-                                continue
-                    elif hasattr(GameAction, candidate):
-                        action_name = getattr(GameAction, candidate).name
-                    elif hasattr(GameAction, candidate.upper()):
-                        action_name = getattr(GameAction, candidate.upper()).name
-            except Exception:
-                action_name = str(action)
+            current_pixels = _get_pixels(env, frame)
+            changes = _iter_cell_changes(last_pixels, current_pixels)
+            step_index = len(step_results) + 1
+            step_record = {
+                "step": step_index,
+                "action": action_name,
+                "changed_pixels": len(changes),
+                "change_bbox": _change_bbox(changes),
+                "changes_sample": _changes_sample(changes),
+                "state": str(frame.state.value),
+                "state_before_step": prev_state,
+                "state_changed_in_step": prev_state != str(frame.state.value),
+                "levels_completed": int(frame.levels_completed),
+                "levels_before_step": prev_levels,
+                "levels_gained_in_step": int(frame.levels_completed) - prev_levels,
+                "is_terminal": str(frame.state.value) in {"WIN", "GAME_OVER"},
+            }
+            step_results.append(step_record)
+            last_pixels = current_pixels
             executed_events.append(
                 {
                     "kind": "step",
@@ -642,39 +837,115 @@ def _execute_script(
             desc = f"{action_name}{' data=' + str(data) if data else ''} -> state={frame.state.value} levels={frame.levels_completed}/{frame.win_levels}"
             transition_log.append(desc)
             try:
-                step_snapshots.append((desc, _get_pixels(env, frame)))
+                step_snapshots.append((desc, current_pixels))
             except Exception:
                 pass
             if frame.state.value in {"WIN", "GAME_OVER"}:
                 terminal_halt = True
                 raise _TerminalStateReached()
-        return frame
+        return frame, (step_results[-1] if step_results else None)
 
-    def blocked_reset():
-        raise RuntimeError("env.reset() cannot be called inside run_script; use action=reset_level")
+    def _frame_view_dict(frame: FrameDataRaw, step_info: dict | None = None) -> dict:
+        action_input = getattr(frame, "action_input", None)
+        action_id_obj = getattr(action_input, "id", None) if action_input is not None else None
+        action_id = getattr(action_id_obj, "value", action_id_obj)
+        action_name = getattr(action_id_obj, "name", "")
+        try:
+            action_id = int(action_id) if action_id is not None else 0
+        except Exception:
+            action_id = 0
+        payload = {
+            "state": str(frame.state.value),
+            "levels_completed": int(frame.levels_completed),
+            "win_levels": int(frame.win_levels),
+            "current_level": int(frame.levels_completed) + 1,
+            "full_reset": bool(getattr(frame, "full_reset", False)),
+            "available_actions": [int(a) for a in getattr(frame, "available_actions", [])],
+            "action_input_id": action_id,
+            "action_input_name": str(action_name),
+        }
+        if step_info is not None:
+            payload.update(
+                {
+                    "step_index": int(step_info.get("step", 0)),
+                    "changed_pixels": int(step_info.get("changed_pixels", 0)),
+                    "change_bbox": step_info.get("change_bbox"),
+                    "changes_sample": step_info.get("changes_sample", []),
+                    "levels_gained_in_step": int(step_info.get("levels_gained_in_step", 0)),
+                    "state_changed_in_step": bool(step_info.get("state_changed_in_step", False)),
+                    # Backward-compatible alias for older scripts that checked len(step_diffs).
+                    "step_diffs": [
+                        {
+                            "changed_pixels": int(step_info.get("changed_pixels", 0)),
+                            "changes_sample": step_info.get("changes_sample", []),
+                        }
+                    ],
+                }
+            )
+        return payload
 
-    env.step = logging_step
-    env.reset = blocked_reset
-
+    ctx = multiprocessing.get_context("spawn")
+    parent_conn, child_conn = ctx.Pipe()
+    proc = ctx.Process(target=_script_worker_main, args=(child_conn, script_source, agent_lib_source, script_label))
+    proc.start()
+    child_conn.close()
+    last_frame = initial_frame
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
     error = ""
-    script_globals = {"__builtins__": __builtins__, "env": env, "GameAction": GameAction, "np": np}
 
     try:
-        with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-            if agent_lib_source.strip():
-                exec(compile(agent_lib_source, "agent_lib.py", "exec"), script_globals)
-            exec(compile(script_source, script_label, "exec"), script_globals)
-    except _TerminalStateReached:
-        pass
-    except BaseException:
-        error = traceback.format_exc()
+        while True:
+            msg = parent_conn.recv()
+            if not isinstance(msg, dict):
+                continue
+            op = str(msg.get("op", "")).strip()
+            if op == "step":
+                try:
+                    frame, step_info = logging_step(
+                        msg.get("action"),
+                        data=msg.get("data"),
+                        reasoning=msg.get("reasoning"),
+                    )
+                    parent_conn.send({"ok": True, "frame": _frame_view_dict(frame, step_info)})
+                except _TerminalStateReached:
+                    parent_conn.send({"ok": True, "terminal": True})
+                except BaseException as exc:
+                    parent_conn.send({"ok": False, "error": str(exc)})
+            elif op == "get_state":
+                frame = last_frame or initial_frame
+                parent_conn.send({"ok": True, "state": _frame_view_dict(frame)})
+            elif op == "done":
+                stdout_capture.write(str(msg.get("stdout", "")))
+                stderr_capture.write(str(msg.get("stderr", "")))
+                error = str(msg.get("error", ""))
+                break
+            else:
+                parent_conn.send({"ok": False, "error": f"unsupported op: {op}"})
+    except EOFError:
+        if not error:
+            error = "script worker terminated unexpectedly"
     finally:
+        parent_conn.close()
+        proc.join(timeout=2.0)
+        if proc.is_alive():
+            proc.terminate()
+            proc.join(timeout=1.0)
         env.step = original_step
-        env.reset = original_reset
 
-    return last_frame, stdout_capture.getvalue(), error, transition_log, step_snapshots, executed_events
+    output = stdout_capture.getvalue()
+    worker_stderr = stderr_capture.getvalue().strip()
+    if worker_stderr:
+        output = (output + ("\n" if output and not output.endswith("\n") else "")) + worker_stderr + "\n"
+    return (
+        last_frame,
+        output,
+        error,
+        transition_log,
+        step_snapshots,
+        executed_events,
+        step_results,
+    )
 
 
 def _write_turn_trace(
@@ -765,6 +1036,7 @@ def main() -> int:
 
         transition_log: list[str] = []
         step_snapshots: list[tuple[str, np.ndarray]] = []
+        step_results: list[dict] = []
         script_output = ""
         error = ""
         action_label = action
@@ -806,15 +1078,23 @@ def main() -> int:
             script_source = str(script_inline)
 
             agent_lib_source = agent_lib_file.read_text()
-            last_frame, script_output, error, transition_log, step_snapshots, executed_events = _execute_script(
+            (
+                last_frame,
+                script_output,
+                error,
+                transition_log,
+                step_snapshots,
+                executed_events,
+                step_results,
+            ) = _execute_script(
                 script_source,
                 env,
                 script_label=script_label,
+                initial_frame=frame,
                 agent_lib_source=agent_lib_source,
             )
             if last_frame is not None:
                 frame = last_frame
-            events.extend(executed_events)
             action_label = f"run_script({script_label})"
 
             scripts_dir = arc_dir / "script-history"
@@ -823,36 +1103,29 @@ def main() -> int:
             winning_script_file = scripts_dir / f"turn_{turn_hint:03d}_script.py"
             winning_script_file.write_text(script_source)
 
-            # Record level completion(s) at the exact step they occur, using action
-            # history since the most recent reset. This avoids missing completions
-            # when outer harness cycle timing and state file writes race.
+            # Record level completion(s) with per-level action windows derived
+            # from reset/completion boundaries across prior + current events.
             completions_path = _ensure_level_completions_file(cwd)
             max_recorded = _read_max_recorded_completion_level(completions_path)
-            prev_levels = levels_before_script
-            for idx, event in enumerate(executed_events):
-                levels_now = event.get("levels_completed")
-                if not isinstance(levels_now, int):
+            completion_windows = _completion_action_windows_by_level(events + executed_events)
+            levels_after_script = int(frame.levels_completed)
+            for completed_level in range(levels_before_script + 1, levels_after_script + 1):
+                if completed_level <= max_recorded:
                     continue
-                if levels_now <= prev_levels:
-                    continue
-                combined_events = events + executed_events[: idx + 1]
-                actions = _actions_since_last_reset(combined_events)
-                for completed_level in range(prev_levels + 1, levels_now + 1):
-                    if completed_level <= max_recorded:
-                        continue
-                    try:
-                        winning_script_rel = str(winning_script_file.relative_to(cwd))
-                    except ValueError:
-                        winning_script_rel = str(winning_script_file)
-                    _append_level_completion(
-                        path=completions_path,
-                        completed_level=completed_level,
-                        actions=actions,
-                        tool_turn=turn_hint,
-                        winning_script_relpath=winning_script_rel,
-                    )
-                    max_recorded = completed_level
-                prev_levels = levels_now
+                actions = completion_windows.get(completed_level, [])
+                try:
+                    winning_script_rel = str(winning_script_file.relative_to(cwd))
+                except ValueError:
+                    winning_script_rel = str(winning_script_file)
+                _append_level_completion(
+                    path=completions_path,
+                    completed_level=completed_level,
+                    actions=actions,
+                    tool_turn=turn_hint,
+                    winning_script_relpath=winning_script_rel,
+                )
+                max_recorded = completed_level
+            events.extend(executed_events)
         else:
             _emit_json(
                 _error_payload(
@@ -910,6 +1183,7 @@ def main() -> int:
             trace_file_rel = str(trace_path)
 
         result = {
+            "schema_version": "arc_action.v2",
             "ok": not bool(error),
             "action": action,
             "requested_game_id": requested_game_id,
@@ -927,12 +1201,14 @@ def main() -> int:
             "available_actions": [int(a) for a in frame.available_actions],
             **action_meta,
             "steps_executed": len(step_snapshots),
+            "step_results": step_results,
             "step_diffs": step_diff_records,
             "aggregate_diff": aggregate_diff,
             "trace_file": trace_file_rel,
             "state_file": str((arc_dir / "state.json")),
             "transitions": transition_log,
             "script_stdout": script_output,
+            "script_stdout_lines": script_output.splitlines(),
             "script_error": error or None,
         }
         _emit_json(result)

@@ -14,6 +14,8 @@ stop_condition: |
 
 supervisor:
   enabled: true
+  cadence_time_ms: 120000
+  cadence_tokens_adjusted: 12000
   review_timeout_ms: 240000
   disable_synthetic_check_supervisor_on_rule_failure: false
   context_carryover_limit_bytes: 98304
@@ -79,9 +81,9 @@ base_system_message:
         Turn timebox and stop protocol:
         - End your turn as soon as the active mode goal is achieved.
         - End your turn if 5 minutes have elapsed, even if mode goal is not yet achieved.
-        - At turn start, capture wall time with `date +%s` (can be combined with your first shell command).
-        - Record that value as TURN_START_EPOCH in your reasoning notes.
-        - Before additional shell calls, check elapsed time against TURN_START_EPOCH.
+        - Track an approximate turn start time in reasoning notes (do not spend a shell call only to fetch time).
+        - Before additional shell calls, check elapsed time against your noted start time.
+        - If elapsed >= 300 seconds, stop immediately and return control.
         - Do not keep calling tools after mode goal or 5-minute limit; return control.
 
         Tool contract:
@@ -89,15 +91,22 @@ base_system_message:
         - There is no custom MCP arc_action tool in this run.
         - Turn chunking: keep turns short so supervisor can run frequently.
         - Default shell budget per turn:
-          - explore/plan: at most 2 shell commands total, with at most 1 `arc_action run_script`.
+          - explore/plan: at most 2 shell commands total, with at most 1 `arc_action` command.
           - act/recover: at most 1 `arc_action` command total.
+        - Do not run multiple `arc_action` commands in one turn unless supervisor explicitly authorizes it for that turn.
+        - Do not chain multiple `arc_action` commands with shell operators.
         - After executing the primary `arc_action` command and reading its JSON result, end the turn.
         - Do not continue with extra shell analysis after the primary call unless the supervisor explicitly requested it.
         - `arc_action` stdout is always exactly one JSON object (no trailing plain-text blocks).
         - `arc_get_state` stdout is always exactly one JSON object with current state and optional grid rows.
         - On failures, JSON still returns with `ok=false` and an `error` object; command exit may be non-zero.
+        - If tool output is persisted/truncated preview, do not open the persisted file in the same turn; use preview fields and end turn.
         - If you use `jq`, parse only that JSON object and branch on `.ok`.
-        - Preferred run_script form:
+        - Safe jq examples:
+          - `arc_action status | jq '{ok, state, current_level, levels_completed, full_reset}'`
+          - `... | arc_action run_script | jq '{ok, state, levels_gained_in_call, steps_executed, step_results: [.step_results[] | {step, action, changed_pixels, levels_gained_in_step}]}'`
+        - run_script script must be provided via stdin (heredoc/pipe); `--script` is unsupported.
+        - Required run_script form:
           - `cat <<'PY' | arc_action run_script`
           - ...python with env.step(GameAction.ACTION1)...
           - `PY`
@@ -110,7 +119,15 @@ base_system_message:
         - A single arc_action command is single-level scoped; do not attempt to span multiple level completions.
         - After each arc_action call, analyze its returned JSON directly before deciding the next action.
         - Prefer JSON fields over trace mining for immediate decisions: `ok`, `state`, `levels_completed`,
-          `levels_gained_in_call`, `state_changed_in_call`, `steps_executed`, `step_diffs`, `aggregate_diff`.
+          `levels_gained_in_call`, `state_changed_in_call`, `steps_executed`, `step_results`, `step_diffs`, `aggregate_diff`.
+        - arc_action result schema (top-level):
+          - `schema_version` (string), `ok` (bool), `action` (string), `game_id` (string)
+          - state summary: `state`, `current_level`, `levels_completed`, `levels_gained_in_call`, `full_reset`
+          - execution summary: `steps_executed`, `step_results[]`, `step_diffs[]`, `aggregate_diff`
+          - trace/debug: `trace_file`, `state_file`, `transitions[]`, `script_stdout_lines[]`, `script_error`
+        - `step_results[]` is the compact per-step summary for agent logic:
+          - `step`, `action`, `changed_pixels`, `change_bbox`, `levels_gained_in_step`, `state_changed_in_step`
+          - Use this for fast reasoning; use `step_diffs[]` when you need full cell-level changes.
         - In act mode, do not mine old traces (`turn-traces`, `rg/sed` over history) unless supervisor explicitly asks.
 
         Diff interpretation contract:
@@ -124,6 +141,8 @@ base_system_message:
         - State/history artifacts are outside the agent workspace.
         - Use `arc_get_state` to fetch current state JSON (and grid rows when needed).
         - Use `arc_action` return JSON as the primary source of truth for recent transitions.
+        - Do not attempt to import harness/repo modules or inspect parent directories from shell.
+        - In recover mode, do not spend shell calls on workspace probing before the required `arc_action` probe.
 
         agent_lib.py behavior:
         - Every run_script auto-loads agent_lib.py first.
@@ -154,13 +173,17 @@ base_user_message:
         - Keep cause/effect reasoning explicit and evidence-grounded.
         - Features should be reasoned about visually (possibly multi-color/multi-part), not as single-color tokens.
         - Stop as soon as this mode's goal is achieved, or when 5 minutes have elapsed from turn start (whichever comes first).
-        - At turn start, record TURN_START_EPOCH via `date +%s` and check elapsed before extra shell calls.
+        - Track turn start time in reasoning notes; do not spend a shell call only to fetch time.
+        - Run at most one `arc_action` command this turn unless supervisor explicitly authorizes more.
+        - After the first `arc_action` result, return control immediately.
 
 base_agent_rules:
   operation: append
   values:
     - "Use `arc_action` for environment interaction (status/run_script/reset_level)."
     - "Unless supervisor explicitly requests analysis-only, execute at least one `arc_action` command before ending your turn."
+    - "Hard gate: execute at most one `arc_action` command per turn unless supervisor explicitly authorizes multiple in this turn."
+    - "Hard gate: after the first `arc_action` result, end the turn immediately with a concise evidence summary."
 
 base_supervisor_instructions:
   operation: append
@@ -181,6 +204,9 @@ base_supervisor_instructions:
     - "Ensure feature reasoning is visual/object-based (multi-color/multi-part allowed), not color-token based."
     - "Treat run_script budget and turn chunking as soft optimization constraints unless they violate a hard gate."
     - "Treat `import agent_lib` inside run_script as soft guidance only; critique and continue instead of rewrite loops."
+    - "Enforce mode switch_when limits operationally: if explore repeats the same unresolved uncertainty for >=3 turns or exceeds 4 turns on one level, force a mode transition (plan or recover) instead of another same-mode continue."
+    - "If the same critique text is being repeated for >=3 consecutive turns without new evidence, switch mode."
+    - "If a turn includes >1 arc_action command without explicit supervisor authorization, treat that as a hard-gate failure and rewrite."
     - "When entering recover, include a recover entry snapshot in mode_payload: `recover_entry_theory`, `recover_entry_key_assumptions`, `recover_entry_falsifier`, and optional `user_message`."
     - "Recover exit gate: do not fork from recover to act/plan/explore unless at least one entry assumption was explicitly falsified and a materially different replacement theory is stated."
     - "A recover turn that only restores baseline without theory revision is not sufficient for recover exit; keep recover active with one bounded disambiguation probe."
@@ -214,13 +240,14 @@ modes:
             - Run a focused probe that best disambiguates plausible causes.
             - Update causal ledger entries (new evidence, weakened theories, contradictions).
             - Suggest whether to continue exploring or move to plan/act.
-            - Stop once explore goal is met or 5 minutes elapsed from TURN_START_EPOCH.
+            - Stop once explore goal is met or 5 minutes elapsed from turn start.
         - template: |
             {{supervisor.user_message}}
     agent_rules:
       operation: append
       values:
         - "Explore mode hard gate: execute at least one evidence-producing `arc_action` interaction unless supervisor explicitly requests analysis-only."
+        - "Explore mode hard gate: run at most one `arc_action` command and then stop the turn."
 
   plan:
     description: "Turn evidence into a compact executable solve plan with explicit risk checks."
@@ -246,13 +273,14 @@ modes:
             - Provide an executable plan with assumptions.
             - State expected evidence of success and one key falsifier.
             - If needed, run a short validation probe to remove one blocking ambiguity.
-            - Stop once plan goal is met or 5 minutes elapsed from TURN_START_EPOCH.
+            - Stop once plan goal is met or 5 minutes elapsed from turn start.
         - template: |
             {{supervisor.user_message}}
     agent_rules:
       operation: append
       values:
         - "Plan mode hard gate: return one concrete next executable attempt (or one concrete blocking uncertainty with a single validation probe)."
+        - "Plan mode hard gate: if you run a validation probe, run at most one `arc_action` command and then stop."
 
   act:
     description: "Execute the current best solve attempt efficiently and react only to concrete contradictions."
@@ -281,13 +309,14 @@ modes:
             - Analyze the returned arc_action JSON immediately and decide from that evidence before extra shell analysis.
             - If it fails, identify the first contradiction and update the causal ledger.
             - State immediate corrective next step.
-            - Stop once act goal is met or 5 minutes elapsed from TURN_START_EPOCH.
+            - Stop once act goal is met or 5 minutes elapsed from turn start.
         - template: |
             {{supervisor.user_message}}
     agent_rules:
       operation: append
       values:
         - "Act mode hard gate: execute at least one `arc_action` attempt toward level progress before ending turn."
+        - "Act mode hard gate: run at most one `arc_action` command and then stop the turn."
 
   recover:
     description: "Re-establish stable progress after reset/regression and replace failed theory before returning to execution."
@@ -317,7 +346,8 @@ modes:
             - Replace it only with evidence-backed alternatives.
             - Do not exit recover until the replacement theory is materially different from entry.
             - On proposed exit, explicitly report: entry theory, falsified assumption, new theory, and supporting evidence.
-            - Stop once recover goal is met or 5 minutes elapsed from TURN_START_EPOCH.
+            - Start recover turns with the required `arc_action` recovery probe; avoid pre-probe shell analysis.
+            - Stop once recover goal is met or 5 minutes elapsed from turn start.
         - template: |
             Recover entry snapshot:
             - Entry theory: {{supervisor.recover_entry_theory}}
@@ -329,6 +359,7 @@ modes:
       operation: append
       values:
         - "Recover mode hard gate: perform one concrete recovery action (`reset_level` or one bounded disambiguation probe) before ending turn."
+        - "Recover mode hard gate: run at most one `arc_action` command and then stop the turn."
 
 mode_state_machine:
   initial_mode: explore
