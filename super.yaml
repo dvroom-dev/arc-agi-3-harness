@@ -115,133 +115,106 @@ base_supervisor_instructions:
     - "Do not rewrite for minor style/process issues; use critique+continue."
     - "Use rewrite only for immediate in-turn repairable failures."
     - "Detect level transitions from the latest harness summary fields (`state`, `current_level`, `levels_completed`, `full_reset`)."
-    - "Always fork on level transition events: LEVEL COMPLETE or GAME OVER/full-reset transition."
-    - "For transition handling, use `fork_new_conversation` and place the handoff text in `mode_payload.user_message`."
-    - "On LEVEL COMPLETE: fork to `explore` and in `mode_payload.user_message` provide prior-level mechanics/replay details, then instruct the new agent to start from that baseline and search for one additional mechanic/feature/requirement/twist."
-    - "On LEVEL COMPLETE, remind the agent to persist/update `solve_<game id>_<completed level>.py` before handoff if missing."
-    - "At new-level start, instruct the agent to run prior solver(s), observe carryover vs new behavior, and scaffold `solve_<game id>_<current level>.py` immediately."
-    - "On GAME OVER/full reset: fork to `recover` and pass forward the game-over handoff."
-    - "If GAME OVER/full reset regresses below frontier level, include concrete solution steps for each solved level from `arc/level_completions.md` until frontier, then include the detailed frontier-level `GAME_OVER_HANDOFF`."
+    - "Use `fork_new_conversation` and put transition guidance in `mode_payload.user_message`."
+    - "Use `new_game` only once at true first game entry (initial run, level 1). Do not use `new_game` again after GAME_OVER/full reset."
+    - "On LEVEL COMPLETE, fork to `new_level` for the next level startup workflow (unless stop_condition is met)."
+    - "On GAME_OVER/full reset, do not fork to `new_game`; fork to `explore_exploit` with high-confidence beliefs and concrete guidance to recover efficiently."
+    - "When the agent goes off-rails, recover by forking a fresh conversation in the appropriate mode with: last high-confidence beliefs, what failed, and improved exploration/exploitation guidance."
+    - "In `new_level`, require the agent to run previous-level solver(s), report observed carryover, identify new features/mechanics, and then exit to `explore_exploit`."
     - "Maintain concise supervisor-side memory in `arc/game-knowledge.md` and `arc/level-knowledge.md`; remove stale claims."
 
 modes:
-  explore:
-    description: "Gather high-information evidence and narrow competing mechanic hypotheses."
+  new_game:
+    description: "First-time game bootstrap: broad feature/action survey and initial mechanic theories."
     switch_when:
-      - "Use when mechanics are uncertain, contradictory, or newly changed."
-      - "Exit when there is enough evidence for a concrete executable plan."
-      - "If no conceptual progress for multiple turns, switch to recover."
+      - "Use only at first entry into a new game at level 1."
+      - "Exit after simple feature exploration and initial action-result interpretations are documented."
     system_message:
       operation: append
       parts:
         - literal: |
-            Mode: explore
-            Goal: identify mechanics using short disambiguating probes.
+            Mode: new_game
+            Goal: quickly map visible game features and action-linked effects from level-1 initial state.
     user_message:
       operation: append
       parts:
         - literal: |
-            Explore mode guidance:
-            - If this is the first turn of a new level: run prior level solver(s), observe what mechanics carry over, and start `solve_<game id>_<current level>.py`.
-            - Name the top unresolved uncertainty.
-            - Run one focused probe that can falsify at least one candidate explanation.
-            - Update what is supported, contradicted, and still unknown.
+            New-game mode guidance:
+            - Start from initial state feature inventory (shapes/components, not just colors).
+            - Run simple feature exploration only; do not over-search.
+            - Interpret action results with multiple candidate theories when uncertain.
+            - Stop this mode after initial feature/action interpretation is written.
+            - You may run this bootstrap script in `arc_repl exec` and adapt it:
+        - config_file: ./prompts/new_game_auto_explore.py
         - template: |
             {{supervisor.user_message}}
     agent_rules:
       operation: append
       values:
-        - "Explore: maintain 2-3 candidate mechanisms for the top uncertainty."
-        - "Explore: include one explicit falsifier for the top candidate."
+        - "new_game: perform only bounded simple exploration and produce feature/action interpretations."
+        - "new_game: for unclear effects, include 2-3 candidate theories and one falsifier."
 
-  plan:
-    description: "Convert validated mechanics into a compact execution plan."
+  new_level:
+    description: "Level-start handoff mode for non-initial levels: replay prior solution and characterize what's new."
     switch_when:
-      - "Use when evidence is sufficient for a concrete solve attempt."
-      - "Exit to act once plan steps and failure checks are explicit."
+      - "Use when a new level starts and current_level > 1."
+      - "Exit after replaying prior level solution(s), describing results, and identifying new mechanics/features/changes."
     system_message:
       operation: append
       parts:
         - literal: |
-            Mode: plan
-            Goal: produce a short, evidence-backed plan to solve the current level.
+            Mode: new_level
+            Goal: transfer prior-level knowledge into the new level and isolate what's changed.
     user_message:
       operation: append
       parts:
         - literal: |
-            Plan mode guidance:
-            - Provide explicit ordered steps with expected evidence.
-            - Include one key risk and how to detect failure quickly.
+            New-level mode guidance:
+            - Find and run previous level solver(s) (`solve_<game id>_<prev level>.py`) and describe what happened.
+            - Identify features/mechanics/requirements that are new or changed vs previous level.
+            - Start `solve_<game id>_<current level>.py` with reusable feature-detection helpers and notes from replay.
+            - Stop this mode after writing the replay results + new-feature analysis.
         - template: |
             {{supervisor.user_message}}
     agent_rules:
       operation: append
       values:
-        - "Plan: return one concrete executable attempt with expected success signal."
+        - "new_level: replay prior solver(s), document observed carryover, and isolate new mechanics before exiting mode."
 
-  act:
-    description: "Execute the best current solve attempt and react to contradictions quickly."
+  explore_exploit:
+    description: "Unified solve loop: explore uncertain mechanics and exploit validated ones to complete levels."
     switch_when:
-      - "Use when a concrete solve sequence exists."
-      - "Exit to explore on contradiction; exit to recover on repeated no-progress."
+      - "Use for ongoing problem solving after startup modes complete."
+      - "Stay in mode while making conceptual progress; fork fresh conversation in same mode if context quality degrades."
     system_message:
       operation: append
       parts:
         - literal: |
-            Mode: act
-            Goal: execute and verify the shortest credible solve path.
+            Mode: explore_exploit
+            Goal: alternate between uncertainty-reducing probes and short solve attempts until level completion.
     user_message:
       operation: append
       parts:
         - literal: |
-            Act mode guidance:
-            - Execute the planned attempt and evaluate the returned JSON immediately.
-            - If it fails, identify the first contradiction and next corrective step.
+            Explore-exploit mode guidance:
+            - Use short probes to resolve uncertainties; use short solve attempts to exploit validated mechanics.
+            - Keep solving scripts robust to position changes by detecting features from current state.
+            - Update `solve_<game id>_<level>.py` whenever understanding improves.
+            - If a theory fails, name the first contradiction and choose one high-information next probe.
         - template: |
             {{supervisor.user_message}}
     agent_rules:
       operation: append
       values:
-        - "Act: report the first decisive progress/contradiction signal."
-
-  recover:
-    description: "Recover after game over/regression and return to the frontier efficiently."
-    switch_when:
-      - "Use after GAME_OVER/full reset or repeated regressions."
-      - "Exit once frontier is restored and a revised frontier-level theory exists."
-    system_message:
-      operation: append
-      parts:
-        - literal: |
-            Mode: recover
-            Goal: restore progress quickly and re-enter the frontier with better theory.
-    user_message:
-      operation: append
-      parts:
-        - literal: |
-            Recover mode guidance:
-            - Replay known solved levels efficiently to return to the frontier.
-            - At the frontier, use the carried game-over handoff to test a revised theory.
-            - On exit, report entry theory, failed assumption, and replacement theory.
-        - template: |
-            Recover entry snapshot:
-            - Entry theory: {{supervisor.recover_entry_theory}}
-            - Entry assumptions: {{supervisor.recover_entry_key_assumptions}}
-            - Entry falsifier: {{supervisor.recover_entry_falsifier}}
-        - template: |
-            {{supervisor.user_message}}
-    agent_rules:
-      operation: append
-      values:
-        - "Recover: use replay knowledge to regain frontier, then test a revised frontier theory."
+        - "explore_exploit: keep exploration bounded and immediately exploit validated mechanics."
+        - "explore_exploit: when completing a level, persist a robust solver in `solve_<game id>_<level>.py`."
 
 mode_state_machine:
-  initial_mode: explore
+  initial_mode: new_game
   transitions:
-    explore: [explore, plan, recover]
-    plan: [plan, act, explore, recover]
-    act: [act, plan, explore, recover]
-    recover: [recover, act, plan, explore]
+    new_game: [new_game, explore_exploit]
+    new_level: [new_level, explore_exploit]
+    explore_exploit: [explore_exploit, new_level]
 
 tools:
   allow_builtin:
