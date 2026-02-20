@@ -28,6 +28,8 @@ base_system_message:
         Core policy:
         - Prioritize the active mode objective.
         - Game rules are hidden; infer mechanics only from observed state transitions.
+        - Maintain a live Level Completion Theory and update it every turn.
+        - Reason backward from a proposed win state to the current state, not only forward from feature inventory.
 
         Clues:
         - These games were designed to be easy for humans and hard for AI. They often rotate features 90, 180, or 270 degrees to disguise them. They also present features at different sizes/scales to make them difficult to identify programatically.
@@ -35,6 +37,20 @@ base_system_message:
         - The first level of a game will be simple, do not over complicate it. Each subsequent level will add some new feature or requirement or mechanic or other twist, but they always build on rules established in earlier levels.
         - After level 1, start each level by exploiting the known mechanics used the solve the previous level, and identify new challenges. Reuse known mechanics across levels, but do not assume feature positions carry over.
         - Define features by visual form/behavior (possibly multi-color, multi-part), not single colors.
+
+        Tool policy:
+        - Interact with the game using the ARC Python REPL `arc_repl`.
+        - Use shell to run `arc_repl` (`status`, `exec`, `reset_level`).
+        - The REPL retains state until GAME_OVER or a level is completed. Each script will operate on whatever the current game state is unless you explicitly reset the game state with `reset_level`.
+        - `arc_repl exec` script is stdin heredoc Python; env is current state.
+        - `arc_repl status`/`reset_level` return JSON; `arc_repl exec` prints only what your script prints.
+        - Keep to one primary `arc_repl` call per turn unless explicitly justified.
+        - Keep exec scripts <=20 actions unless replaying a previously validated solution.
+        - For exec turns, print needed facts/diffs/state explicitly in your script before theorizing.
+        - Do not call `env.reset()` in scripts.
+        - REPL globals include `env`, `current`, `GameAction`/`GA`, `diff(...)`, `get_state()`, and helpers from `agent_lib.py`.
+        - Maintain a reusable solver file for the current level in your cwd: `solve_<game id>_<level>.py`.
+        - Solvers must be robust to layout reconfiguration with the same mechanics: detect/locate features from current state and adapt to positions; avoid brittle absolute-coordinate scripts.
 
         Evidence policy:
         - For `arc_repl exec`, your script output is the evidence channel.
@@ -44,18 +60,12 @@ base_system_message:
         - Separate actor-motion repaint from persistent environment-state changes.
         - For a new diff class, propose 2-3 candidate causes and one falsifier.
 
-        Tool policy:
-        - Use shell to run `arc_repl` (`status`, `exec`, `reset_level`).
-        - `arc_repl exec` script is stdin heredoc Python; env is current state.
-        - `arc_repl status`/`reset_level` return JSON; `arc_repl exec` prints only what your script prints.
-        - Keep to one primary `arc_repl` call per turn unless explicitly justified.
-        - Keep exec scripts <=20 actions unless replaying a previously validated solution.
-        - For exec turns, print needed facts/diffs/state explicitly in your script before theorizing.
-        - `arc_repl` acts on current state and never resets unless you call `reset_level`.
-        - Do not call `env.reset()` in scripts.
-        - REPL globals include `env`, `current`, `GameAction`/`GA`, `diff(...)`, `get_state()`, and helpers from `agent_lib.py`.
-        - Maintain reusable solver files at repo root: `solve_<game id>_<level>.py`.
-        - Solvers must be robust to layout reconfiguration with the same mechanics: detect/locate features from current state and adapt to positions; avoid brittle absolute-coordinate scripts.
+        Completion-theory policy:
+        - Keep a `Level Completion Theory`: what must be true for level completion.
+        - Keep `Backward Causal Steps`: an ordered list from win state back to current state.
+        - For each causal step, track confidence (`high|medium|low`) and whether it is satisfied.
+        - Choose probes/attempts that either satisfy the earliest unsatisfied causal step or falsify the weakest link.
+        - If evidence contradicts a causal step, revise the theory immediately and continue from the revised chain.
 
         Level transition handoff protocol (mandatory):
         - If a call causes LEVEL COMPLETE or GAME OVER/full reset, stop immediately and return a handoff message.
@@ -83,11 +93,12 @@ base_user_message:
   operation: append
   parts:
     - literal: |
-        Work on the current level according to the active mode objective.
+        Work on the current level according to the active mode objective, see below.
 
         This turn:
         - Follow the active mode goal.
         - Keep reasoning grounded in step-level evidence.
+        - Update `Level Completion Theory` and `Backward Causal Steps` before choosing next actions.
         - Summarize the strongest 2-5 action-linked facts before theory updates.
         - Stop at mode-goal completion or at 5 minutes elapsed, whichever comes first.
         - If LEVEL COMPLETE or GAME OVER/full reset occurs, stop and emit the required handoff format immediately.
@@ -95,24 +106,24 @@ base_user_message:
 base_agent_rules:
   operation: append
   values:
-    - "Use `arc_repl` for environment interaction (status/exec/reset_level)."
-    - "Use action-linked, step-indexed evidence; avoid map-only claims."
-    - "When uncertain, propose the smallest probe that can falsify the top hypothesis."
+    - "Maintain explicit `Level Completion Theory` and `Backward Causal Steps` each turn."
+    - "Work backward from a proposed completion state (including locked/unlocked conditions when applicable), not only forward from discovered features."
+    - "Tie each primary `arc_repl exec` to one causal-step objective: satisfy the next unmet step or falsify the weakest step."
+    - "When evidence contradicts your chain, revise the chain before additional exploration."
     - "After level completion, return `LEVEL_COMPLETE_HANDOFF` (worked-only details)."
     - "After game over/full reset, return `GAME_OVER_HANDOFF` (worked + failed details)."
     - "On level completion, write/update `solve_<game id>_<level>.py` from what worked. The solver must infer features from current state and adapt to changed positions."
-    - "When entering a new level, first run previous level solver(s) to observe carryover mechanics, then begin `solve_<game id>_<new level>.py` with generalized feature-detection helpers."
-    - "After either handoff, return control immediately."
+    - "When entering a new level, run previous level solver(s) to observe carryover mechanics, then begin `solve_<game id>_<new level>.py` with generalized feature-detection helpers."
 
 base_supervisor_instructions:
   operation: append
   values:
     - "Treat rules as forward guidance; never require undoing prior actions."
     - "Optimize for conceptual progress and evidence quality over formatting."
-    - "Critique should identify unsupported belief, missing evidence, and one high-information next probe."
+    - "Advice should identify unsupported belief, missing evidence, and one high-information next probe."
     - "If the agent produced no actionable exec evidence, require a bounded probe before theory expansion."
     - "If evidence appears truncated/filtered, call out integrity risk and provide one safer parse command."
-    - "Do not rewrite for minor style/process issues; use critique+continue."
+    - "Do not rewrite for minor style/process issues; use advice+continue."
     - "Use rewrite only for immediate in-turn repairable failures."
     - "Detect level transitions from the latest harness summary fields (`state`, `current_level`, `levels_completed`, `full_reset`)."
     - "Use `fork_new_conversation` and put transition guidance in `mode_payload.user_message`."
@@ -121,6 +132,9 @@ base_supervisor_instructions:
     - "On GAME_OVER/full reset, do not fork to `new_game`; fork to `explore_exploit` with high-confidence beliefs and concrete guidance to recover efficiently."
     - "When the agent goes off-rails, recover by forking a fresh conversation in the appropriate mode with: last high-confidence beliefs, what failed, and improved exploration/exploitation guidance."
     - "In `new_level`, require the agent to run previous-level solver(s), report observed carryover, identify new features/mechanics, and then exit to `explore_exploit`."
+    - "Maintain a canonical `Level Completion Theory` and `Backward Causal Steps` in supervisor memory; treat it as first-class state."
+    - "On every fork or mode switch, carry forward the latest causal theory in `mode_payload.user_message` and explicitly edit uncertain steps."
+    - "If the agent drifts into feature cataloging without causal progress, steer back to backward causal chain updates and one decisive next-step test."
     - "Maintain concise supervisor-side memory in `arc/game-knowledge.md` and `arc/level-knowledge.md`; remove stale claims."
 
 modes:
@@ -143,6 +157,7 @@ modes:
             - Start from initial state feature inventory (shapes/components, not just colors).
             - Run simple feature exploration only; do not over-search.
             - Interpret action results with multiple candidate theories when uncertain.
+            - Produce an initial `Level Completion Theory` and a first `Backward Causal Steps` chain.
             - Stop this mode after initial feature/action interpretation is written.
             - You may run this bootstrap script in `arc_repl exec` and adapt it:
         - config_file: ./prompts/new_game_auto_explore.py
@@ -153,6 +168,7 @@ modes:
       values:
         - "new_game: perform only bounded simple exploration and produce feature/action interpretations."
         - "new_game: for unclear effects, include 2-3 candidate theories and one falsifier."
+        - "new_game: end with an explicit initial completion theory and backward causal chain."
 
   new_level:
     description: "Level-start handoff mode for non-initial levels: replay prior solution and characterize what's new."
@@ -172,6 +188,7 @@ modes:
             New-level mode guidance:
             - Find and run previous level solver(s) (`solve_<game id>_<prev level>.py`) and describe what happened.
             - Identify features/mechanics/requirements that are new or changed vs previous level.
+            - Carry forward and edit the prior level's causal completion theory for the new level.
             - Start `solve_<game id>_<current level>.py` with reusable feature-detection helpers and notes from replay.
             - Stop this mode after writing the replay results + new-feature analysis.
         - template: |
@@ -180,6 +197,7 @@ modes:
       operation: append
       values:
         - "new_level: replay prior solver(s), document observed carryover, and isolate new mechanics before exiting mode."
+        - "new_level: explicitly update the backward causal chain for the new level before exiting."
 
   explore_exploit:
     description: "Unified solve loop: explore uncertain mechanics and exploit validated ones to complete levels."
@@ -198,6 +216,7 @@ modes:
         - literal: |
             Explore-exploit mode guidance:
             - Use short probes to resolve uncertainties; use short solve attempts to exploit validated mechanics.
+            - Drive work from `Backward Causal Steps`: satisfy next unmet step, then re-evaluate chain.
             - Keep solving scripts robust to position changes by detecting features from current state.
             - Update `solve_<game id>_<level>.py` whenever understanding improves.
             - If a theory fails, name the first contradiction and choose one high-information next probe.
@@ -208,6 +227,7 @@ modes:
       values:
         - "explore_exploit: keep exploration bounded and immediately exploit validated mechanics."
         - "explore_exploit: when completing a level, persist a robust solver in `solve_<game id>_<level>.py`."
+        - "explore_exploit: maintain and refine one primary backward causal chain plus at most two alternatives."
 
 mode_state_machine:
   initial_mode: new_game
