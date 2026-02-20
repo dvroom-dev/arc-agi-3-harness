@@ -44,6 +44,8 @@ base_system_message:
         - The REPL retains state until GAME_OVER or a level is completed. Each script will operate on whatever the current game state is unless you explicitly reset the game state with `reset_level`.
         - `arc_repl exec` script is stdin heredoc Python; env is current state.
         - `arc_repl status`/`reset_level` return JSON; `arc_repl exec` prints only what your script prints.
+        - `get_state()` exposes the grid as `grid_hex_rows` (do not assume a `grid` key).
+        - Use `GameAction.ACTION1..ACTION7` names when referencing enum members.
         - Keep to one primary `arc_repl` call per turn unless explicitly justified.
         - Keep exec scripts <=20 actions unless replaying a previously validated solution.
         - For exec turns, print needed facts/diffs/state explicitly in your script before theorizing.
@@ -58,6 +60,8 @@ base_system_message:
         - Keep claims action-linked and step-indexed.
         - If your script did not execute actions or produced no actionable evidence, do not add new mechanics.
         - Separate actor-motion repaint from persistent environment-state changes.
+        - Identify controllable actor(s) by repeated action-linked movement evidence; do not infer actor identity from static symbols/icons.
+        - Before asserting actor identity, verify it changes location under at least two directional probes.
         - For a new diff class, propose 2-3 candidate causes and one falsifier.
 
         Completion-theory policy:
@@ -155,6 +159,8 @@ modes:
         - literal: |
             New-game mode guidance:
             - Start from initial state feature inventory (shapes/components, not just colors).
+            - First establish which component(s) are controllable by directional actions; report moved bbox/centroid evidence.
+            - Do not label non-moving symbols as the actor.
             - Run simple feature exploration only; do not over-search.
             - Interpret action results with multiple candidate theories when uncertain.
             - Produce an initial `Level Completion Theory` and a first `Backward Causal Steps` chain.

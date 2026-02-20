@@ -20,6 +20,8 @@ Sibling project for ARC-AGI-3 harness experiments using package imports (`arc-ag
   - `arc_repl exec` accepts script content on stdin only (heredoc/pipe).
 - `arc_repl exec` interface:
   - Persistent globals per conversation: `env`, `current`, `GameAction`, `GA`, `diff()`, `get_state()`, and helpers from `agent_lib.py`.
+  - `get_state()` grid payload is `grid_hex_rows` (not `grid`).
+  - Action enum members are `GameAction.ACTION1..ACTION7` plus `RESET`.
   - `diff(before, after, output=\"json\"|\"text\", pad=0)`:
     - `json`: changed-pixel summary plus `before`/`after` chunks
     - `text`: explicit per-cell transitions
@@ -34,3 +36,8 @@ source .env
 . .venv/bin/activate
 python harness.py --game-id ls20 --max-turns 2 --session-name smoke-minimal
 ```
+
+## Actor-identification note (important)
+- Do not identify the controllable actor from visual salience alone.
+- Identify actor(s) from action-linked evidence: whichever component consistently moves under directional actions is the actor.
+- Static markers/symbols that do not move under directional actions are environment features, not the actor.

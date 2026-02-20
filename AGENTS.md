@@ -21,6 +21,8 @@ Hard rules:
 
 If leakage is found, fix the setup/root cause (what gets mounted/copied into run filesystems). Do not rely on prompt warnings as primary protection.
 
+When diagnosing solver failures, find the first turn where a wrong belief appears and trace it to the exact evidence/tool output that triggered it. Prefer action-linked movement evidence over visual salience when identifying controllable actors.
+
 ## Legacy code policy
 
 - Delete unused legacy code aggressively when touched; do not keep dead compatibility paths around.
