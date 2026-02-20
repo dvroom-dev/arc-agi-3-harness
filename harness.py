@@ -592,8 +592,10 @@ def setup_run_config_dir(run_config_dir: Path) -> tuple[Path, Path]:
     run_config_dir.mkdir(parents=True, exist_ok=True)
     tools_dir = run_config_dir / "tools"
     bin_dir = run_config_dir / "bin"
+    prompts_dir = run_config_dir / "prompts"
     tools_dir.mkdir(parents=True, exist_ok=True)
     bin_dir.mkdir(parents=True, exist_ok=True)
+    prompts_dir.mkdir(parents=True, exist_ok=True)
 
     for filename in (
         "arc_action.py",  # dependency module used by arc_repl.py helpers
@@ -614,6 +616,21 @@ exec "{py}" "${{CONFIG_DIR}}/tools/arc_repl_cli.py" "$@"
     arc_repl_path = bin_dir / "arc_repl"
     arc_repl_path.write_text(arc_repl_wrapper)
     arc_repl_path.chmod(0o755)
+
+    # Super config_file references are resolved under --config-dir.
+    # Stage prompt assets into per-run config dir so template includes remain valid.
+    src_prompts_dir = PROJECT_ROOT / "prompts"
+    if not src_prompts_dir.exists():
+        raise RuntimeError(f"missing prompts directory: {src_prompts_dir}")
+    for src in src_prompts_dir.rglob("*"):
+        rel = src.relative_to(src_prompts_dir)
+        dst = prompts_dir / rel
+        if src.is_dir():
+            dst.mkdir(parents=True, exist_ok=True)
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+
     return bin_dir, tools_dir
 
 
@@ -1370,9 +1387,12 @@ def main() -> None:
 
             prompt_images = _level_start_prompt_images(state)
             stdout = resume_super(prompt, image_paths=prompt_images)
-            if not stdout.strip():
-                raise RuntimeError("super returned empty assistant response")
             sync_active_conversation_id_from_session()
+            if not stdout.strip():
+                log(
+                    "[harness] super returned empty assistant response; "
+                    "continuing (likely supervisor fork/transition without assistant text)."
+                )
 
             # Record level completions based on authoritative post-turn state.
             post_state = load_state()

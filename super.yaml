@@ -13,8 +13,6 @@ stop_condition: |
 
 supervisor:
   enabled: true
-  cadence_time_ms: 120000
-  cadence_tokens_adjusted: 12000
   review_timeout_ms: 960000
   disable_synthetic_check_supervisor_on_rule_failure: false
   context_carryover_limit_bytes: 98304

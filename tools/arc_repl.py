@@ -15,7 +15,6 @@ seeded with an `env` already positioned at the current game state via replay his
 from __future__ import annotations
 
 import argparse
-import builtins
 import io
 import json
 import multiprocessing.connection
@@ -245,65 +244,7 @@ class ReplSession:
 
         self.script_counter = 0
         self.last_agent_lib_mtime_ns: int | None = None
-        self.allowed_external_import_roots = {"numpy", "scipy"}
-        stdlib_names = getattr(sys, "stdlib_module_names", ())
-        self.allowed_stdlib_import_roots = {str(name) for name in stdlib_names}
-
-        def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
-            module_name = str(name or "")
-            if not module_name:
-                raise ImportError("empty module name")
-            if int(level or 0) != 0:
-                raise ImportError("relative imports are not allowed in arc_repl")
-            root = module_name.split(".", 1)[0]
-            if (
-                root in self.allowed_external_import_roots
-                or root in self.allowed_stdlib_import_roots
-            ):
-                return builtins.__import__(module_name, globals, locals, fromlist, level)
-            raise ImportError(
-                f"import of '{module_name}' is not allowed; "
-                "allowed imports are Python stdlib modules plus numpy/scipy"
-            )
-
-        # Persistent REPL globals.
-        self.safe_builtins = {
-            "__import__": _safe_import,
-            "abs": abs,
-            "all": all,
-            "any": any,
-            "bool": bool,
-            "dict": dict,
-            "dir": dir,
-            "enumerate": enumerate,
-            "Exception": Exception,
-            "filter": filter,
-            "float": float,
-            "getattr": getattr,
-            "hasattr": hasattr,
-            "int": int,
-            "isinstance": isinstance,
-            "issubclass": issubclass,
-            "len": len,
-            "list": list,
-            "map": map,
-            "max": max,
-            "min": min,
-            "print": print,
-            "range": range,
-            "reversed": reversed,
-            "round": round,
-            "set": set,
-            "sorted": sorted,
-            "str": str,
-            "sum": sum,
-            "tuple": tuple,
-            "type": type,
-            "vars": vars,
-            "zip": zip,
-        }
         self.globals: dict[str, Any] = {
-            "__builtins__": self.safe_builtins,
             "np": np,
             "json": json,
             "env": self.env,
