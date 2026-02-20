@@ -358,6 +358,7 @@ class ReplSession:
         error: str,
         pre_pixels: np.ndarray | None,
         step_snapshots: list[tuple[str, np.ndarray]],
+        step_results: list[dict] | None,
     ) -> Path:
         final_pixels = self.pixels
         write_game_state(
@@ -370,6 +371,7 @@ class ReplSession:
             error=error,
             step_snapshots=step_snapshots,
             pre_turn_pixels=pre_pixels,
+            step_results=step_results,
         )
         write_machine_state(
             self.arc_dir,
@@ -385,6 +387,7 @@ class ReplSession:
             action_name=action_label,
             pre_pixels=pre_pixels,
             step_snapshots=step_snapshots,
+            step_results=step_results,
             final_pixels=final_pixels,
             script_output=script_output,
             error=error,
@@ -505,8 +508,17 @@ class ReplSession:
         trace_path: Path,
         session_created: bool,
     ) -> dict:
-        step_diffs = build_step_diff_records(pre_pixels, step_snapshots)
-        aggregate_diff = build_aggregate_diff_record(pre_pixels, self.pixels)
+        step_diffs = build_step_diff_records(
+            pre_pixels,
+            step_snapshots,
+            step_results=step_results,
+        )
+        aggregate_diff = build_aggregate_diff_record(
+            pre_pixels,
+            self.pixels,
+            step_snapshots=step_snapshots,
+            step_results=step_results,
+        )
 
         try:
             trace_rel = str(trace_path.relative_to(self.cwd))
@@ -540,7 +552,6 @@ class ReplSession:
             "state_file": str((self.arc_dir / "state.json")),
             "transitions": transitions,
             "script_stdout": script_output,
-            "script_stdout_lines": script_output.splitlines(),
             "script_error": script_error or None,
             "repl": {
                 "conversation_id": self.conversation_id,
@@ -566,6 +577,7 @@ class ReplSession:
             error="",
             pre_pixels=None,
             step_snapshots=[],
+            step_results=[],
         )
         return self._finalize_result(
             action="status",
@@ -604,6 +616,7 @@ class ReplSession:
             error="",
             pre_pixels=None,
             step_snapshots=[],
+            step_results=[],
         )
         return self._finalize_result(
             action="reset_level",
@@ -661,13 +674,15 @@ class ReplSession:
             self.frame = frame
             current_pixels = _get_pixels(self.env, frame)
             changes = _iter_cell_changes(self.pixels, current_pixels)
+            levels_gained = int(frame.levels_completed) - prev_levels
             step_index = len(step_results) + 1
-            step_record = {
-                "step": step_index,
-                "action": action_name,
-                "changed_pixels": len(changes),
-                "change_bbox": _change_bbox(changes),
-                "changes": [
+            if levels_gained > 0:
+                step_changed_pixels = 0
+                step_changes: list[dict] = []
+                step_bbox = None
+            else:
+                step_changed_pixels = len(changes)
+                step_changes = [
                     {
                         "row": int(r),
                         "col": int(c),
@@ -675,15 +690,24 @@ class ReplSession:
                         "after": f"{int(a):X}",
                     }
                     for (r, c, b, a) in changes
-                ],
+                ]
+                step_bbox = _change_bbox(changes)
+            step_record = {
+                "step": step_index,
+                "action": action_name,
+                "changed_pixels": step_changed_pixels,
+                "change_bbox": step_bbox,
+                "changes": step_changes,
                 "state": str(frame.state.value),
                 "state_before_step": prev_state,
                 "state_changed_in_step": prev_state != str(frame.state.value),
                 "levels_completed": int(frame.levels_completed),
                 "levels_before_step": prev_levels,
-                "levels_gained_in_step": int(frame.levels_completed) - prev_levels,
+                "levels_gained_in_step": levels_gained,
                 "is_terminal": str(frame.state.value) in {"WIN", "GAME_OVER"},
             }
+            if levels_gained > 0:
+                step_record["suppressed_cross_level_diff"] = True
             step_results.append(step_record)
             self.pixels = current_pixels
             executed_events.append(
@@ -744,6 +768,7 @@ class ReplSession:
             error=error,
             pre_pixels=pre_pixels,
             step_snapshots=step_snapshots,
+            step_results=step_results,
         )
 
         return self._finalize_result(
@@ -1027,6 +1052,40 @@ def main() -> int:
             repl.setdefault("conversation_id", conversation_id)
             repl["session_created"] = bool(session_created or repl.get("session_created"))
             result["repl"] = repl
+        if action == "exec":
+            if not isinstance(result, dict):
+                if result is not None:
+                    sys.stdout.write(str(result))
+                    if not str(result).endswith("\n"):
+                        sys.stdout.write("\n")
+                return 1
+            script_stdout = str(result.get("script_stdout", "") or "")
+            if script_stdout:
+                sys.stdout.write(script_stdout)
+                if not script_stdout.endswith("\n"):
+                    sys.stdout.write("\n")
+            if not bool(result.get("ok")):
+                script_error = str(result.get("script_error", "") or "").strip()
+                if script_error:
+                    sys.stderr.write(script_error)
+                    if not script_error.endswith("\n"):
+                        sys.stderr.write("\n")
+                else:
+                    err = result.get("error")
+                    if isinstance(err, dict):
+                        msg = str(err.get("message", "") or "").strip()
+                        details = str(err.get("details", "") or "").strip()
+                        if msg:
+                            sys.stderr.write(msg)
+                            if not msg.endswith("\n"):
+                                sys.stderr.write("\n")
+                        if details:
+                            sys.stderr.write(details)
+                            if not details.endswith("\n"):
+                                sys.stderr.write("\n")
+                return 1
+            return 0
+
         _emit_json(result)
         return 0 if bool(result.get("ok")) else 1
     except Exception as exc:

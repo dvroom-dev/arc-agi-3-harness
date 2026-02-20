@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
-"""Command-line wrapper for arc_repl JSON tool.
+"""Command-line wrapper for arc_repl tool.
 
 Usage:
   arc_repl status [--game-id GAME]
   arc_repl reset_level [--game-id GAME]
   arc_repl exec [--game-id GAME] < script.py
   arc_repl shutdown
+
+Output contract:
+- status/reset_level/shutdown: JSON object
+- exec: raw script stdout/stderr (like a normal REPL)
 """
 
 from __future__ import annotations

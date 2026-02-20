@@ -21,6 +21,13 @@ Hard rules:
 
 If leakage is found, fix the setup/root cause (what gets mounted/copied into run filesystems). Do not rely on prompt warnings as primary protection.
 
+## Legacy code policy
+
+- Delete unused legacy code aggressively when touched; do not keep dead compatibility paths around.
+- If a code path is not used by the active harness flow, remove it instead of preserving it "just in case."
+- Keep one canonical implementation per critical behavior (diff generation, state transitions, tool outputs); avoid duplicate logic across old/new paths.
+- After cleanup, run compile/tests and verify no stale references remain.
+
 ## No silent fallback policy (harness/tooling)
 
 Benchmark-critical features must fail loudly if broken. Do not silently degrade or no-op when these fail:

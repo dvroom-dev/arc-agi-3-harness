@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import argparse
-import io
 import json
 import os
 import re
+import signal
 import shutil
 import subprocess
 import sys
 import textwrap
 import threading
-import traceback
-from contextlib import redirect_stdout, redirect_stderr
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -21,22 +20,10 @@ from typing import Any
 import numpy as np
 
 try:
-    from arcengine import GameAction
-    from arcengine.enums import FrameDataRaw
-except Exception as exc:  # pragma: no cover - fail fast
-    raise RuntimeError(
-        "Failed to import arcengine dependencies (GameAction/FrameDataRaw)."
-    ) from exc
-
-try:
     from game_state import (
         COLOR_NAMES,
         _connected_components_8,
-        pixels_to_hex_grid,
         render_grid_to_image,
-        write_game_state,
-        write_machine_state,
-        render_grid_to_terminal,
     )
 except Exception as exc:  # pragma: no cover - fail fast
     raise RuntimeError(
@@ -112,30 +99,6 @@ AGENT_LIB_TEMPLATE = textwrap.dedent("""\
 # Helpers
 # ---------------------------------------------------------------------------
 
-def get_pixels(env) -> np.ndarray:
-    """Extract the full pixel grid from the environment."""
-    game = env._game
-    return game.get_pixels(
-        game.camera.x, game.camera.y,
-        game.camera.width, game.camera.height,
-    )
-
-
-def format_cell_changes(before: np.ndarray, after: np.ndarray) -> str:
-    """Format explicit grid changes as per-cell before->after transitions."""
-    changed = np.argwhere(before != after)
-    if changed.size == 0:
-        return "(no changes)"
-    lines = [
-        f"changed_pixels={len(changed)}",
-        "format: (row,col): before->after",
-    ]
-    for row, col in changed:
-        lines.append(
-            f"({int(row)},{int(col)}): {int(before[row, col]):X}->{int(after[row, col]):X}"
-        )
-    return "\n".join(lines)
-
 
 def format_change_records(changes: list[dict]) -> str:
     """Format tool diff records (`changes`) as explicit cell transitions."""
@@ -161,6 +124,41 @@ def format_change_records(changes: list[dict]) -> str:
     if skipped:
         lines.append(f"note: skipped_malformed_change_records={skipped}")
     return "\n".join(lines)
+
+
+def diff_change_records(before: np.ndarray, after: np.ndarray) -> list[dict]:
+    """Return per-cell before/after records between two 64x64 grids."""
+    if before.shape != after.shape:
+        raise RuntimeError(
+            f"Grid shape mismatch for diff generation: before={before.shape} after={after.shape}"
+        )
+    changed = np.argwhere(before != after)
+    records: list[dict] = []
+    for row, col in changed:
+        r = int(row)
+        c = int(col)
+        records.append(
+            {
+                "row": r,
+                "col": c,
+                "before": f"{int(before[r, c]):X}",
+                "after": f"{int(after[r, c]):X}",
+            }
+        )
+    return records
+
+
+def collect_palette_from_change_records(changes: list[dict]) -> set[int]:
+    """Collect numeric color IDs appearing in change records."""
+    palette: set[int] = set()
+    for ch in changes:
+        before = _parse_color_id(ch.get("before"))
+        after = _parse_color_id(ch.get("after"))
+        if before is not None:
+            palette.add(before)
+        if after is not None:
+            palette.add(after)
+    return palette
 
 
 def find_click_targets(pixels: np.ndarray) -> list[tuple[int, int, int, int]]:
@@ -208,32 +206,6 @@ def _parse_color_id(value: Any) -> int | None:
         return None
 
 
-def _collect_diff_palette(result: dict | None) -> set[int]:
-    """Collect color ids appearing in a tool diff payload."""
-    palette: set[int] = set()
-    if not result:
-        return palette
-    step_diffs = result.get("step_diffs")
-    if not isinstance(step_diffs, list):
-        return palette
-    for step in step_diffs:
-        if not isinstance(step, dict):
-            continue
-        changes = step.get("changes")
-        if not isinstance(changes, list):
-            continue
-        for ch in changes:
-            if not isinstance(ch, dict):
-                continue
-            before = _parse_color_id(ch.get("before"))
-            after = _parse_color_id(ch.get("after"))
-            if before is not None:
-                palette.add(before)
-            if after is not None:
-                palette.add(after)
-    return palette
-
-
 def summarize_static_features(
     pixels: np.ndarray,
     *,
@@ -272,69 +244,6 @@ def summarize_static_features(
             f"{color_name} (id={color_id:X}) size={size} origin=({r0},{c0}) center=({cy},{cx})"
         )
     return lines
-
-
-def explore_inputs(env, frame: FrameDataRaw, pixels: np.ndarray) -> str:
-    """Try every available action (with reset between each), capture diffs.
-
-    For ACTION6, clicks on the centroid of each contiguous color region.
-    Returns a formatted summary for the initial prompt.
-    """
-    base_pixels = pixels.copy()
-    action_map = {a.value: a for a in GameAction}
-
-    results_with_diff: list[str] = []
-    no_effect: list[str] = []
-
-    for action_id in sorted(frame.available_actions):
-        if action_id == 0:  # RESET — skip
-            continue
-        action = action_map.get(action_id)
-        if action is None:
-            continue
-        action_name = action.name
-
-        if action_id == 6:  # ACTION6 — click on each color region
-            targets = find_click_targets(base_pixels)
-            for x, y, color_id, size in targets:
-                color_name = COLOR_NAMES.get(color_id, f"color-{color_id}")
-                label = f"{action_name} click ({x},{y}) on {color_name} (size={size})"
-                try:
-                    env.step(action, data={"x": x, "y": y})
-                    new_pixels = get_pixels(env)
-                    if np.any(base_pixels != new_pixels):
-                        results_with_diff.append(
-                            f"### {label}\n```\n{format_cell_changes(base_pixels, new_pixels)}\n```"
-                        )
-                    else:
-                        no_effect.append(label)
-                except Exception as e:
-                    no_effect.append(f"{label} (error: {e})")
-                env.reset()
-        else:
-            label = action_name
-            try:
-                env.step(action)
-                new_pixels = get_pixels(env)
-                if np.any(base_pixels != new_pixels):
-                    results_with_diff.append(
-                        f"### {label}\n```\n{format_cell_changes(base_pixels, new_pixels)}\n```"
-                    )
-                else:
-                    no_effect.append(label)
-            except Exception as e:
-                no_effect.append(f"{label} (error: {e})")
-            env.reset()
-
-    parts = ["## Input Exploration Results\n"]
-    parts.append("The following actions were tested from the initial state "
-                 "(with reset between each):\n")
-    parts.extend(results_with_diff)
-
-    if no_effect:
-        parts.append(f"\n### No effect\n{', '.join(no_effect)}")
-
-    return "\n".join(parts)
 
 
 def _drain_stderr(proc, prefix="[super] "):
@@ -473,165 +382,6 @@ def extract_last_assistant_message(transcript: str) -> str:
     return blocks[-1].strip() if blocks else ""
 
 
-def extract_json(text: str) -> str | None:
-    """Try to extract JSON from assistant output that may be wrapped in markdown.
-
-    Handles: bare JSON, ```json fenced blocks, JSON with surrounding prose.
-    """
-    text = text.strip()
-    if not text:
-        return None
-
-    # Try bare JSON first
-    if text.startswith("{"):
-        depth = 0
-        for i, ch in enumerate(text):
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    return text[: i + 1]
-
-    # Try fenced code block: ```json ... ``` or ``` ... ```
-    fence_match = re.search(r"```(?:json)?\s*\n(\{.*?\})\s*\n```", text, re.DOTALL)
-    if fence_match:
-        return fence_match.group(1).strip()
-
-    # Try to find any JSON object in the text
-    brace_start = text.find("{")
-    if brace_start != -1:
-        depth = 0
-        for i in range(brace_start, len(text)):
-            if text[i] == "{":
-                depth += 1
-            elif text[i] == "}":
-                depth -= 1
-                if depth == 0:
-                    return text[brace_start : i + 1]
-
-    return None
-
-
-def execute_script(
-    script_path: Path,
-    env,
-) -> tuple[FrameDataRaw | None, str, str, list[str], list[tuple[str, np.ndarray]]]:
-    """Execute an agent-written script with env in its namespace.
-
-    Returns (last_frame, stdout_capture, error_string, transition_log, step_snapshots).
-    step_snapshots is a list of (description, pixels) captured after each env.step().
-    """
-    if not script_path.exists():
-        return None, "", f"Script not found: {script_path}", [], []
-
-    code = script_path.read_text()
-
-    # Collect per-step transitions and pixel snapshots
-    transition_log: list[str] = []
-    step_snapshots: list[tuple[str, np.ndarray]] = []
-    last_frame: FrameDataRaw | None = None
-
-    # Wrap env.step to log transitions and capture snapshots
-    original_step = env.step
-    terminal_halt = False
-
-    class _TerminalStateReached(Exception):
-        """Internal sentinel used to stop script execution after terminal state."""
-        pass
-
-    def logging_step(action, data=None, reasoning=None):
-        nonlocal last_frame, terminal_halt
-        if terminal_halt:
-            raise _TerminalStateReached()
-        frame = original_step(action, data=data, reasoning=reasoning)
-        if frame is not None:
-            last_frame = frame
-            action_name = action.name if hasattr(action, "name") else str(action)
-            data_str = f" data={data}" if data else ""
-            description = (
-                f"{action_name}{data_str} -> state={frame.state.value} "
-                f"levels={frame.levels_completed}/{frame.win_levels}"
-            )
-            transition_log.append(description)
-            try:
-                pixels = get_pixels(env)
-                step_snapshots.append((description, pixels))
-            except Exception:
-                pass  # pixel capture failure shouldn't crash the script
-            if frame.state.value in {"WIN", "GAME_OVER"}:
-                terminal_halt = True
-                raise _TerminalStateReached()
-        return frame
-
-    env.step = logging_step
-
-    # Block env.reset — resets are only allowed via the reset_level action
-    original_reset = env.reset
-
-    def blocked_reset():
-        raise RuntimeError(
-            "env.reset() cannot be called from scripts. "
-            'Return {"action": "reset_level"} to reset the level.'
-        )
-
-    env.reset = blocked_reset
-
-    stdout_capture = io.StringIO()
-    stderr_capture = io.StringIO()
-    error = ""
-
-    script_globals = {
-        "__builtins__": __builtins__,
-        "env": env,
-        "GameAction": GameAction,
-        "np": np,
-    }
-
-    try:
-        with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-            exec(compile(code, str(script_path), "exec"), script_globals)
-    except _TerminalStateReached:
-        # Expected early stop after reaching terminal state.
-        pass
-    except BaseException:
-        # Catch BaseException to handle SystemExit, KeyboardInterrupt, etc.
-        # from agent scripts without crashing the harness.
-        error = traceback.format_exc()
-    finally:
-        # Restore original methods
-        env.step = original_step
-        env.reset = original_reset
-
-    return last_frame, stdout_capture.getvalue(), error, transition_log, step_snapshots
-
-
-def archive_script(script_path: Path, session_dir: Path, turn: int) -> None:
-    """Copy an executed script to the session scripts archive."""
-    scripts_dir = session_dir / "scripts"
-    scripts_dir.mkdir(parents=True, exist_ok=True)
-    dest = scripts_dir / f"turn_{turn:03d}_{script_path.name}"
-    shutil.copy2(script_path, dest)
-
-
-def archive_script_in_run_dir(script_path: Path, run_dir: Path, turn: int) -> Path:
-    """Copy an executed script to a run-local script history directory."""
-    scripts_dir = run_dir / ".ai-supervisor" / "arc" / "script-history"
-    scripts_dir.mkdir(parents=True, exist_ok=True)
-    dest = scripts_dir / f"turn_{turn:03d}_{script_path.name}"
-    shutil.copy2(script_path, dest)
-    return dest
-
-
-def log_action(session_dir: Path, turn: int, entry: dict) -> None:
-    """Append a line to actions.jsonl."""
-    log_file = session_dir / "actions.jsonl"
-    entry["turn"] = turn
-    entry["timestamp"] = datetime.now(timezone.utc).isoformat()
-    with open(log_file, "a") as f:
-        f.write(json.dumps(entry) + "\n")
-
-
 def load_history_events(history_json: Path) -> list[dict[str, Any]]:
     """Load raw tool-engine events from history json."""
     if not history_json.exists():
@@ -729,201 +479,6 @@ def read_max_recorded_completion_level(completions_file: Path) -> int:
             continue
         max_level = max(max_level, level)
     return max_level
-
-
-def write_turn_trace(
-    *,
-    trace_dir: Path,
-    turn: int,
-    script_path: Path,
-    pre_turn_pixels: np.ndarray | None,
-    step_snapshots: list[tuple[str, np.ndarray]],
-    final_pixels: np.ndarray,
-    script_output: str = "",
-    error: str = "",
-) -> Path:
-    """Write a verbose per-turn execution trace for the executed script."""
-    trace_dir.mkdir(parents=True, exist_ok=True)
-    trace_path = trace_dir / f"turn_{turn:03d}_trace.md"
-
-    parts: list[str] = [
-        f"# Turn {turn:03d} Trace",
-        "",
-        f"- script: `{script_path.name}`",
-        f"- steps: {len(step_snapshots)}",
-        f"- script_error: {bool(error)}",
-    ]
-
-    if script_output:
-        parts.extend(
-            [
-                "",
-                "## Script Output",
-                "```",
-                script_output,
-                "```",
-            ]
-        )
-
-    if error:
-        parts.extend(
-            [
-                "",
-                "## Script Error",
-                "```",
-                error,
-                "```",
-            ]
-        )
-
-    if pre_turn_pixels is not None:
-        parts.extend(
-            [
-                "",
-                "## Initial Grid (Full 64x64 Hex)",
-                "```",
-                pixels_to_hex_grid(pre_turn_pixels),
-                "```",
-            ]
-        )
-
-    if step_snapshots and pre_turn_pixels is not None:
-        parts.append("")
-        parts.append("## Per-Step Actions And Diffs")
-        for i, (desc, snap_pixels) in enumerate(step_snapshots):
-            prev = pre_turn_pixels if i == 0 else step_snapshots[i - 1][1]
-            parts.extend(
-                [
-                    "",
-                    f"### Step {i + 1}: {desc}",
-                    "",
-                    "Cell diff:",
-                    "```",
-                    format_cell_changes(prev, snap_pixels),
-                    "```",
-                ]
-            )
-
-    if pre_turn_pixels is not None:
-        parts.extend(
-            [
-                "",
-                "## Aggregate Diff (Initial -> Final)",
-                "```",
-                format_cell_changes(pre_turn_pixels, final_pixels),
-                "```",
-            ]
-        )
-
-    parts.extend(
-        [
-            "",
-            "## Final Grid (Full 64x64 Hex)",
-            "```",
-            pixels_to_hex_grid(final_pixels),
-            "```",
-            "",
-        ]
-    )
-
-    trace_path.write_text("\n".join(parts))
-    return trace_path
-
-
-def build_resume_prompt(
-    *,
-    action_type: str,
-    frame: FrameDataRaw,
-    game_id: str = "",
-    step_snapshots: list[tuple[str, np.ndarray]] | None = None,
-    pre_turn_pixels: np.ndarray | None = None,
-    script_output: str = "",
-    error: str = "",
-    reset_notice: str = "",
-    telemetry: dict | None = None,
-) -> str:
-    """Build a rich prompt for super resume with action results, diffs, and state.
-
-    For run_script actions with step data, includes:
-    - Per-step explicit cell diffs (before->after transitions)
-    - Aggregate explicit cell diff (initial->final)
-    - Full current hex grid
-    """
-    parts: list[str] = []
-
-    # What happened
-    if action_type == "run_script":
-        if error:
-            parts.append(f"Script execution FAILED.\n\nError:\n```\n{error}\n```")
-        else:
-            parts.append("Script executed successfully.")
-        if script_output:
-            parts.append(f"\nScript output:\n```\n{script_output}\n```")
-        if step_snapshots and pre_turn_pixels is not None:
-            parts.append(f"\nActions taken ({len(step_snapshots)} steps):")
-            no_change_steps = 0
-            for i, (desc, snap_pixels) in enumerate(step_snapshots):
-                prev = pre_turn_pixels if i == 0 else step_snapshots[i - 1][1]
-                if not np.any(prev != snap_pixels):
-                    no_change_steps += 1
-                parts.append(f"\nStep {i + 1}: {desc}")
-                parts.append(f"```\n{format_cell_changes(prev, snap_pixels)}\n```")
-
-            # Aggregate diff
-            parts.append(f"\nAggregate diff ({len(step_snapshots)} steps):")
-            parts.append(f"```\n{format_cell_changes(pre_turn_pixels, step_snapshots[-1][1])}\n```")
-
-            # Full current grid
-            parts.append("\nCurrent grid:")
-            parts.append(f"```\n{pixels_to_hex_grid(step_snapshots[-1][1])}\n```")
-
-            # Generic action-efficiency signals to reduce repeated ineffective probing.
-            changed_steps = len(step_snapshots) - no_change_steps
-            parts.append(
-                f"\nAction efficiency: {changed_steps}/{len(step_snapshots)} steps changed state; "
-                f"{no_change_steps}/{len(step_snapshots)} had no observable change."
-            )
-            if no_change_steps > 0:
-                parts.append(
-                    "If many steps had no effect, prefer a shorter, targeted script that changes one "
-                    "condition at a time instead of repeating similar moves."
-                )
-        elif not error:
-            parts.append(
-                "\nWARNING: Script executed 0 steps. Your script must call "
-                "env.step() at the TOP LEVEL — not inside a function definition. "
-                "Scripts are run via exec(); only top-level code executes."
-            )
-    elif action_type == "reset_level":
-        parts.append("Level has been reset.")
-    elif action_type == "next_level":
-        parts.append("Level knowledge reset. Game knowledge updated. New level started.")
-
-    # Current state metadata
-    actions_str = ", ".join(str(a) for a in frame.available_actions)
-    level = frame.levels_completed + 1
-    parts.append(
-        f"\nCurrent state: {frame.state.value} | "
-        f"game: {game_id} | level: {level}/{frame.win_levels} | "
-        f"available_actions: [{actions_str}]"
-    )
-    if telemetry:
-        parts.append(
-            "Runtime telemetry: "
-            f"steps_since_last_reset={telemetry.get('steps_since_last_reset', 0)}, "
-            f"reset_epoch={telemetry.get('reset_epoch', 0)}, "
-            f"manual_resets={telemetry.get('manual_resets', 0)}, "
-            f"auto_game_over_resets={telemetry.get('auto_game_over_resets', 0)}, "
-            f"game_over_events={telemetry.get('game_over_events', 0)}, "
-            f"last_reset_reason={telemetry.get('last_reset_reason', 'none')}, "
-            f"full_reset_signal={telemetry.get('full_reset_signal', False)}"
-        )
-
-    if reset_notice.strip():
-        parts.append(f"\n{reset_notice.strip()}")
-    parts.append("\nGrid files updated. Return your next action as JSON.")
-
-    return "\n".join(parts)
 
 
 def write_prompt_file(
@@ -1202,6 +757,7 @@ def main() -> None:
     def run_arc_repl(payload: dict) -> tuple[dict | None, str, int]:
         nonlocal active_game_id, active_conversation_id
         request = dict(payload)
+        action_name = str(request.get("action", "")).strip()
         requested_game_id = str(request.get("game_id", "")).strip()
         # Keep all harness-side calls on one canonical game_id lineage.
         # After the first status call, arc_repl returns a resolved id
@@ -1237,6 +793,9 @@ def main() -> None:
                 log(f"[arc_repl] {line}")
         stdout = proc.stdout.strip()
         parsed: dict | None = None
+        allow_raw_stdout = action_name == "exec"
+        if allow_raw_stdout:
+            return None, stdout, proc.returncode
         if stdout:
             try:
                 maybe = json.loads(stdout)
@@ -1292,32 +851,6 @@ def main() -> None:
         except Exception as exc:
             raise RuntimeError(f"Failed to load current grid file: {grid_path}: {exc}") from exc
 
-    def summarize_tool_diff(result: dict | None) -> tuple[int, str]:
-        if not result:
-            return 0, "(no result)"
-        step_diffs = result.get("step_diffs")
-        if isinstance(step_diffs, list) and step_diffs:
-            first = step_diffs[0] if isinstance(step_diffs[0], dict) else {}
-            changes = first.get("changes")
-            if isinstance(changes, list):
-                changed = first.get("changed_pixels")
-                try:
-                    changed_pixels = int(changed) if changed is not None else len(changes)
-                except Exception:
-                    changed_pixels = len(changes)
-                return changed_pixels, format_change_records(changes)
-        agg = result.get("aggregate_diff")
-        if isinstance(agg, dict):
-            changes = agg.get("changes")
-            if isinstance(changes, list):
-                changed = agg.get("changed_pixels")
-                try:
-                    changed_pixels = int(changed) if changed is not None else len(changes)
-                except Exception:
-                    changed_pixels = len(changes)
-                return changed_pixels, format_change_records(changes)
-        return 0, "(no changes)"
-
     def run_input_exploration_from_reset() -> str:
         """Auto-probe every available input from a reset baseline.
 
@@ -1363,36 +896,106 @@ def main() -> None:
                         f"(id={color_id:X}, size={size})"
                     )
                     script = f"env.step(6, data={{'x': {x}, 'y': {y}}})"
-                    result, stdout, rc = run_arc_repl(
+                    before_pixels = load_current_pixels()
+                    before_status, _, before_status_rc = run_arc_repl(
+                        {"action": "status", "game_id": args.game_id}
+                    )
+                    _, stdout, rc = run_arc_repl(
                         {"action": "exec", "game_id": args.game_id, "script": script}
                     )
-                    if rc == 0 and result:
-                        motion_palette.update(_collect_diff_palette(result))
-                        changed_pixels, diff_text = summarize_tool_diff(result)
-                        if changed_pixels > 0:
-                            diff_sections.append(f"### {label}\n```\n{diff_text}\n```")
+                    after_status, after_stdout, after_status_rc = run_arc_repl(
+                        {"action": "status", "game_id": args.game_id}
+                    )
+                    after_pixels = load_current_pixels()
+                    if rc == 0 and before_pixels is not None and after_pixels is not None:
+                        before_level = (
+                            int(before_status.get("levels_completed", 0))
+                            if isinstance(before_status, dict)
+                            else None
+                        )
+                        after_level = (
+                            int(after_status.get("levels_completed", 0))
+                            if isinstance(after_status, dict)
+                            else None
+                        )
+                        if (
+                            before_status_rc == 0
+                            and after_status_rc == 0
+                            and before_level is not None
+                            and after_level is not None
+                            and after_level > before_level
+                        ):
+                            no_effect.append(f"{label} (diff suppressed: level transition)")
                         else:
-                            no_effect.append(label)
+                            changes = diff_change_records(before_pixels, after_pixels)
+                            changed_pixels = len(changes)
+                            if changed_pixels > 0:
+                                motion_palette.update(collect_palette_from_change_records(changes))
+                                diff_text = format_change_records(changes)
+                                diff_sections.append(f"### {label}\n```\n{diff_text}\n```")
+                            else:
+                                no_effect.append(label)
                     else:
-                        error_text = stdout.strip() if stdout.strip() else "exec failed"
+                        status_detail = (
+                            after_stdout.strip()
+                            if after_status_rc != 0 and after_stdout.strip()
+                            else ""
+                        )
+                        detail = status_detail or stdout.strip() or "exec failed"
+                        error_text = detail
                         no_effect.append(f"{label} (error: {error_text})")
                     run_arc_repl({"action": "reset_level", "game_id": args.game_id})
                 continue
 
             label = f"ACTION{action_id}"
             script = f"env.step({action_id})"
-            result, stdout, rc = run_arc_repl(
+            before_pixels = load_current_pixels()
+            before_status, _, before_status_rc = run_arc_repl(
+                {"action": "status", "game_id": args.game_id}
+            )
+            _, stdout, rc = run_arc_repl(
                 {"action": "exec", "game_id": args.game_id, "script": script}
             )
-            if rc == 0 and result:
-                motion_palette.update(_collect_diff_palette(result))
-                changed_pixels, diff_text = summarize_tool_diff(result)
-                if changed_pixels > 0:
-                    diff_sections.append(f"### {label}\n```\n{diff_text}\n```")
+            after_status, after_stdout, after_status_rc = run_arc_repl(
+                {"action": "status", "game_id": args.game_id}
+            )
+            after_pixels = load_current_pixels()
+            if rc == 0 and before_pixels is not None and after_pixels is not None:
+                before_level = (
+                    int(before_status.get("levels_completed", 0))
+                    if isinstance(before_status, dict)
+                    else None
+                )
+                after_level = (
+                    int(after_status.get("levels_completed", 0))
+                    if isinstance(after_status, dict)
+                    else None
+                )
+                if (
+                    before_status_rc == 0
+                    and after_status_rc == 0
+                    and before_level is not None
+                    and after_level is not None
+                    and after_level > before_level
+                ):
+                    no_effect.append(f"{label} (diff suppressed: level transition)")
                 else:
-                    no_effect.append(label)
+                    changes = diff_change_records(before_pixels, after_pixels)
+                    changed_pixels = len(changes)
+                    if changed_pixels > 0:
+                        motion_palette.update(collect_palette_from_change_records(changes))
+                        diff_text = format_change_records(changes)
+                        diff_sections.append(f"### {label}\n```\n{diff_text}\n```")
+                    else:
+                        no_effect.append(label)
             else:
-                error_text = stdout.strip() if stdout.strip() else "exec failed"
+                status_detail = (
+                    after_stdout.strip()
+                    if after_status_rc != 0 and after_stdout.strip()
+                    else ""
+                )
+                detail = status_detail or stdout.strip() or "exec failed"
+                error_text = detail
                 no_effect.append(f"{label} (error: {error_text})")
             run_arc_repl({"action": "reset_level", "game_id": args.game_id})
 
@@ -1435,6 +1038,7 @@ def main() -> None:
         return "\n".join(parts)
 
     prompt_file_counter = 0
+    enable_level_start_images = False
     last_prompted_image_level: int | None = None
     level_start_images_dir = supervisor_dir / "arc" / "level-start-images"
     level_start_images_dir.mkdir(parents=True, exist_ok=True)
@@ -1456,6 +1060,8 @@ def main() -> None:
 
     def _level_start_prompt_images(state: dict | None, *, initial: bool = False) -> list[Path]:
         nonlocal last_prompted_image_level
+        if not enable_level_start_images:
+            return []
         if not state:
             raise RuntimeError(
                 "Cannot determine level-start prompt image: state is unavailable."
@@ -1534,6 +1140,95 @@ def main() -> None:
         shutil.move(str(tmp_session), str(session_file))
         return stdout
 
+    def _session_pid_file(conversation_id: str) -> Path:
+        return arc_state_dir / "repl-sessions" / conversation_id / "daemon.pid"
+
+    def _shutdown_repl_session(conversation_id: str) -> None:
+        nonlocal active_conversation_id
+        cid = str(conversation_id or "").strip()
+        if not cid:
+            return
+        pid_file = _session_pid_file(cid)
+        if not pid_file.exists():
+            return
+        prev_conversation_id = active_conversation_id
+        try:
+            active_conversation_id = cid
+            result, stdout, rc = run_arc_repl({"action": "shutdown", "game_id": args.game_id})
+            if rc == 0:
+                log(f"[harness] arc_repl shutdown sent for conversation={cid}")
+            else:
+                detail = stdout.strip() if stdout.strip() else "no stdout"
+                log(
+                    "[harness] arc_repl shutdown failed for "
+                    f"conversation={cid}: rc={rc} detail={detail}"
+                )
+            if result and isinstance(result, dict) and not bool(result.get("ok", False)):
+                err = result.get("error")
+                log(f"[harness] arc_repl shutdown response error conversation={cid}: {err}")
+        except Exception as exc:
+            log(f"[harness] arc_repl shutdown exception conversation={cid}: {exc}")
+        finally:
+            active_conversation_id = prev_conversation_id
+
+    def _terminate_pid(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return True
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            return True
+        deadline = time.time() + 1.5
+        while time.time() < deadline:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                return True
+            time.sleep(0.05)
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            return True
+        time.sleep(0.05)
+        try:
+            os.kill(pid, 0)
+            return False
+        except OSError:
+            return True
+
+    def cleanup_repl_daemons() -> None:
+        # Best-effort graceful shutdown for known conversation ids.
+        cids: set[str] = set()
+        cids.update(k for k in conversation_aliases.keys() if k)
+        cids.update(v for v in conversation_aliases.values() if v)
+        if active_actual_conversation_id:
+            cids.add(active_actual_conversation_id)
+        if active_conversation_id:
+            cids.add(active_conversation_id)
+        sessions_root = arc_state_dir / "repl-sessions"
+        if sessions_root.exists():
+            for p in sessions_root.iterdir():
+                if p.is_dir():
+                    cids.add(p.name)
+        for cid in sorted(cids):
+            _shutdown_repl_session(cid)
+
+        # Hard cleanup for any local session pid that survived shutdown.
+        if not sessions_root.exists():
+            return
+        for pid_file in sessions_root.glob("*/daemon.pid"):
+            try:
+                raw = pid_file.read_text().strip()
+                pid = int(raw)
+            except Exception:
+                continue
+            if _terminate_pid(pid):
+                log(f"[harness] cleaned repl daemon pid={pid} ({pid_file.parent.name})")
+            else:
+                log(f"[harness] WARNING: failed to terminate repl daemon pid={pid}")
+
     log(f"[harness] session: {session_dir}")
     log(f"[harness] run dir: {run_dir}")
     log(f"[harness] agent dir: {agent_dir}")
@@ -1546,189 +1241,192 @@ def main() -> None:
         log("[harness] auto input exploration is disabled (--no-explore).")
     else:
         log("[harness] auto input exploration is enabled.")
+    log("[harness] level-start prompt image attachments are disabled.")
+    try:
+        # Initialize state artifacts before first agent turn.
+        init_result, _, init_rc = run_arc_repl({"action": "status", "game_id": args.game_id})
+        if init_rc != 0:
+            log("[harness] failed to initialize state with arc_repl status")
+            sys.exit(1)
+        log(f"[harness] active game id: {active_game_id}")
+        log(f"[harness] initialized: {format_state_summary(load_state())}")
 
-    # Initialize state artifacts before first agent turn.
-    init_result, _, init_rc = run_arc_repl({"action": "status", "game_id": args.game_id})
-    if init_rc != 0:
-        log("[harness] failed to initialize state with arc_repl status")
-        sys.exit(1)
-    log(f"[harness] active game id: {active_game_id}")
-    log(f"[harness] initialized: {format_state_summary(load_state())}")
+        initial_prompt = (
+            "Game state initialized. Use shell exactly once this turn to execute arc_repl "
+            "(status, exec, or reset_level). "
+            "For exec, pass Python via stdin heredoc, e.g. "
+            "`cat <<'PY' | arc_repl exec` ... `PY`. "
+            "Inside exec scripts, use `get_state()` and `env` for state inspection and actions. "
+            "Use agent_lib.py for persistent reusable helper functions."
+        )
+        if init_result and isinstance(init_result.get("state"), str):
+            initial_prompt += f"\nCurrent state: {init_result.get('state')}"
+        init_state = load_state() or {}
+        at_fresh_game_start = (
+            int(init_state.get("current_level", 0) or 0) == 1
+            and int(init_state.get("levels_completed", 0) or 0) == 0
+        )
+        should_auto_explore_once = (
+            (not args.no_explore)
+            and at_fresh_game_start
+            and (not auto_explore_once_marker.exists())
+        )
+        if should_auto_explore_once:
+            auto_explore_summary = run_input_exploration_from_reset()
+            if auto_explore_summary.strip():
+                initial_prompt += "\n\n" + auto_explore_summary
+            auto_explore_once_marker.parent.mkdir(parents=True, exist_ok=True)
+            auto_explore_once_marker.write_text(datetime.now(timezone.utc).isoformat() + "\n")
+            log("[harness] auto input exploration completed (one-time at game start).")
+        elif not args.no_explore:
+            if not at_fresh_game_start:
+                log("[harness] skipping auto input exploration (not fresh game start).")
+            else:
+                log("[harness] skipping auto input exploration (already ran once).")
 
-    initial_prompt = (
-        "Game state initialized. Use shell exactly once this turn to execute arc_repl "
-        "(status, exec, or reset_level). "
-        "For exec, pass Python via stdin heredoc, e.g. "
-        "`cat <<'PY' | arc_repl exec` ... `PY`. "
-        "Inside exec scripts, use `get_state()` and `env` for state inspection and actions. "
-        "Use agent_lib.py for persistent reusable helper functions."
-    )
-    if init_result and isinstance(init_result.get("state"), str):
-        initial_prompt += f"\nCurrent state: {init_result.get('state')}"
-    init_state = load_state() or {}
-    at_fresh_game_start = (
-        int(init_state.get("current_level", 0) or 0) == 1
-        and int(init_state.get("levels_completed", 0) or 0) == 0
-    )
-    should_auto_explore_once = (
-        (not args.no_explore)
-        and at_fresh_game_start
-        and (not auto_explore_once_marker.exists())
-    )
-    if should_auto_explore_once:
-        auto_explore_summary = run_input_exploration_from_reset()
-        if auto_explore_summary.strip():
-            initial_prompt += "\n\n" + auto_explore_summary
-        auto_explore_once_marker.parent.mkdir(parents=True, exist_ok=True)
-        auto_explore_once_marker.write_text(datetime.now(timezone.utc).isoformat() + "\n")
-        log("[harness] auto input exploration completed (one-time at game start).")
-    elif not args.no_explore:
-        if not at_fresh_game_start:
-            log("[harness] skipping auto input exploration (not fresh game start).")
-        else:
-            log("[harness] skipping auto input exploration (already ran once).")
-
-    log("[harness] starting super new...")
-    init_images = _level_start_prompt_images(init_state, initial=True)
-    super_env["ARC_CONVERSATION_ID"] = active_conversation_id
-    run_super([
-        "new",
-        "--config", str(super_config),
-        "--workspace", str(run_dir),
-        "--config-dir", str(run_config_dir),
-        "--agent-dir", str(agent_dir),
-        "--supervisor-dir", str(supervisor_dir),
-        *_provider_args(),
-        *_supervisor_args(),
-        "--cycle-limit", str(cycle_limit),
-        *_prompt_args(initial_prompt, prompt_kind="new", image_paths=init_images),
-        "--output", str(session_file),
-    ], stream=args.verbose, cwd=run_dir, env=super_env)
-    sync_active_conversation_id_from_session()
-
-    super_turn = 1
-    stale_turns = 0
-    game_over_resets = 0
-    last_engine_turn = load_engine_turn()
-    last_recorded_completed_level = read_max_recorded_completion_level(completions_md)
-    pending_auto_explore_summary = ""
-
-    while super_turn <= args.max_turns:
-        state = load_state()
-        prev_completed = int(state.get("levels_completed", 0)) if state else 0
-        log(f"[harness] turn {super_turn}: {format_state_summary(state)}")
-
-        if state and state.get("state") == "WIN":
-            log(f"[harness] GAME WON after {super_turn} turns")
-            break
-
-        if super_turn >= args.max_turns:
-            log(f"[harness] max turns ({args.max_turns}) reached")
-            break
-
-        prompt_lines: list[str] = []
-        current_engine_turn = load_engine_turn()
-        if current_engine_turn <= last_engine_turn:
-            stale_turns += 1
-        else:
-            stale_turns = 0
-            last_engine_turn = current_engine_turn
-
-        if state and state.get("state") == "GAME_OVER":
-            game_over_resets += 1
-            log(
-                f"[harness] GAME_OVER detected "
-                f"(auto-reset {game_over_resets}/{args.max_game_over_resets})"
-            )
-            if game_over_resets > args.max_game_over_resets:
-                log("[harness] max GAME_OVER auto-resets reached, stopping")
-                break
-            reset_result, reset_stdout, reset_rc = run_arc_repl(
-                {"action": "reset_level", "game_id": args.game_id}
-            )
-            if reset_rc != 0:
-                log("[harness] auto-reset failed")
-                if reset_stdout:
-                    log(f"[harness] reset output: {reset_stdout}")
-                break
-            state = load_state()
-            prompt_lines.append(
-                "Previous script ended in GAME_OVER. Harness auto-reset the level. "
-                "Continue from the new post-reset state."
-            )
-            if reset_result:
-                prompt_lines.append(f"Reset result: {json.dumps(reset_result)}")
-
-        if stale_turns >= 2:
-            prompt_lines.append(
-                "No arc_repl execution was detected in recent turns. "
-                "Execute exactly one shell command invoking arc_repl this turn."
-            )
-        if pending_auto_explore_summary.strip():
-            prompt_lines.append(pending_auto_explore_summary.strip())
-            pending_auto_explore_summary = ""
-
-        prompt_lines.append(f"Current summary: {format_state_summary(state)}")
-        prompt_lines.append("Continue solving the current level.")
-        prompt = "\n".join(prompt_lines)
-
-        prompt_images = _level_start_prompt_images(state)
-        stdout = resume_super(prompt, image_paths=prompt_images)
-        if not stdout.strip():
-            raise RuntimeError("super returned empty assistant response")
+        log("[harness] starting super new...")
+        init_images = _level_start_prompt_images(init_state, initial=True)
+        super_env["ARC_CONVERSATION_ID"] = active_conversation_id
+        run_super([
+            "new",
+            "--config", str(super_config),
+            "--workspace", str(run_dir),
+            "--config-dir", str(run_config_dir),
+            "--agent-dir", str(agent_dir),
+            "--supervisor-dir", str(supervisor_dir),
+            *_provider_args(),
+            *_supervisor_args(),
+            "--cycle-limit", str(cycle_limit),
+            *_prompt_args(initial_prompt, prompt_kind="new", image_paths=init_images),
+            "--output", str(session_file),
+        ], stream=args.verbose, cwd=run_dir, env=super_env)
         sync_active_conversation_id_from_session()
 
-        # Record level completions based on authoritative post-turn state.
-        post_state = load_state()
-        post_completed = int(post_state.get("levels_completed", 0)) if post_state else 0
-        if post_completed > prev_completed:
-            # If arc_repl already recorded completions directly, refresh and
-            # avoid duplicate append blocks in harness.
-            last_recorded_completed_level = max(
-                last_recorded_completed_level,
-                read_max_recorded_completion_level(completions_md),
-            )
-            events = load_history_events(history_json)
-            completion_windows = completion_action_windows_by_level(events)
-            tool_turn = load_engine_turn()
-            win_script = (
-                arc_state_dir / "script-history" / f"turn_{tool_turn:03d}_script.py"
-            )
-            win_script_rel = None
-            if win_script.exists():
-                try:
-                    win_script_rel = str(win_script.relative_to(run_dir))
-                except Exception:
-                    win_script_rel = str(win_script)
-            for completed_level in range(prev_completed + 1, post_completed + 1):
-                # Avoid duplicate writes if loop restarts or state is re-read.
-                if completed_level <= last_recorded_completed_level:
-                    continue
-                level_actions = completion_windows.get(completed_level, [])
-                append_level_completion_record(
-                    completions_file=completions_md,
-                    completed_level=completed_level,
-                    actions=level_actions,
-                    harness_turn=super_turn,
-                    tool_turn=tool_turn,
-                    winning_script_relpath=win_script_rel,
-                )
-                last_recorded_completed_level = completed_level
-                log(
-                    "[harness] level completion recorded: "
-                    f"level={completed_level} actions_in_level_window={len(level_actions)}"
-                )
-            if not args.no_explore and (post_state and post_state.get("state") != "WIN"):
-                # Do not auto-explore here: arc_repl reset_level resets campaign
-                # progress (levels_completed), so probing after a level completion
-                # would destroy run progress.
-                log(
-                    "[harness] skipping post-completion auto exploration "
-                    "(reset_level would reset campaign progress)"
-                )
-        super_turn += 1
+        super_turn = 1
+        stale_turns = 0
+        game_over_resets = 0
+        last_engine_turn = load_engine_turn()
+        last_recorded_completed_level = read_max_recorded_completion_level(completions_md)
+        pending_auto_explore_summary = ""
 
-    log(f"[harness] session files: {session_dir}")
+        while super_turn <= args.max_turns:
+            state = load_state()
+            prev_completed = int(state.get("levels_completed", 0)) if state else 0
+            log(f"[harness] turn {super_turn}: {format_state_summary(state)}")
+
+            if state and state.get("state") == "WIN":
+                log(f"[harness] GAME WON after {super_turn} turns")
+                break
+
+            if super_turn >= args.max_turns:
+                log(f"[harness] max turns ({args.max_turns}) reached")
+                break
+
+            prompt_lines: list[str] = []
+            current_engine_turn = load_engine_turn()
+            if current_engine_turn <= last_engine_turn:
+                stale_turns += 1
+            else:
+                stale_turns = 0
+                last_engine_turn = current_engine_turn
+
+            if state and state.get("state") == "GAME_OVER":
+                game_over_resets += 1
+                log(
+                    f"[harness] GAME_OVER detected "
+                    f"(auto-reset {game_over_resets}/{args.max_game_over_resets})"
+                )
+                if game_over_resets > args.max_game_over_resets:
+                    log("[harness] max GAME_OVER auto-resets reached, stopping")
+                    break
+                reset_result, reset_stdout, reset_rc = run_arc_repl(
+                    {"action": "reset_level", "game_id": args.game_id}
+                )
+                if reset_rc != 0:
+                    log("[harness] auto-reset failed")
+                    if reset_stdout:
+                        log(f"[harness] reset output: {reset_stdout}")
+                    break
+                state = load_state()
+                prompt_lines.append(
+                    "Previous script ended in GAME_OVER. Harness auto-reset the level. "
+                    "Continue from the new post-reset state."
+                )
+                if reset_result:
+                    prompt_lines.append(f"Reset result: {json.dumps(reset_result)}")
+
+            if stale_turns >= 2:
+                prompt_lines.append(
+                    "No arc_repl execution was detected in recent turns. "
+                    "Execute exactly one shell command invoking arc_repl this turn."
+                )
+            if pending_auto_explore_summary.strip():
+                prompt_lines.append(pending_auto_explore_summary.strip())
+                pending_auto_explore_summary = ""
+
+            prompt_lines.append(f"Current summary: {format_state_summary(state)}")
+            prompt_lines.append("Continue solving the current level.")
+            prompt = "\n".join(prompt_lines)
+
+            prompt_images = _level_start_prompt_images(state)
+            stdout = resume_super(prompt, image_paths=prompt_images)
+            if not stdout.strip():
+                raise RuntimeError("super returned empty assistant response")
+            sync_active_conversation_id_from_session()
+
+            # Record level completions based on authoritative post-turn state.
+            post_state = load_state()
+            post_completed = int(post_state.get("levels_completed", 0)) if post_state else 0
+            if post_completed > prev_completed:
+                # If arc_repl already recorded completions directly, refresh and
+                # avoid duplicate append blocks in harness.
+                last_recorded_completed_level = max(
+                    last_recorded_completed_level,
+                    read_max_recorded_completion_level(completions_md),
+                )
+                events = load_history_events(history_json)
+                completion_windows = completion_action_windows_by_level(events)
+                tool_turn = load_engine_turn()
+                win_script = (
+                    arc_state_dir / "script-history" / f"turn_{tool_turn:03d}_script.py"
+                )
+                win_script_rel = None
+                if win_script.exists():
+                    try:
+                        win_script_rel = str(win_script.relative_to(run_dir))
+                    except Exception:
+                        win_script_rel = str(win_script)
+                for completed_level in range(prev_completed + 1, post_completed + 1):
+                    # Avoid duplicate writes if loop restarts or state is re-read.
+                    if completed_level <= last_recorded_completed_level:
+                        continue
+                    level_actions = completion_windows.get(completed_level, [])
+                    append_level_completion_record(
+                        completions_file=completions_md,
+                        completed_level=completed_level,
+                        actions=level_actions,
+                        harness_turn=super_turn,
+                        tool_turn=tool_turn,
+                        winning_script_relpath=win_script_rel,
+                    )
+                    last_recorded_completed_level = completed_level
+                    log(
+                        "[harness] level completion recorded: "
+                        f"level={completed_level} actions_in_level_window={len(level_actions)}"
+                    )
+                if not args.no_explore and (post_state and post_state.get("state") != "WIN"):
+                    # Do not auto-explore here: arc_repl reset_level resets campaign
+                    # progress (levels_completed), so probing after a level completion
+                    # would destroy run progress.
+                    log(
+                        "[harness] skipping post-completion auto exploration "
+                        "(reset_level would reset campaign progress)"
+                    )
+            super_turn += 1
+
+        log(f"[harness] session files: {session_dir}")
+    finally:
+        cleanup_repl_daemons()
 
 
 if __name__ == "__main__":

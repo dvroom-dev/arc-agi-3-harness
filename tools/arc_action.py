@@ -102,10 +102,6 @@ def _call_quiet(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
 
-def diff_grids(before: np.ndarray, after: np.ndarray) -> np.ndarray:
-    return after.astype(np.int16) - before.astype(np.int16)
-
-
 def _iter_cell_changes(before: np.ndarray, after: np.ndarray) -> list[tuple[int, int, int, int]]:
     changed = np.argwhere(before != after)
     return [(int(r), int(c), int(before[r, c]), int(after[r, c])) for r, c in changed]
@@ -146,14 +142,61 @@ def format_diff_minimal(before: np.ndarray, after: np.ndarray) -> str:
     return "\n".join(lines)
 
 
+def format_change_records(changes: list[dict]) -> str:
+    if not changes:
+        return "(no changes)"
+    lines = [
+        f"changed_pixels={len(changes)}",
+        "format: (row,col): before->after",
+    ]
+    for change in changes:
+        try:
+            row = int(change.get("row"))
+            col = int(change.get("col"))
+            before = str(change.get("before", "?"))
+            after = str(change.get("after", "?"))
+        except Exception:
+            continue
+        lines.append(f"({row},{col}): {before}->{after}")
+    return "\n".join(lines) if len(lines) > 2 else "(no changes)"
+
+
+def _step_crosses_level(step_results: list[dict] | None, step_index: int) -> bool:
+    if not isinstance(step_results, list):
+        return False
+    if step_index < 0 or step_index >= len(step_results):
+        return False
+    meta = step_results[step_index]
+    if not isinstance(meta, dict):
+        return False
+    try:
+        return int(meta.get("levels_gained_in_step", 0) or 0) > 0
+    except Exception:
+        return False
+
+
 def build_step_diff_records(
     pre_turn_pixels: np.ndarray | None,
     step_snapshots: list[tuple[str, np.ndarray]],
+    *,
+    step_results: list[dict] | None = None,
 ) -> list[dict]:
     if pre_turn_pixels is None or not step_snapshots:
         return []
     records: list[dict] = []
     for idx, (desc, snap) in enumerate(step_snapshots):
+        if _step_crosses_level(step_results, idx):
+            records.append(
+                {
+                    "step": idx + 1,
+                    "description": desc,
+                    "changed_pixels": 0,
+                    "changes": [],
+                    "suppressed_cross_level_diff": True,
+                    "suppressed_reason": "level_transition",
+                }
+            )
+            continue
         prev = pre_turn_pixels if idx == 0 else step_snapshots[idx - 1][1]
         changes = _iter_cell_changes(prev, snap)
         records.append(
@@ -173,16 +216,36 @@ def build_step_diff_records(
 def build_aggregate_diff_record(
     pre_turn_pixels: np.ndarray | None,
     final_pixels: np.ndarray,
+    *,
+    step_snapshots: list[tuple[str, np.ndarray]] | None = None,
+    step_results: list[dict] | None = None,
 ) -> dict:
     if pre_turn_pixels is None:
         return {"changed_pixels": 0, "changes": []}
-    changes = _iter_cell_changes(pre_turn_pixels, final_pixels)
+    baseline = pre_turn_pixels
+    baseline_note: dict[str, object] = {}
+    if isinstance(step_snapshots, list) and isinstance(step_results, list):
+        transition_steps = [
+            idx
+            for idx in range(min(len(step_snapshots), len(step_results)))
+            if _step_crosses_level(step_results, idx)
+        ]
+        if transition_steps:
+            last_idx = transition_steps[-1]
+            baseline = step_snapshots[last_idx][1]
+            baseline_note = {
+                "suppressed_cross_level_diff": True,
+                "aggregate_baseline": "post_last_level_transition",
+                "aggregate_baseline_step": last_idx + 1,
+            }
+    changes = _iter_cell_changes(baseline, final_pixels)
     return {
         "changed_pixels": len(changes),
         "changes": [
             {"row": row, "col": col, "before": f"{before:X}", "after": f"{after:X}"}
             for row, col, before, after in changes
         ],
+        **baseline_note,
     }
 
 
@@ -204,18 +267,6 @@ def frame_action_metadata(frame: FrameDataRaw) -> dict:
         "action_input_data": data,
         "action_input_reasoning": reasoning,
     }
-
-
-def _hex_to_rgb(h: str) -> tuple[int, int, int]:
-    h = h.lstrip("#")
-    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16))
-
-
-def render_grid_to_image(pixels: np.ndarray, path: Path, scale: int = 8) -> None:
-    raise RuntimeError(
-        "render_grid_to_image() is not available in arc_action.py; "
-        "use game_state.render_grid_to_image from harness paths."
-    )
 
 
 def write_machine_state(
@@ -262,6 +313,7 @@ def write_game_state(
     error: str,
     step_snapshots: list[tuple[str, np.ndarray]],
     pre_turn_pixels: np.ndarray | None,
+    step_results: list[dict] | None = None,
 ) -> None:
     lines = [
         "# Game State",
@@ -293,11 +345,43 @@ def write_game_state(
             lines.append("".join(f"{int(v):X}" for v in row))
         lines.append("```")
     if pre_turn_pixels is not None and step_snapshots:
+        step_diff_records = build_step_diff_records(
+            pre_turn_pixels,
+            step_snapshots,
+            step_results=step_results,
+        )
+        aggregate_diff = build_aggregate_diff_record(
+            pre_turn_pixels,
+            pixels,
+            step_snapshots=step_snapshots,
+            step_results=step_results,
+        )
         lines.extend(["", "## Step Diffs"])
-        for idx, (desc, snap) in enumerate(step_snapshots):
-            prev = pre_turn_pixels if idx == 0 else step_snapshots[idx - 1][1]
-            lines.extend(["", f"### Step {idx + 1}: {desc}", "```", format_diff_minimal(prev, snap), "```"])
-        lines.extend(["", "## Aggregate Diff (Initial -> Final)", "```", format_diff_minimal(pre_turn_pixels, pixels), "```"])
+        for record in step_diff_records:
+            step_num = int(record.get("step", 0))
+            desc = str(record.get("description", ""))
+            lines.extend(["", f"### Step {step_num}: {desc}", "```"])
+            if bool(record.get("suppressed_cross_level_diff", False)):
+                lines.append("(suppressed: level transition occurred in this step)")
+            else:
+                changes = record.get("changes")
+                if isinstance(changes, list):
+                    lines.append(format_change_records(changes))
+                else:
+                    lines.append("(no changes)")
+            lines.append("```")
+        lines.extend(["", "## Aggregate Diff (Initial -> Final)", "```"])
+        agg_changes = aggregate_diff.get("changes")
+        if isinstance(agg_changes, list):
+            lines.append(format_change_records(agg_changes))
+        else:
+            lines.append("(no changes)")
+        if bool(aggregate_diff.get("suppressed_cross_level_diff", False)):
+            baseline_step = aggregate_diff.get("aggregate_baseline_step")
+            lines.append(
+                f"note: cross-level changes suppressed; baseline reset after step {baseline_step}"
+            )
+        lines.append("```")
     lines.extend(["", "## Grid", "```"])
     for row in pixels:
         lines.append("".join(f"{int(v):X}" for v in row))
@@ -534,16 +618,21 @@ def _get_pixels(env, frame: FrameDataRaw | None = None) -> np.ndarray:
     """Return the canonical 64x64 frame used by the API response.
 
     `game.get_pixels(...)` omits certain HUD updates (notably move-budget bar
-    depletion/refill), so diffs should prefer `FrameDataRaw.frame[0]`.
+    depletion/refill), so diffs should prefer the final rendered subframe from
+    `FrameDataRaw.frame`.
     """
     if frame is not None:
         data = getattr(frame, "frame", None)
         if isinstance(data, (list, tuple)) and data:
-            pixels = data[0]
+            # Actions can emit multiple frames; level transitions commonly put
+            # the new level on the final frame. Use the final subframe as the
+            # post-action state.
+            pixels = data[-1]
             if isinstance(pixels, np.ndarray):
                 return pixels
+            return np.array(pixels)
         raise RuntimeError(
-            "FrameDataRaw.frame[0] is unavailable; cannot compute authoritative diff/state grid."
+            "FrameDataRaw.frame is unavailable; cannot compute authoritative diff/state grid."
         )
 
     game = env._game
@@ -805,21 +894,30 @@ def _execute_script(
             last_frame = frame
             current_pixels = _get_pixels(env, frame)
             changes = _iter_cell_changes(last_pixels, current_pixels)
+            levels_gained = int(frame.levels_completed) - prev_levels
             step_index = len(step_results) + 1
+            if levels_gained > 0:
+                step_changed_pixels = 0
+                step_changes_sample: list[dict] = []
+            else:
+                step_changed_pixels = len(changes)
+                step_changes_sample = _changes_sample(changes)
             step_record = {
                 "step": step_index,
                 "action": action_name,
-                "changed_pixels": len(changes),
-                "change_bbox": _change_bbox(changes),
-                "changes_sample": _changes_sample(changes),
+                "changed_pixels": step_changed_pixels,
+                "change_bbox": _change_bbox(changes) if levels_gained <= 0 else None,
+                "changes_sample": step_changes_sample,
                 "state": str(frame.state.value),
                 "state_before_step": prev_state,
                 "state_changed_in_step": prev_state != str(frame.state.value),
                 "levels_completed": int(frame.levels_completed),
                 "levels_before_step": prev_levels,
-                "levels_gained_in_step": int(frame.levels_completed) - prev_levels,
+                "levels_gained_in_step": levels_gained,
                 "is_terminal": str(frame.state.value) in {"WIN", "GAME_OVER"},
             }
+            if levels_gained > 0:
+                step_record["suppressed_cross_level_diff"] = True
             step_results.append(step_record)
             last_pixels = current_pixels
             executed_events.append(
@@ -947,6 +1045,7 @@ def _write_turn_trace(
     action_name: str,
     pre_pixels: np.ndarray | None,
     step_snapshots: list[tuple[str, np.ndarray]],
+    step_results: list[dict] | None,
     final_pixels: np.ndarray,
     script_output: str = "",
     error: str = "",
@@ -971,12 +1070,44 @@ def _write_turn_trace(
             parts.append("".join(f"{int(v):X}" for v in row))
         parts.append("```")
     if pre_pixels is not None and step_snapshots:
+        step_diff_records = build_step_diff_records(
+            pre_pixels,
+            step_snapshots,
+            step_results=step_results,
+        )
+        aggregate_diff = build_aggregate_diff_record(
+            pre_pixels,
+            final_pixels,
+            step_snapshots=step_snapshots,
+            step_results=step_results,
+        )
         parts.append("")
         parts.append("## Per-Step Diffs")
-        for index, (desc, snap) in enumerate(step_snapshots):
-            prev = pre_pixels if index == 0 else step_snapshots[index - 1][1]
-            parts.extend(["", f"### Step {index + 1}: {desc}", "```", format_diff_minimal(prev, snap), "```"])
-        parts.extend(["", "## Aggregate Diff (Initial -> Final)", "```", format_diff_minimal(pre_pixels, final_pixels), "```"])
+        for record in step_diff_records:
+            step_num = int(record.get("step", 0))
+            desc = str(record.get("description", ""))
+            parts.extend(["", f"### Step {step_num}: {desc}", "```"])
+            if bool(record.get("suppressed_cross_level_diff", False)):
+                parts.append("(suppressed: level transition occurred in this step)")
+            else:
+                changes = record.get("changes")
+                if isinstance(changes, list):
+                    parts.append(format_change_records(changes))
+                else:
+                    parts.append("(no changes)")
+            parts.append("```")
+        parts.extend(["", "## Aggregate Diff (Initial -> Final)", "```"])
+        agg_changes = aggregate_diff.get("changes")
+        if isinstance(agg_changes, list):
+            parts.append(format_change_records(agg_changes))
+        else:
+            parts.append("(no changes)")
+        if bool(aggregate_diff.get("suppressed_cross_level_diff", False)):
+            baseline_step = aggregate_diff.get("aggregate_baseline_step")
+            parts.append(
+                f"note: cross-level changes suppressed; baseline reset after step {baseline_step}"
+            )
+        parts.append("```")
     parts.extend(["", "## Final Grid", "```"])
     for row in final_pixels:
         parts.append("".join(f"{int(v):X}" for v in row))
@@ -1158,6 +1289,7 @@ def main() -> int:
             error=error,
             step_snapshots=step_snapshots,
             pre_turn_pixels=pre_pixels if action == "run_script" else None,
+            step_results=step_results if action == "run_script" else [],
         )
         write_machine_state(
             arc_dir,
@@ -1173,13 +1305,23 @@ def main() -> int:
             action_name=action_label,
             pre_pixels=pre_pixels if action == "run_script" else None,
             step_snapshots=step_snapshots,
+            step_results=step_results if action == "run_script" else [],
             final_pixels=final_pixels,
             script_output=script_output,
             error=error,
         )
 
-        step_diff_records = build_step_diff_records(pre_pixels if action == "run_script" else None, step_snapshots)
-        aggregate_diff = build_aggregate_diff_record(pre_pixels if action == "run_script" else None, final_pixels)
+        step_diff_records = build_step_diff_records(
+            pre_pixels if action == "run_script" else None,
+            step_snapshots,
+            step_results=step_results if action == "run_script" else [],
+        )
+        aggregate_diff = build_aggregate_diff_record(
+            pre_pixels if action == "run_script" else None,
+            final_pixels,
+            step_snapshots=step_snapshots if action == "run_script" else [],
+            step_results=step_results if action == "run_script" else [],
+        )
         action_meta = frame_action_metadata(frame)
         try:
             trace_file_rel = str(trace_path.relative_to(cwd))
