@@ -49,3 +49,39 @@ Hard rules:
 - Never require post-hoc "fixes" that depend on undoing prior tool calls/messages in the same conversation.
 - Supervisor enforcement must only target next-turn-correctable behavior.
 - If a violation is already in history and cannot be changed, treat it as non-rewritable context; provide forward guidance instead of repeated rewrite loops.
+
+## Game Rules Explained
+
+Use this section to calibrate run analysis quality. It is for evaluator understanding only, not for injecting game-specific solving logic into prompts/harness behavior.
+
+### LS20 (public practice game) - mechanic summary
+
+- Core objective: transform the lower-left HUD symbol so it matches the symbol shown on the exit square (same symbol at smaller scale on exit tile).
+- Player movement: directional actions move the player block.
+- Turn/life system:
+  - A yellow turn counter decreases with movement.
+  - When it reaches zero, one red life dot is lost.
+  - Losing all red life dots causes `GAME_OVER`.
+- Level 1:
+  - Landing on the cross rotates the HUD symbol by 90 degrees.
+  - Do this once, then move to exit.
+- Level 2:
+  - Same rotation mechanic as level 1.
+  - Requires 270 degrees total rotation, so trigger cross three times (move off/on between triggers), then exit.
+  - Adds yellow refill boxes that replenish turn counter.
+- Level 3:
+  - Adds rainbow box mechanic that cycles HUD symbol color.
+  - Must satisfy both rotation requirement and color match before exiting.
+- Level 4:
+  - Adds shape-change trigger for HUD symbol shape.
+- Level 5:
+  - Combines prior mechanics (rotation, color, shape) together.
+- Level 6:
+  - Adds a second gate before the final exit that must be cleared first.
+- Level 7:
+  - Adds a visibility mask limiting view to nearby area around player.
+
+## Post-Run Prompt TODOs
+
+- Instruct agent to build reusable code abstractions first (helpers in `agent_lib.py`), then keep per-level `solve_*.py` scripts thin and compositional.
+- On any `GAME_OVER`, require a written causal theory of why it happened (resource exhaustion/pathing/mechanic mismatch), with concrete evidence and the minimal fix plan before retry.

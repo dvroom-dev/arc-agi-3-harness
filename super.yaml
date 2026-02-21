@@ -99,11 +99,20 @@ base_user_message:
 
         This turn:
         - Follow the active mode goal.
+        - At conversation start, first check your cwd for `solve_<game id>_<level>.py` for the current level; if it exists, run it immediately to replay/solve this level before doing new exploration.
         - Keep reasoning grounded in step-level evidence.
         - Update `Level Completion Theory` and `Backward Causal Steps` before choosing next actions.
         - Summarize the strongest 2-5 action-linked facts before theory updates.
         - Stop at mode-goal completion or at 5 minutes elapsed, whichever comes first.
         - If LEVEL COMPLETE or GAME OVER/full reset occurs, stop and emit the required handoff format immediately.
+    - template: |
+        Persistent supervisor memory (carry this into all reasoning; if evidence conflicts, update beliefs rather than ignore evidence):
+
+        ## Persistent Level Knowledge (all levels in this game)
+        {{supervisor_file:arc/level-knowledge.md}}
+
+        ## Persistent Game Knowledge (cross-level)
+        {{supervisor_file:arc/game-knowledge.md}}
 
 base_agent_rules:
   operation: append
@@ -115,6 +124,7 @@ base_agent_rules:
     - "After level completion, return `LEVEL_COMPLETE_HANDOFF` (worked-only details)."
     - "After game over/full reset, return `GAME_OVER_HANDOFF` (worked + failed details)."
     - "On level completion, write/update `solve_<game id>_<level>.py` from what worked. The solver must infer features from current state and adapt to changed positions."
+    - "At conversation start, check for `solve_<game id>_<level>.py` in cwd for the current level; if present, run it first and report outcome before proposing new exploration."
     - "When entering a new level, run previous level solver(s) to observe carryover mechanics, then begin `solve_<game id>_<new level>.py` with generalized feature-detection helpers."
 
 base_supervisor_instructions:
@@ -134,10 +144,15 @@ base_supervisor_instructions:
     - "On GAME_OVER/full reset, do not fork to `new_game`; fork to `explore_exploit` with high-confidence beliefs and concrete guidance to recover efficiently."
     - "When the agent goes off-rails, recover by forking a fresh conversation in the appropriate mode with: last high-confidence beliefs, what failed, and improved exploration/exploitation guidance."
     - "In `new_level`, require the agent to run previous-level solver(s), report observed carryover, identify new features/mechanics, and then exit to `explore_exploit`."
+    - "Enforce solver completeness before accepting solver-related progress or mode transitions: solver file exists in cwd, contains runnable action code (not placeholder analysis-only code), and has validation evidence from execution."
+    - "If solver is missing/incomplete (e.g., no actionable env.step sequence, placeholder `pass`, diagnostics-only prints), rewrite with a concrete request to complete and validate the solver before continuing."
     - "Maintain a canonical `Level Completion Theory` and `Backward Causal Steps` in supervisor memory; treat it as first-class state."
     - "On every fork or mode switch, carry forward the latest causal theory in `mode_payload.user_message` and explicitly edit uncertain steps."
     - "If the agent drifts into feature cataloging without causal progress, steer back to backward causal chain updates and one decisive next-step test."
     - "Maintain concise supervisor-side memory in `arc/game-knowledge.md` and `arc/level-knowledge.md`; remove stale claims."
+    - "Maintain `arc/level-knowledge.md` as cumulative, game-scoped memory across all levels (never current-level-only)."
+    - "Store `arc/level-knowledge.md` in per-level sections (`## Level N`) including carryover mechanics, new/changed mechanics, canonical completion theory, backward causal steps, and key evidence."
+    - "When level advances, append/update the new level section and keep prior level sections intact for future replay/recovery."
 
 modes:
   new_game:
@@ -219,6 +234,7 @@ modes:
       parts:
         - literal: |
             Explore-exploit mode guidance:
+            - At mode entry, check for `solve_<game id>_<current level>.py`; if present, run it first and use the result as your starting point.
             - Use short probes to resolve uncertainties; use short solve attempts to exploit validated mechanics.
             - Drive work from `Backward Causal Steps`: satisfy next unmet step, then re-evaluate chain.
             - Keep solving scripts robust to position changes by detecting features from current state.

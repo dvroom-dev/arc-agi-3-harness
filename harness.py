@@ -39,21 +39,32 @@ CTXS = PROJECT_ROOT / ".ctxs"
 PROJECT_VENV_PYTHON = PROJECT_ROOT / ".venv" / "bin" / "python"
 
 LEVEL_KNOWLEDGE_TEMPLATE = textwrap.dedent("""\
-    # Level Knowledge (Current Level Only)
+    # Level Knowledge (Persistent Across Levels)
 
-    Reset this file when advancing to the next level.
+    Keep this file cumulative for the whole game. Do not delete prior levels.
+    Add/update one section per level as understanding improves.
 
-    ## Goal
-    - [LOW] (unknown — determine win condition)
+    ## Level N Template
+    ### Goal
+    - [LOW/MED/HIGH] concise win condition
 
-    ## Level Features
+    ### Carryover Mechanics
+    - [LOW/MED/HIGH] mechanic reused from previous levels
 
-    List every visual element specific to this level with confidence-rated mechanics:
-    - [HIGH/MED/LOW] feature_name @ (row,col): mechanic explanation
-    (none identified yet)
+    ### New/Changed Mechanics
+    - [LOW/MED/HIGH] mechanic introduced or modified in this level
 
-    ## Experiments
-    - (none)
+    ### Canonical Level Completion Theory
+    - [LOW/MED/HIGH][sat/unsat] backward completion statement
+
+    ### Backward Causal Steps
+    - [LOW/MED/HIGH][sat/unsat] 3) ...
+    - [LOW/MED/HIGH][sat/unsat] 2) ...
+    - [LOW/MED/HIGH][sat/unsat] 1) ...
+    - [LOW/MED/HIGH][sat/unsat] 0) ...
+
+    ### Evidence / Experiments
+    - action-linked evidence only (probe, result, conclusion)
 """)
 
 GAME_KNOWLEDGE_TEMPLATE = textwrap.dedent("""\
@@ -512,8 +523,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="ARC-AGI-3 supervisor harness")
     parser.add_argument("--game-id", default="ls20", help="Game ID to load")
     parser.add_argument(
-        "--max-turns", type=int, default=50,
-        help="Maximum harness turns before stopping",
+        "--max-turns", type=int, default=None,
+        help="Maximum harness turns before stopping (default: unlimited)",
     )
     parser.add_argument(
         "--operation-mode", default="NORMAL",
@@ -1326,17 +1337,17 @@ def main() -> None:
         last_recorded_completed_level = read_max_recorded_completion_level(completions_md)
         pending_auto_explore_summary = ""
 
-        while super_turn <= args.max_turns:
+        while True:
+            if args.max_turns is not None and super_turn > args.max_turns:
+                log(f"[harness] max turns ({args.max_turns}) reached")
+                break
+
             state = load_state()
             prev_completed = int(state.get("levels_completed", 0)) if state else 0
             log(f"[harness] turn {super_turn}: {format_state_summary(state)}")
 
             if state and state.get("state") == "WIN":
                 log(f"[harness] GAME WON after {super_turn} turns")
-                break
-
-            if super_turn >= args.max_turns:
-                log(f"[harness] max turns ({args.max_turns}) reached")
                 break
 
             prompt_lines: list[str] = []
