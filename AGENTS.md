@@ -23,6 +23,12 @@ If leakage is found, fix the setup/root cause (what gets mounted/copied into run
 
 When diagnosing solver failures, find the first turn where a wrong belief appears and trace it to the exact evidence/tool output that triggered it. Prefer action-linked movement evidence over visual salience when identifying controllable actors.
 
+## Run logging discipline
+
+- Always capture both `stdout` and `stderr` for harness runs and monitoring commands.
+- For background runs, use shell redirection that preserves both streams in one log file (for example: `> <logfile> 2>&1`).
+- Do not declare a run diagnosis complete unless both streams were checked for failures.
+
 ## Legacy code policy
 
 - Delete unused legacy code aggressively when touched; do not keep dead compatibility paths around.

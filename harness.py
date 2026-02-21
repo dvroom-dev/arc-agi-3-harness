@@ -305,7 +305,11 @@ def run_super(args: list[str], *, stream: bool = False,
 
 
 def _run_super_batch(cmd: list[str], *, cwd: str = "", env: dict[str, str] | None = None) -> str:
-    """Batch mode: capture stdout+stderr, print stderr after completion."""
+    """Batch mode: capture stdout+stderr and print both to harness stderr.
+
+    This keeps run logs self-contained for debugging even when `super` is not
+    in streaming mode.
+    """
     result = subprocess.run(
         cmd,
         capture_output=True,
@@ -313,11 +317,17 @@ def _run_super_batch(cmd: list[str], *, cwd: str = "", env: dict[str, str] | Non
         cwd=cwd or str(PROJECT_ROOT),
         env=env,
     )
+    if result.stdout.strip():
+        for line in result.stdout.strip().splitlines():
+            print(f"[super][stdout] {line}", file=sys.stderr, flush=True)
     if result.stderr.strip():
         for line in result.stderr.strip().splitlines():
-            print(f"[super] {line}", file=sys.stderr, flush=True)
+            print(f"[super][stderr] {line}", file=sys.stderr, flush=True)
     if result.returncode != 0:
-        raise RuntimeError(f"super exited with code {result.returncode}")
+        raise RuntimeError(
+            "super exited with code "
+            f"{result.returncode} (stdout/stderr captured in harness log)"
+        )
     return result.stdout.strip()
 
 
