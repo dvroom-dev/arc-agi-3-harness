@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+import time
 from argparse import Namespace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,10 @@ from typing import Any
 
 from harness_explore import run_input_exploration_from_reset
 from harness_runtime import HarnessRuntime
+from harness_scorecard_timeout_hack import (
+    has_new_agent_steps,
+    maybe_inject_scorecard_keepalive_hack,
+)
 
 
 def _resolve_arc_base_url(args) -> str:
@@ -222,6 +227,10 @@ def _run_single_game(
             env=runtime.super_env,
         )
         runtime.sync_active_conversation_id_from_session()
+        history_events_after_new = deps.load_history_events(runtime.history_json)
+        agent_history_floor = len(history_events_after_new)
+        processed_history_len = len(history_events_after_new)
+        last_scorecard_action_at = time.monotonic()
 
         super_turn = 1
         stale_turns = 0
@@ -234,6 +243,16 @@ def _run_single_game(
             if args.max_turns is not None and super_turn > args.max_turns:
                 runtime.log(f"[harness] max turns ({args.max_turns}) reached")
                 break
+
+            last_scorecard_action_at, injected_keepalive = maybe_inject_scorecard_keepalive_hack(
+                runtime,
+                last_action_at_monotonic=last_scorecard_action_at,
+                agent_history_floor=agent_history_floor,
+            )
+            if injected_keepalive:
+                history_after_keepalive = deps.load_history_events(runtime.history_json)
+                processed_history_len = len(history_after_keepalive)
+                last_engine_turn = runtime.load_engine_turn()
 
             state = runtime.load_state()
             prev_completed = int(state.get("levels_completed", 0)) if state else 0
@@ -297,6 +316,14 @@ def _run_single_game(
                     "[harness] super returned empty assistant response; "
                     "continuing (likely supervisor fork/transition without assistant text)."
                 )
+            history_after_resume = deps.load_history_events(runtime.history_json)
+            if has_new_agent_steps(
+                events=history_after_resume,
+                since_event_index=processed_history_len,
+                agent_history_floor=agent_history_floor,
+            ):
+                last_scorecard_action_at = time.monotonic()
+            processed_history_len = len(history_after_resume)
 
             post_state = runtime.load_state()
             post_completed = int(post_state.get("levels_completed", 0)) if post_state else 0
