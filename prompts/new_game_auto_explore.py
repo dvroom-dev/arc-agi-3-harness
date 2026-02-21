@@ -1,3 +1,5 @@
+# ruff: noqa: F821
+
 # new_game auto-explore bootstrap (game-agnostic)
 #
 # Purpose:

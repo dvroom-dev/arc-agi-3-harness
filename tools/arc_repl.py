@@ -27,7 +27,6 @@ import traceback
 from contextlib import redirect_stderr, redirect_stdout
 from hashlib import sha1
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import numpy as np

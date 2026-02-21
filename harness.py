@@ -829,7 +829,8 @@ def main() -> None:
 
     # Per-run isolation: each run gets its own working directory
     run_dir = PROJECT_ROOT / "runs" / session_name
-    log = lambda msg: print(msg, file=sys.stderr, flush=True)
+    def log(msg: str) -> None:
+        print(msg, file=sys.stderr, flush=True)
     cleanup_stats = cleanup_orphan_repl_daemons(
         PROJECT_ROOT,
         preserve_run_ids={session_name},
