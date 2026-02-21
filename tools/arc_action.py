@@ -279,6 +279,7 @@ def write_machine_state(
     step_snapshots: list[tuple[str, np.ndarray]],
 ) -> None:
     directory.mkdir(parents=True, exist_ok=True)
+    scorecard_id = str(os.getenv("ARC_SCORECARD_ID", "") or "").strip() or None
     np.save(directory / "current_grid.npy", pixels.astype(np.int8))
     if step_snapshots:
         grids = np.stack([g for _, g in step_snapshots], axis=0).astype(np.int8)
@@ -287,6 +288,7 @@ def write_machine_state(
     np.save(directory / "all_grids.npy", grids)
     state = {
         "game_id": game_id,
+        "scorecard_id": scorecard_id,
         "current_level": frame.levels_completed + 1,
         "state": frame.state.value,
         "levels_completed": frame.levels_completed,

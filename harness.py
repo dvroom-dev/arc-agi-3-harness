@@ -1059,6 +1059,18 @@ def main() -> None:
             else:
                 if isinstance(maybe, dict):
                     parsed = maybe
+                    if (
+                        active_scorecard_id
+                        and action_name == "status"
+                        and proc.returncode == 0
+                    ):
+                        echoed_scorecard_id = str(parsed.get("scorecard_id", "") or "").strip()
+                        if echoed_scorecard_id != active_scorecard_id:
+                            raise RuntimeError(
+                                "arc_repl status did not echo expected scorecard_id: "
+                                f"expected={active_scorecard_id!r} "
+                                f"got={echoed_scorecard_id!r}"
+                            )
                     resolved_game_id = str(parsed.get("game_id", "")).strip()
                     if resolved_game_id:
                         active_game_id = resolved_game_id
@@ -1727,10 +1739,38 @@ def main() -> None:
                         f"for id={active_scorecard_id}"
                     )
             except Exception as exc:
-                log(
-                    "[harness] WARNING: failed to close scorecard "
-                    f"id={active_scorecard_id}: {exc}"
-                )
+                status_code = getattr(getattr(exc, "response", None), "status_code", None)
+                if status_code == 404:
+                    # Current API behavior: close/get on an already-closed card returns 404.
+                    # This commonly happens if the scorecard auto-closed due inactivity.
+                    log(
+                        "[harness] scorecard already closed before explicit close "
+                        f"(id={active_scorecard_id}, status=404)"
+                    )
+                    try:
+                        scorecard_meta_path.write_text(
+                            json.dumps(
+                                {
+                                    "scorecard_id": active_scorecard_id,
+                                    "api_url": scorecard_api_url,
+                                    "web_url": scorecard_web_url,
+                                    "created_here": True,
+                                    "closed": True,
+                                    "close_status": "already_closed",
+                                    "operation_mode": operation_mode_name,
+                                    "arc_base_url": arc_base_url,
+                                },
+                                indent=2,
+                            )
+                            + "\n"
+                        )
+                    except Exception:
+                        pass
+                else:
+                    log(
+                        "[harness] WARNING: failed to close scorecard "
+                        f"id={active_scorecard_id}: {exc}"
+                    )
         cleanup_repl_daemons()
 
 
