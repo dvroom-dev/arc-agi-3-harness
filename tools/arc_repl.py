@@ -270,12 +270,14 @@ class ReplSession:
 
     def _state_payload(self) -> dict:
         frame = self.frame
+        scorecard_id = str(os.getenv("ARC_SCORECARD_ID", "") or "").strip() or None
         return {
             "state": str(frame.state.value),
             "current_level": int(frame.levels_completed) + 1,
             "levels_completed": int(frame.levels_completed),
             "win_levels": int(frame.win_levels),
             "guid": getattr(frame, "guid", None),
+            "scorecard_id": scorecard_id,
             "available_actions": [int(a) for a in getattr(frame, "available_actions", [])],
             "full_reset": bool(getattr(frame, "full_reset", False)),
             **frame_action_metadata(frame),
@@ -472,6 +474,7 @@ class ReplSession:
             "action": action,
             "requested_game_id": requested_game_id,
             "game_id": self.game_id,
+            "scorecard_id": str(os.getenv("ARC_SCORECARD_ID", "") or "").strip() or None,
             "conversation_id": self.conversation_id,
             "guid": getattr(self.frame, "guid", None),
             "state": str(self.frame.state.value),
@@ -758,7 +761,6 @@ def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
             stdin=subprocess.DEVNULL,
             stdout=logf,
             stderr=subprocess.STDOUT,
-            start_new_session=True,
         )
     _pid_path(cwd, conversation_id).write_text(str(proc.pid) + "\n")
 

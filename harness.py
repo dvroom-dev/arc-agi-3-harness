@@ -376,6 +376,124 @@ def _run_super_streaming(cmd: list[str], output_path: Path | None,
     return extract_last_assistant_message(transcript)
 
 
+def _pid_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
+def _terminate_pid(pid: int, *, timeout_s: float = 1.5) -> bool:
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return True
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if not _pid_exists(pid):
+            return True
+        time.sleep(0.05)
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except OSError:
+        return True
+    time.sleep(0.05)
+    return not _pid_exists(pid)
+
+
+def _read_pid_cmdline(pid: int) -> str:
+    cmdline_path = Path("/proc") / str(pid) / "cmdline"
+    try:
+        raw = cmdline_path.read_bytes()
+    except Exception:
+        return ""
+    return raw.replace(b"\x00", b" ").decode("utf-8", errors="replace").strip()
+
+
+def _collect_active_run_ids(project_root: Path) -> set[str]:
+    run_ids: set[str] = set()
+    try:
+        ps = subprocess.run(
+            ["ps", "-eo", "args="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return run_ids
+    if ps.returncode != 0:
+        return run_ids
+    for line in ps.stdout.splitlines():
+        if "harness.py" not in line and "run-config.ts" not in line:
+            continue
+        for m in re.finditer(r"/runs/([^/\s]+)/", line):
+            run_ids.add(m.group(1))
+        m = re.search(r"--session-name\s+([^\s]+)", line)
+        if m:
+            run_ids.add(m.group(1))
+    return run_ids
+
+
+def cleanup_orphan_repl_daemons(
+    project_root: Path,
+    *,
+    preserve_run_ids: set[str] | None = None,
+) -> dict[str, int]:
+    """Best-effort cleanup for leaked arc_repl daemons from inactive runs."""
+    preserve = set(preserve_run_ids or set())
+    active_run_ids = _collect_active_run_ids(project_root).union(preserve)
+    runs_root = project_root / "runs"
+    if not runs_root.exists():
+        return {"killed": 0, "stale_files_removed": 0, "skipped_active": 0}
+
+    killed = 0
+    stale_files_removed = 0
+    skipped_active = 0
+
+    for pid_file in runs_root.glob("*/supervisor/arc/repl-sessions/*/daemon.pid"):
+        try:
+            run_id = pid_file.relative_to(runs_root).parts[0]
+        except Exception:
+            continue
+        if run_id in active_run_ids:
+            skipped_active += 1
+            continue
+        try:
+            pid_raw = pid_file.read_text().strip()
+            pid = int(pid_raw)
+        except Exception:
+            try:
+                pid_file.unlink()
+                stale_files_removed += 1
+            except Exception:
+                pass
+            continue
+
+        cmdline = _read_pid_cmdline(pid)
+        if not cmdline:
+            try:
+                pid_file.unlink()
+                stale_files_removed += 1
+            except Exception:
+                pass
+            continue
+        if "arc_repl.py" not in cmdline or "--daemon" not in cmdline:
+            # PID was reused by another process; do not touch it.
+            continue
+        if _terminate_pid(pid):
+            killed += 1
+            try:
+                pid_file.unlink()
+            except Exception:
+                pass
+    return {
+        "killed": killed,
+        "stale_files_removed": stale_files_removed,
+        "skipped_active": skipped_active,
+    }
+
+
 def extract_last_assistant_message(transcript: str) -> str:
     """Extract content of the last ```chat role=assistant``` block."""
     blocks: list[str] = []
@@ -564,6 +682,23 @@ def parse_args() -> argparse.Namespace:
         "--max-game-over-resets", type=int, default=8,
         help="Maximum automatic level resets after GAME_OVER before stopping",
     )
+    parser.add_argument(
+        "--arc-backend",
+        default="api",
+        choices=["api", "server"],
+        help=(
+            "ARC HTTP backend target: `api` uses https://three.arcprize.org; "
+            "`server` uses a local ARC server (default http://127.0.0.1:8000)."
+        ),
+    )
+    parser.add_argument(
+        "--arc-base-url",
+        default=None,
+        help=(
+            "Override ARC base URL for Arcade API calls. "
+            "If unset, derives from --arc-backend."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -669,6 +804,21 @@ def assert_no_game_files_in_agent_dir(agent_dir: Path) -> None:
 
 def main() -> None:
     args = parse_args()
+    operation_mode_name = str(args.operation_mode).strip().upper()
+    if args.open_scorecard and args.scorecard_id:
+        raise RuntimeError(
+            "Use either --open-scorecard (create new) or --scorecard-id (reuse existing), not both."
+        )
+
+    def _resolve_arc_base_url() -> str:
+        if args.arc_base_url and str(args.arc_base_url).strip():
+            return str(args.arc_base_url).strip()
+        if args.arc_backend == "server":
+            return "http://127.0.0.1:8000"
+        return "https://three.arcprize.org"
+
+    arc_base_url = _resolve_arc_base_url()
+    offline_mode = operation_mode_name == "OFFLINE"
 
     # Session and run directories
     session_name = args.session_name or datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -680,6 +830,17 @@ def main() -> None:
     # Per-run isolation: each run gets its own working directory
     run_dir = PROJECT_ROOT / "runs" / session_name
     log = lambda msg: print(msg, file=sys.stderr, flush=True)
+    cleanup_stats = cleanup_orphan_repl_daemons(
+        PROJECT_ROOT,
+        preserve_run_ids={session_name},
+    )
+    if cleanup_stats["killed"] or cleanup_stats["stale_files_removed"]:
+        log(
+            "[harness] cleaned stale repl daemons: "
+            f"killed={cleanup_stats['killed']} "
+            f"stale_pid_files_removed={cleanup_stats['stale_files_removed']} "
+            f"skipped_active={cleanup_stats['skipped_active']}"
+        )
     agent_dir = run_dir / "agent"
     supervisor_dir = run_dir / "supervisor"
     run_config_dir = run_dir / "config"
@@ -708,6 +869,64 @@ def main() -> None:
     completions_md = arc_state_dir / "level_completions.md"
     auto_explore_once_marker = arc_state_dir / "auto_explore_once.done"
     cycle_limit = 1
+    scorecard_meta_path = session_dir / "scorecard.json"
+
+    active_scorecard_id = str(args.scorecard_id or "").strip() or None
+    scorecard_created_here = False
+    scorecard_api_url: str | None = None
+    scorecard_web_url: str | None = None
+    scorecard_client: Any | None = None
+
+    def _build_scorecard_client():
+        import arc_agi
+        from arc_agi import OperationMode
+
+        mode = OperationMode[operation_mode_name]
+        return arc_agi.Arcade(
+            operation_mode=mode,
+            arc_base_url=arc_base_url,
+            environments_dir=str(arc_env_dir),
+        )
+
+    if args.open_scorecard or active_scorecard_id:
+        if operation_mode_name != "ONLINE":
+            raise RuntimeError(
+                "Scorecards require ONLINE mode. Re-run with --operation-mode ONLINE."
+            )
+        scorecard_client = _build_scorecard_client()
+        if active_scorecard_id:
+            scorecard_client.get_scorecard(active_scorecard_id)
+        else:
+            tags = [
+                "arc-agi-harness",
+                "tool-driven",
+                f"game:{args.game_id}",
+            ]
+            opaque = {
+                "session_name": session_name,
+                "game_id": str(args.game_id),
+                "started_at": datetime.now(timezone.utc).isoformat(),
+            }
+            active_scorecard_id = str(
+                scorecard_client.open_scorecard(tags=tags, opaque=opaque)
+            )
+            scorecard_created_here = True
+        scorecard_api_url = f"{arc_base_url.rstrip('/')}/api/scorecard/{active_scorecard_id}"
+        scorecard_web_url = f"{arc_base_url.rstrip('/')}/scorecards/{active_scorecard_id}"
+        scorecard_meta_path.write_text(
+            json.dumps(
+                {
+                    "scorecard_id": active_scorecard_id,
+                    "api_url": scorecard_api_url,
+                    "web_url": scorecard_web_url,
+                    "created_here": scorecard_created_here,
+                    "operation_mode": operation_mode_name,
+                    "arc_base_url": arc_base_url,
+                },
+                indent=2,
+            )
+            + "\n"
+        )
 
     def _provider_args() -> list[str]:
         if args.provider:
@@ -805,9 +1024,12 @@ def main() -> None:
         ]
         child_env = dict(os.environ)
         child_env["ARC_OPERATION_MODE"] = str(args.operation_mode).strip().upper()
+        child_env["ARC_BASE_URL"] = arc_base_url
         child_env.setdefault("ARC_ENVIRONMENTS_DIR", str(arc_env_dir))
         child_env["ARC_STATE_DIR"] = str(arc_state_dir)
         child_env["ARC_CONVERSATION_ID"] = active_conversation_id
+        if active_scorecard_id:
+            child_env["ARC_SCORECARD_ID"] = active_scorecard_id
         proc = subprocess.run(
             cmd,
             input=json.dumps(request),
@@ -1138,9 +1360,12 @@ def main() -> None:
         return [current_level_start_image] if should_attach else []
 
     super_env = dict(os.environ)
-    super_env["ARC_OPERATION_MODE"] = str(args.operation_mode).strip().upper()
+    super_env["ARC_OPERATION_MODE"] = operation_mode_name
+    super_env["ARC_BASE_URL"] = arc_base_url
     super_env.setdefault("ARC_ENVIRONMENTS_DIR", str(arc_env_dir))
     super_env["ARC_STATE_DIR"] = str(arc_state_dir)
+    if active_scorecard_id:
+        super_env["ARC_SCORECARD_ID"] = active_scorecard_id
     super_env["PATH"] = f"{run_bin_dir}:{os.environ.get('PATH', '')}"
 
     def resume_super(prompt: str | None = None, *, image_paths: list[Path] | None = None) -> str:
@@ -1263,8 +1488,20 @@ def main() -> None:
     log(f"[harness] supervisor dir: {supervisor_dir}")
     log(f"[harness] arc state dir: {arc_state_dir}")
     log(f"[harness] game: {args.game_id}")
-    if args.open_scorecard or args.scorecard_id:
-        log("[harness] NOTE: scorecard integration is disabled in tool-driven mode.")
+    log(f"[harness] arc backend: {args.arc_backend}")
+    log(f"[harness] arc base url: {arc_base_url}")
+    if offline_mode:
+        log(
+            "[harness] NOTE: operation-mode OFFLINE ignores ARC backend/base-url "
+            "and uses local environments only."
+        )
+    if active_scorecard_id:
+        created_status = "created_new" if scorecard_created_here else "reusing_existing"
+        log(f"[harness] scorecard: {active_scorecard_id} ({created_status})")
+        if scorecard_web_url:
+            log(f"[harness] scorecard web url: {scorecard_web_url}")
+        if scorecard_api_url:
+            log(f"[harness] scorecard api url: {scorecard_api_url}")
     if args.no_explore:
         log("[harness] auto input exploration is disabled (--no-explore).")
     else:
@@ -1457,6 +1694,43 @@ def main() -> None:
 
         log(f"[harness] session files: {session_dir}")
     finally:
+        if scorecard_created_here and active_scorecard_id:
+            try:
+                if scorecard_client is None:
+                    scorecard_client = _build_scorecard_client()
+                final_scorecard = scorecard_client.close_scorecard(active_scorecard_id)
+                if final_scorecard is not None:
+                    score = getattr(final_scorecard, "score", None)
+                    log(
+                        "[harness] scorecard closed: "
+                        f"id={active_scorecard_id} score={score}"
+                    )
+                    scorecard_meta_path.write_text(
+                        json.dumps(
+                            {
+                                "scorecard_id": active_scorecard_id,
+                                "api_url": scorecard_api_url,
+                                "web_url": scorecard_web_url,
+                                "created_here": True,
+                                "closed": True,
+                                "final_score": score,
+                                "operation_mode": operation_mode_name,
+                                "arc_base_url": arc_base_url,
+                            },
+                            indent=2,
+                        )
+                        + "\n"
+                    )
+                else:
+                    log(
+                        "[harness] WARNING: close_scorecard returned no data "
+                        f"for id={active_scorecard_id}"
+                    )
+            except Exception as exc:
+                log(
+                    "[harness] WARNING: failed to close scorecard "
+                    f"id={active_scorecard_id}: {exc}"
+                )
         cleanup_repl_daemons()
 
 

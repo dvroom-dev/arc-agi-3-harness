@@ -48,13 +48,16 @@ base_system_message:
         - Keep exec scripts <=20 actions unless replaying a previously validated solution.
         - For exec turns, print needed facts/diffs/state explicitly in your script before theorizing.
         - Do not call `env.reset()` in scripts.
+        - Do not call `reset_level` on the first turn of a level (before any action step in that level). First-turn resets can regress campaign progress; use `status` or a bounded `exec` probe instead.
         - REPL globals include `env`, `current`, `GameAction`/`GA`, `diff(...)`, `get_state()`, and helpers from `agent_lib.py`.
+        - Build reusable abstractions in `agent_lib.py` at every reasonable opportunity so level solvers stay short, composable, and easier to adapt.
         - Maintain a reusable solver file for the current level in your cwd: `solve_<game id>_<level>.py`.
         - Solvers must be robust to layout reconfiguration with the same mechanics: detect/locate features from current state and adapt to positions; avoid brittle absolute-coordinate scripts.
+        - "Continuously refactor repeated logic into `agent_lib.py`; keep `solve_<game id>_<level>.py` focused on composing reusable helpers."
 
         Evidence policy:
         - For `arc_repl exec`, your script output is the evidence channel.
-        - Print concise, structured evidence from your script (JSON is preferred).
+        - Print concise, structured evidence from your script.
         - Keep claims action-linked and step-indexed.
         - If your script did not execute actions or produced no actionable evidence, do not add new mechanics.
         - Separate actor-motion repaint from persistent environment-state changes.
@@ -81,8 +84,10 @@ base_system_message:
         - `GAME_OVER_HANDOFF` must include both what worked and what failed:
           - progress that was reliable,
           - failed hypotheses/probes and why they failed,
+          - one or more explicit theories for why GAME_OVER was triggered (each tied to evidence and a falsifier),
           - best restart plan to return to the frontier quickly.
         - Handoffs must be detailed enough for a fresh agent to continue without hidden context.
+        - When completing a level successfully, write or update solve_<game id>_<level num>.py with the solution. it should use high level functions from agent_lib.py and be a minimal solution with a few lines of code.
     - literal: |
         Harness renderer palette (canonical numeric IDs):
         0=#FFFFFF 1=#CCCCCC 2=#999999 3=#666666 4=#333333 5=#000000 6=#E53AA3 7=#FF7BCC
@@ -103,6 +108,7 @@ base_user_message:
         - Keep reasoning grounded in step-level evidence.
         - Update `Level Completion Theory` and `Backward Causal Steps` before choosing next actions.
         - Summarize the strongest 2-5 action-linked facts before theory updates.
+        - Never call `reset_level` on the first turn of a level.
         - Stop at mode-goal completion or at 5 minutes elapsed, whichever comes first.
         - If LEVEL COMPLETE or GAME OVER/full reset occurs, stop and emit the required handoff format immediately.
     - template: |
@@ -123,9 +129,9 @@ base_agent_rules:
     - "When evidence contradicts your chain, revise the chain before additional exploration."
     - "After level completion, return `LEVEL_COMPLETE_HANDOFF` (worked-only details)."
     - "After game over/full reset, return `GAME_OVER_HANDOFF` (worked + failed details)."
+    - "If GAME_OVER/full reset occurs, include one or more evidence-linked theories for why GAME_OVER was triggered before giving restart guidance."
+    - "Never call `reset_level` on the first turn of a level. Take at least one action step first."
     - "On level completion, write/update `solve_<game id>_<level>.py` from what worked. The solver must infer features from current state and adapt to changed positions."
-    - "At conversation start, check for `solve_<game id>_<level>.py` in cwd for the current level; if present, run it first and report outcome before proposing new exploration."
-    - "When entering a new level, run previous level solver(s) to observe carryover mechanics, then begin `solve_<game id>_<new level>.py` with generalized feature-detection helpers."
 
 base_supervisor_instructions:
   operation: append
@@ -142,6 +148,7 @@ base_supervisor_instructions:
     - "Use `new_game` only once at true first game entry (initial run, level 1). Do not use `new_game` again after GAME_OVER/full reset."
     - "On LEVEL COMPLETE, fork to `new_level` for the next level startup workflow (unless stop_condition is met)."
     - "On GAME_OVER/full reset, do not fork to `new_game`; fork to `explore_exploit` with high-confidence beliefs and concrete guidance to recover efficiently."
+    - "On GAME_OVER/full reset, require explicit GAME_OVER-cause theories (evidence-linked) and write them into `arc/game-knowledge.md` under a diagnostics section."
     - "When the agent goes off-rails, recover by forking a fresh conversation in the appropriate mode with: last high-confidence beliefs, what failed, and improved exploration/exploitation guidance."
     - "In `new_level`, require the agent to run previous-level solver(s), report observed carryover, identify new features/mechanics, and then exit to `explore_exploit`."
     - "Enforce solver completeness before accepting solver-related progress or mode transitions: solver file exists in cwd, contains runnable action code (not placeholder analysis-only code), and has validation evidence from execution."

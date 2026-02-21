@@ -654,10 +654,11 @@ def _make_env(game_id: str):
         # OFFLINE requires local environments; keep backward-compatible discovery.
         kwargs["environments_dir"] = str(_resolve_environments_dir())
     arcade = arc_agi.Arcade(**kwargs)
+    scorecard_id = str(os.getenv("ARC_SCORECARD_ID", "") or "").strip() or None
     tried: list[str] = []
     for candidate in _make_id_candidates(game_id):
         tried.append(candidate)
-        env = arcade.make(candidate, render_mode=None)
+        env = arcade.make(candidate, render_mode=None, scorecard_id=scorecard_id)
         if env is not None:
             return env
     raise RuntimeError(f"failed to load game: {game_id} (tried: {', '.join(tried)})")
