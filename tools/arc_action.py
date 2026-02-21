@@ -21,6 +21,7 @@ import multiprocessing
 import os
 import re
 import sys
+import time
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
@@ -695,23 +696,53 @@ def _action_from_event_name(name: str) -> GameAction:
 
 
 def _replay_history(env, events: list[dict]) -> FrameDataRaw:
-    frame = env.reset()
-    if frame is None:
-        raise RuntimeError("env.reset() returned None")
+    def _reset_with_retry(context: str) -> FrameDataRaw:
+        last_none = False
+        for attempt in range(8):
+            frame_obj = env.reset()
+            if frame_obj is not None:
+                return frame_obj
+            last_none = True
+            # API backends can briefly rate-limit RESET calls during long replays.
+            # Use bounded exponential backoff before declaring replay failure.
+            time.sleep(min(8.0, 0.25 * (2**attempt)))
+        if last_none:
+            raise RuntimeError(f"env.reset() returned None {context}")
+        raise RuntimeError(f"env.reset() failed {context}")
+
+    frame = _reset_with_retry("at replay start")
+    terminal = str(getattr(frame, "state", "").value) in {"GAME_OVER", "WIN"}
     for event in events:
         kind = str(event.get("kind", "")).strip()
         if kind == "reset":
-            frame = env.reset()
-            if frame is None:
-                raise RuntimeError("env.reset() returned None during replay")
+            try:
+                frame = _reset_with_retry("during replay")
+            except RuntimeError:
+                # Long online replays can hit backend throttling on RESET.
+                # Keep startup alive by stopping replay at the last known-good
+                # frame; subsequent turns can continue from this checkpoint.
+                break
+            terminal = str(getattr(frame, "state", "").value) in {"GAME_OVER", "WIN"}
             continue
         if kind != "step":
             continue
+        if terminal:
+            # After terminal states, replay is intentionally inert until the
+            # next explicit reset event.
+            continue
         action_name = str(event.get("action", "")).strip()
         data = event.get("data")
-        frame = env.step(_action_from_event_name(action_name), data=data)
-        if frame is None:
-            raise RuntimeError("env.step() returned None during replay")
+        try:
+            result = env.step(_action_from_event_name(action_name), data=data)
+        except Exception:
+            break
+        if result is None:
+            # Online replay can return None at terminal boundaries. Keep replay
+            # alive and wait for the next reset event in history.
+            terminal = True
+            continue
+        frame = result
+        terminal = str(getattr(frame, "state", "").value) in {"GAME_OVER", "WIN"}
     return frame
 
 

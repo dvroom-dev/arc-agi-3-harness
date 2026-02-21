@@ -63,7 +63,7 @@ from arc_action import (
 )
 
 SCHEMA_VERSION = "arc_repl.v1"
-SOCKET_WAIT_TIMEOUT_S = 12.0
+SOCKET_WAIT_TIMEOUT_S = 90.0
 
 
 def _error(*, action: str, requested_game_id: str, message: str, error_type: str, details: str = "") -> dict:
