@@ -9,6 +9,14 @@ def parse_args_impl() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="ARC-AGI-3 supervisor harness")
     parser.add_argument("--game-id", default="ls20", help="Game ID to load")
     parser.add_argument(
+        "--game-ids",
+        default=None,
+        help=(
+            "Optional comma/space-separated game IDs to run sequentially in one harness invocation. "
+            "When set, this overrides --game-id."
+        ),
+    )
+    parser.add_argument(
         "--max-turns", type=int, default=None,
         help="Maximum harness turns before stopping (default: unlimited)",
     )

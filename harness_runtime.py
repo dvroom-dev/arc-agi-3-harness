@@ -146,6 +146,7 @@ class HarnessRuntime:
         self.super_env["ARC_BASE_URL"] = self.arc_base_url
         self.super_env.setdefault("ARC_ENVIRONMENTS_DIR", str(self.arc_env_dir))
         self.super_env["ARC_STATE_DIR"] = str(self.arc_state_dir)
+        self.super_env["ONLY_RESET_LEVELS"] = "true"
         if self.active_scorecard_id:
             self.super_env["ARC_SCORECARD_ID"] = self.active_scorecard_id
         self.super_env["PATH"] = f"{self.run_bin_dir}:{os.environ.get('PATH', '')}"
@@ -257,6 +258,7 @@ class HarnessRuntime:
         child_env["ARC_BASE_URL"] = self.arc_base_url
         child_env.setdefault("ARC_ENVIRONMENTS_DIR", str(self.arc_env_dir))
         child_env["ARC_STATE_DIR"] = str(self.arc_state_dir)
+        child_env["ONLY_RESET_LEVELS"] = "true"
         child_env["ARC_CONVERSATION_ID"] = self.active_conversation_id
         if self.active_scorecard_id:
             child_env["ARC_SCORECARD_ID"] = self.active_scorecard_id

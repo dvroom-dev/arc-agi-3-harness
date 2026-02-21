@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import json
+import re
+import sys
+from argparse import Namespace
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
 
 from harness_explore import run_input_exploration_from_reset
 from harness_runtime import HarnessRuntime
@@ -15,15 +20,105 @@ def _resolve_arc_base_url(args) -> str:
     return "https://three.arcprize.org"
 
 
-def run_main(deps) -> None:
-    args = deps.parse_args()
-    operation_mode_name = str(args.operation_mode).strip().upper()
-    if args.open_scorecard and args.scorecard_id:
-        raise RuntimeError(
-            "Use either --open-scorecard (create new) or --scorecard-id (reuse existing), not both."
-        )
+def _resolve_game_ids(args) -> list[str]:
+    raw = str(getattr(args, "game_ids", "") or "").strip()
+    if not raw:
+        gid = str(args.game_id or "").strip()
+        if not gid:
+            raise RuntimeError("No game ID provided.")
+        return [gid]
+    tokens = [t.strip() for t in re.split(r"[,\s]+", raw) if t.strip()]
+    if not tokens:
+        raise RuntimeError("Failed to parse --game-ids (expected comma/space-separated IDs).")
+    unique: list[str] = []
+    seen: set[str] = set()
+    for token in tokens:
+        if token in seen:
+            continue
+        seen.add(token)
+        unique.append(token)
+    return unique
 
-    arc_base_url = _resolve_arc_base_url(args)
+
+def _session_name_for_game(session_base: str, game_id: str, index: int) -> str:
+    safe_game = re.sub(r"[^A-Za-z0-9_.-]+", "-", game_id).strip("-")
+    if not safe_game:
+        safe_game = f"game-{index:02d}"
+    return f"{session_base}-{index:02d}-{safe_game}"
+
+
+def _build_scorecard_client(
+    *,
+    operation_mode_name: str,
+    arc_base_url: str,
+    environments_dir: Path,
+):
+    import arc_agi
+    from arc_agi import OperationMode
+
+    mode = OperationMode[operation_mode_name]
+    return arc_agi.Arcade(
+        operation_mode=mode,
+        arc_base_url=arc_base_url,
+        environments_dir=str(environments_dir),
+    )
+
+
+def _open_shared_scorecard(
+    *,
+    args,
+    game_ids: list[str],
+    operation_mode_name: str,
+    arc_base_url: str,
+    session_base: str,
+) -> tuple[Any, str, str, str]:
+    if operation_mode_name != "ONLINE":
+        raise RuntimeError(
+            "Scorecards require ONLINE mode. Re-run with --operation-mode ONLINE."
+        )
+    environments_dir = Path("/tmp/arc-agi-env-cache") / f"{session_base}-scorecard"
+    environments_dir.mkdir(parents=True, exist_ok=True)
+    client = _build_scorecard_client(
+        operation_mode_name=operation_mode_name,
+        arc_base_url=arc_base_url,
+        environments_dir=environments_dir,
+    )
+    tags = [
+        "arc-agi-harness",
+        "tool-driven",
+        "multi-game-batch",
+    ]
+    for gid in game_ids:
+        tags.append(f"game:{gid}")
+    opaque = {
+        "session_name": session_base,
+        "game_ids": game_ids,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    scorecard_id = str(client.open_scorecard(tags=tags, opaque=opaque))
+    api_url = f"{arc_base_url.rstrip('/')}/api/scorecard/{scorecard_id}"
+    web_url = f"{arc_base_url.rstrip('/')}/scorecards/{scorecard_id}"
+    return client, scorecard_id, api_url, web_url
+
+
+def _close_shared_scorecard(*, log, client, scorecard_id: str) -> None:
+    try:
+        final = client.close_scorecard(scorecard_id)
+        score = getattr(final, "score", None) if final is not None else None
+        log(f"[harness] scorecard closed: id={scorecard_id} score={score}")
+    except Exception as exc:
+        log(f"[harness] WARNING: failed to close shared scorecard id={scorecard_id}: {exc}")
+
+
+def _run_single_game(
+    deps,
+    args,
+    *,
+    operation_mode_name: str,
+    arc_base_url: str,
+    game_index: int,
+    total_games: int,
+) -> None:
     runtime = HarnessRuntime(
         deps,
         args,
@@ -36,7 +131,7 @@ def run_main(deps) -> None:
     runtime.log(f"[harness] agent dir: {runtime.agent_dir}")
     runtime.log(f"[harness] supervisor dir: {runtime.supervisor_dir}")
     runtime.log(f"[harness] arc state dir: {runtime.arc_state_dir}")
-    runtime.log(f"[harness] game: {args.game_id}")
+    runtime.log(f"[harness] game: {args.game_id} ({game_index}/{total_games})")
     runtime.log(f"[harness] arc backend: {args.arc_backend}")
     runtime.log(f"[harness] arc base url: {arc_base_url}")
     if runtime.offline_mode:
@@ -76,6 +171,11 @@ def run_main(deps) -> None:
         )
         if init_result and isinstance(init_result.get("state"), str):
             initial_prompt += f"\nCurrent state: {init_result.get('state')}"
+
+        safe_game = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(args.game_id)).strip("_") or "game"
+        runtime.auto_explore_once_marker = (
+            runtime.arc_state_dir / f"auto_explore_once_{safe_game}.done"
+        )
 
         init_state = runtime.load_state() or {}
         at_fresh_game_start = (
@@ -245,3 +345,71 @@ def run_main(deps) -> None:
     finally:
         runtime.close_scorecard_if_needed()
         runtime.cleanup_repl_daemons()
+
+
+def run_main(deps) -> None:
+    args = deps.parse_args()
+    operation_mode_name = str(args.operation_mode).strip().upper()
+    if args.open_scorecard and args.scorecard_id:
+        raise RuntimeError(
+            "Use either --open-scorecard (create new) or --scorecard-id (reuse existing), not both."
+        )
+    game_ids = _resolve_game_ids(args)
+    arc_base_url = _resolve_arc_base_url(args)
+
+    session_base = args.session_name or datetime.now().strftime("%Y%m%d_%H%M%S")
+    shared_scorecard_id = str(args.scorecard_id or "").strip() or None
+    shared_scorecard_client = None
+    shared_scorecard_created_here = False
+
+    if len(game_ids) > 1 and args.open_scorecard:
+        (
+            shared_scorecard_client,
+            shared_scorecard_id,
+            scorecard_api_url,
+            scorecard_web_url,
+        ) = _open_shared_scorecard(
+            args=args,
+            game_ids=game_ids,
+            operation_mode_name=operation_mode_name,
+            arc_base_url=arc_base_url,
+            session_base=session_base,
+        )
+        shared_scorecard_created_here = True
+        print(
+            f"[harness] scorecard: {shared_scorecard_id} (created_new, shared across {len(game_ids)} games)",
+            file=sys.stderr,
+            flush=True,
+        )
+        print(f"[harness] scorecard web url: {scorecard_web_url}", file=sys.stderr, flush=True)
+        print(f"[harness] scorecard api url: {scorecard_api_url}", file=sys.stderr, flush=True)
+
+    try:
+        for index, game_id in enumerate(game_ids, start=1):
+            game_args = Namespace(**vars(args))
+            game_args.game_id = game_id
+            if len(game_ids) > 1:
+                game_args.session_name = _session_name_for_game(session_base, game_id, index)
+            if shared_scorecard_id:
+                game_args.open_scorecard = False
+                game_args.scorecard_id = shared_scorecard_id
+            _run_single_game(
+                deps,
+                game_args,
+                operation_mode_name=operation_mode_name,
+                arc_base_url=arc_base_url,
+                game_index=index,
+                total_games=len(game_ids),
+            )
+    finally:
+        if (
+            len(game_ids) > 1
+            and shared_scorecard_created_here
+            and shared_scorecard_client is not None
+            and shared_scorecard_id
+        ):
+            _close_shared_scorecard(
+                log=lambda msg: print(msg, file=sys.stderr, flush=True),
+                client=shared_scorecard_client,
+                scorecard_id=shared_scorecard_id,
+            )

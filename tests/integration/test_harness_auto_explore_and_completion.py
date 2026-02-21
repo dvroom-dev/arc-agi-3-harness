@@ -132,7 +132,7 @@ def test_harness_runs_auto_explore_once(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(harness.subprocess, "run", fake_subprocess_run)
 
     harness.main()
-    marker = root / "runs" / "t-auto" / "supervisor" / "arc" / "auto_explore_once.done"
+    marker = root / "runs" / "t-auto" / "supervisor" / "arc" / "auto_explore_once_ls20.done"
     assert marker.exists()
 
 

@@ -35,6 +35,9 @@ uv sync
 source .env
 . .venv/bin/activate
 python harness.py --game-id ls20 --max-turns 2 --session-name smoke-minimal
+
+# Multiple games under one scorecard
+python harness.py --game-ids "ls20 ft09 vc33" --operation-mode ONLINE --open-scorecard --session-name batch-smoke
 ```
 
 ## Checks
