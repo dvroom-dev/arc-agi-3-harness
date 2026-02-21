@@ -46,6 +46,12 @@ Benchmark-critical features must fail loudly if broken. Do not silently degrade 
 
 Allowed soft-fail behavior should be rare and explicitly marked as non-critical observability only.
 
+## Pre-commit checks
+
+- Always run lint before committing: `make lint`
+- Always run tests before committing: `make test`
+- If either fails, do not commit until fixed.
+
 ## Supervisor rule design (no time-travel rules)
 
 The supervisor runs after an agent turn. It cannot undo prior actions already present in the conversation context.

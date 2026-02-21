@@ -37,6 +37,12 @@ source .env
 python harness.py --game-id ls20 --max-turns 2 --session-name smoke-minimal
 ```
 
+## Checks
+```bash
+make lint
+make test
+```
+
 ## Actor-identification note (important)
 - Do not identify the controllable actor from visual salience alone.
 - Identify actor(s) from action-linked evidence: whichever component consistently moves under directional actions is the actor.

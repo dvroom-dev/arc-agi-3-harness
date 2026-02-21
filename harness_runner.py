@@ -1,0 +1,247 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+
+from harness_explore import run_input_exploration_from_reset
+from harness_runtime import HarnessRuntime
+
+
+def _resolve_arc_base_url(args) -> str:
+    if args.arc_base_url and str(args.arc_base_url).strip():
+        return str(args.arc_base_url).strip()
+    if args.arc_backend == "server":
+        return "http://127.0.0.1:8000"
+    return "https://three.arcprize.org"
+
+
+def run_main(deps) -> None:
+    args = deps.parse_args()
+    operation_mode_name = str(args.operation_mode).strip().upper()
+    if args.open_scorecard and args.scorecard_id:
+        raise RuntimeError(
+            "Use either --open-scorecard (create new) or --scorecard-id (reuse existing), not both."
+        )
+
+    arc_base_url = _resolve_arc_base_url(args)
+    runtime = HarnessRuntime(
+        deps,
+        args,
+        operation_mode_name=operation_mode_name,
+        arc_base_url=arc_base_url,
+    )
+
+    runtime.log(f"[harness] session: {runtime.session_dir}")
+    runtime.log(f"[harness] run dir: {runtime.run_dir}")
+    runtime.log(f"[harness] agent dir: {runtime.agent_dir}")
+    runtime.log(f"[harness] supervisor dir: {runtime.supervisor_dir}")
+    runtime.log(f"[harness] arc state dir: {runtime.arc_state_dir}")
+    runtime.log(f"[harness] game: {args.game_id}")
+    runtime.log(f"[harness] arc backend: {args.arc_backend}")
+    runtime.log(f"[harness] arc base url: {arc_base_url}")
+    if runtime.offline_mode:
+        runtime.log(
+            "[harness] NOTE: operation-mode OFFLINE ignores ARC backend/base-url "
+            "and uses local environments only."
+        )
+    if runtime.active_scorecard_id:
+        created_status = "created_new" if runtime.scorecard_created_here else "reusing_existing"
+        runtime.log(f"[harness] scorecard: {runtime.active_scorecard_id} ({created_status})")
+        if runtime.scorecard_web_url:
+            runtime.log(f"[harness] scorecard web url: {runtime.scorecard_web_url}")
+        if runtime.scorecard_api_url:
+            runtime.log(f"[harness] scorecard api url: {runtime.scorecard_api_url}")
+    if args.no_explore:
+        runtime.log("[harness] auto input exploration is disabled (--no-explore).")
+    else:
+        runtime.log("[harness] auto input exploration is enabled.")
+    runtime.log("[harness] level-start prompt image attachments are disabled.")
+
+    try:
+        init_result, _, init_rc = runtime.run_arc_repl({"action": "status", "game_id": args.game_id})
+        if init_rc != 0:
+            runtime.log("[harness] failed to initialize state with arc_repl status")
+            deps.sys.exit(1)
+
+        runtime.log(f"[harness] active game id: {runtime.active_game_id}")
+        runtime.log(f"[harness] initialized: {runtime.format_state_summary(runtime.load_state())}")
+
+        initial_prompt = (
+            "Game state initialized. Use shell exactly once this turn to execute arc_repl "
+            "(status, exec, or reset_level). "
+            "For exec, pass Python via stdin heredoc, e.g. "
+            "`cat <<'PY' | arc_repl exec` ... `PY`. "
+            "Inside exec scripts, use `get_state()` and `env` for state inspection and actions. "
+            "Use agent_lib.py for persistent reusable helper functions."
+        )
+        if init_result and isinstance(init_result.get("state"), str):
+            initial_prompt += f"\nCurrent state: {init_result.get('state')}"
+
+        init_state = runtime.load_state() or {}
+        at_fresh_game_start = (
+            int(init_state.get("current_level", 0) or 0) == 1
+            and int(init_state.get("levels_completed", 0) or 0) == 0
+        )
+        should_auto_explore_once = (
+            (not args.no_explore)
+            and at_fresh_game_start
+            and (not runtime.auto_explore_once_marker.exists())
+        )
+        if should_auto_explore_once:
+            auto_explore_summary = run_input_exploration_from_reset(runtime)
+            if auto_explore_summary.strip():
+                initial_prompt += "\n\n" + auto_explore_summary
+            runtime.auto_explore_once_marker.parent.mkdir(parents=True, exist_ok=True)
+            runtime.auto_explore_once_marker.write_text(datetime.now(timezone.utc).isoformat() + "\n")
+            runtime.log("[harness] auto input exploration completed (one-time at game start).")
+        elif not args.no_explore:
+            if not at_fresh_game_start:
+                runtime.log("[harness] skipping auto input exploration (not fresh game start).")
+            else:
+                runtime.log("[harness] skipping auto input exploration (already ran once).")
+
+        runtime.log("[harness] starting super new...")
+        init_images = runtime.level_start_prompt_images(init_state, initial=True)
+        runtime.super_env["ARC_CONVERSATION_ID"] = runtime.active_conversation_id
+        deps.run_super(
+            [
+                "new",
+                "--config", str(runtime.super_config),
+                "--workspace", str(runtime.run_dir),
+                "--config-dir", str(runtime.run_config_dir),
+                "--agent-dir", str(runtime.agent_dir),
+                "--supervisor-dir", str(runtime.supervisor_dir),
+                *runtime.provider_args(),
+                *runtime.supervisor_args(),
+                "--cycle-limit", str(runtime.cycle_limit),
+                *runtime.prompt_args(initial_prompt, prompt_kind="new", image_paths=init_images),
+                "--output", str(runtime.session_file),
+            ],
+            stream=args.verbose,
+            cwd=runtime.run_dir,
+            env=runtime.super_env,
+        )
+        runtime.sync_active_conversation_id_from_session()
+
+        super_turn = 1
+        stale_turns = 0
+        game_over_resets = 0
+        last_engine_turn = runtime.load_engine_turn()
+        last_recorded_completed_level = deps.read_max_recorded_completion_level(runtime.completions_md)
+        pending_auto_explore_summary = ""
+
+        while True:
+            if args.max_turns is not None and super_turn > args.max_turns:
+                runtime.log(f"[harness] max turns ({args.max_turns}) reached")
+                break
+
+            state = runtime.load_state()
+            prev_completed = int(state.get("levels_completed", 0)) if state else 0
+            runtime.log(f"[harness] turn {super_turn}: {runtime.format_state_summary(state)}")
+
+            if state and state.get("state") == "WIN":
+                runtime.log(f"[harness] GAME WON after {super_turn} turns")
+                break
+
+            prompt_lines: list[str] = []
+            current_engine_turn = runtime.load_engine_turn()
+            if current_engine_turn <= last_engine_turn:
+                stale_turns += 1
+            else:
+                stale_turns = 0
+                last_engine_turn = current_engine_turn
+
+            if state and state.get("state") == "GAME_OVER":
+                game_over_resets += 1
+                runtime.log(
+                    f"[harness] GAME_OVER detected "
+                    f"(auto-reset {game_over_resets}/{args.max_game_over_resets})"
+                )
+                if game_over_resets > args.max_game_over_resets:
+                    runtime.log("[harness] max GAME_OVER auto-resets reached, stopping")
+                    break
+                reset_result, reset_stdout, reset_rc = runtime.run_arc_repl(
+                    {"action": "reset_level", "game_id": args.game_id}
+                )
+                if reset_rc != 0:
+                    runtime.log("[harness] auto-reset failed")
+                    if reset_stdout:
+                        runtime.log(f"[harness] reset output: {reset_stdout}")
+                    break
+                state = runtime.load_state()
+                prompt_lines.append(
+                    "Previous script ended in GAME_OVER. Harness auto-reset the level. "
+                    "Continue from the new post-reset state."
+                )
+                if reset_result:
+                    prompt_lines.append(f"Reset result: {json.dumps(reset_result)}")
+
+            if stale_turns >= 2:
+                prompt_lines.append(
+                    "No arc_repl execution was detected in recent turns. "
+                    "Execute exactly one shell command invoking arc_repl this turn."
+                )
+            if pending_auto_explore_summary.strip():
+                prompt_lines.append(pending_auto_explore_summary.strip())
+                pending_auto_explore_summary = ""
+
+            prompt_lines.append(f"Current summary: {runtime.format_state_summary(state)}")
+            prompt_lines.append("Continue solving the current level.")
+            prompt = "\n".join(prompt_lines)
+
+            prompt_images = runtime.level_start_prompt_images(state)
+            stdout = runtime.resume_super(prompt, image_paths=prompt_images)
+            runtime.sync_active_conversation_id_from_session()
+            if not stdout.strip():
+                runtime.log(
+                    "[harness] super returned empty assistant response; "
+                    "continuing (likely supervisor fork/transition without assistant text)."
+                )
+
+            post_state = runtime.load_state()
+            post_completed = int(post_state.get("levels_completed", 0)) if post_state else 0
+            if post_completed > prev_completed:
+                last_recorded_completed_level = max(
+                    last_recorded_completed_level,
+                    deps.read_max_recorded_completion_level(runtime.completions_md),
+                )
+                events = deps.load_history_events(runtime.history_json)
+                completion_windows = deps.completion_action_windows_by_level(events)
+                tool_turn = runtime.load_engine_turn()
+                win_script = runtime.arc_state_dir / "script-history" / f"turn_{tool_turn:03d}_script.py"
+                win_script_rel = None
+                if win_script.exists():
+                    try:
+                        win_script_rel = str(win_script.relative_to(runtime.run_dir))
+                    except Exception:
+                        win_script_rel = str(win_script)
+
+                for completed_level in range(prev_completed + 1, post_completed + 1):
+                    if completed_level <= last_recorded_completed_level:
+                        continue
+                    level_actions = completion_windows.get(completed_level, [])
+                    deps.append_level_completion_record(
+                        completions_file=runtime.completions_md,
+                        completed_level=completed_level,
+                        actions=level_actions,
+                        harness_turn=super_turn,
+                        tool_turn=tool_turn,
+                        winning_script_relpath=win_script_rel,
+                    )
+                    last_recorded_completed_level = completed_level
+                    runtime.log(
+                        "[harness] level completion recorded: "
+                        f"level={completed_level} actions_in_level_window={len(level_actions)}"
+                    )
+                if not args.no_explore and (post_state and post_state.get("state") != "WIN"):
+                    runtime.log(
+                        "[harness] skipping post-completion auto exploration "
+                        "(reset_level would reset campaign progress)"
+                    )
+
+            super_turn += 1
+
+        runtime.log(f"[harness] session files: {runtime.session_dir}")
+    finally:
+        runtime.close_scorecard_if_needed()
+        runtime.cleanup_repl_daemons()
