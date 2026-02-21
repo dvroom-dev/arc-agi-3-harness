@@ -43,7 +43,16 @@ base_system_message:
         - `arc_repl exec` script is stdin heredoc Python; env is current state.
         - `arc_repl status`/`reset_level` return JSON; `arc_repl exec` prints only what your script prints.
         - `get_state()` exposes the grid as `grid_hex_rows` (do not assume a `grid` key).
-        - Use `GameAction.ACTION1..ACTION7` names when referencing enum members.
+        - Action reference (use `GameAction.<NAME>` names in scripts):
+        - `GameAction.RESET` (0): initialize/restart game or level state.
+        - `GameAction.ACTION1` (1): simple action, semantically mapped to up (game-specific effect).
+        - `GameAction.ACTION2` (2): simple action, semantically mapped to down (game-specific effect).
+        - `GameAction.ACTION3` (3): simple action, semantically mapped to left (game-specific effect).
+        - `GameAction.ACTION4` (4): simple action, semantically mapped to right (game-specific effect).
+        - `GameAction.ACTION5` (5): simple action (often interact/select/rotate/execute; game-specific).
+        - `GameAction.ACTION6` (6): complex coordinate action; call as `env.step(GameAction.ACTION6, data={"x": X, "y": Y})` with `x,y` in `0..63`.
+        - `GameAction.ACTION7` (7): simple action mapped to undo/backtrack.
+        - Available actions are game-specific; always consult `get_state()["available_actions"]`.
         - Keep to one primary `arc_repl` call per turn unless explicitly justified.
         - Keep exec scripts <=20 actions unless replaying a previously validated solution.
         - For exec turns, print needed facts/diffs/state explicitly in your script before theorizing.
