@@ -157,3 +157,65 @@ def test_harness_scorecard_requires_online_mode(tmp_path: Path, monkeypatch) -> 
     with pytest.raises(RuntimeError, match="Scorecards require ONLINE mode"):
         harness.main()
 
+
+def test_harness_owner_check_rejects_wrong_account_scorecard_id(tmp_path: Path, monkeypatch) -> None:
+    root = tmp_path / "proj"
+    _seed_project(root)
+
+    calls = {"open": 0, "get": 0}
+
+    class FakeOperationMode:
+        @classmethod
+        def __class_getitem__(cls, key):
+            return key
+
+    class FakeArcadeClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def get_scorecard(self, scorecard_id):
+            calls["get"] += 1
+            raise RuntimeError("404 not found")
+
+        def open_scorecard(self, tags, opaque):
+            calls["open"] += 1
+            return "sc-new"
+
+    fake_arc = ModuleType("arc_agi")
+    fake_arc.Arcade = FakeArcadeClient
+    fake_arc.OperationMode = FakeOperationMode
+    monkeypatch.setitem(sys.modules, "arc_agi", fake_arc)
+
+    args = Namespace(
+        game_id="ls20",
+        game_ids="ls20,ft09",
+        max_turns=0,
+        operation_mode="ONLINE",
+        session_name="t-owner-check-fail",
+        verbose=False,
+        open_scorecard=True,
+        scorecard_id=None,
+        scorecard_owner_check_id="known-good-scorecard",
+        provider="mock",
+        no_supervisor=True,
+        no_explore=True,
+        max_game_over_resets=1,
+        arc_backend="api",
+        arc_base_url="http://example.test",
+    )
+
+    monkeypatch.setattr(harness, "PROJECT_ROOT", root)
+    monkeypatch.setattr(harness, "CTXS", root / ".ctxs")
+    monkeypatch.setattr(harness, "PROJECT_VENV_PYTHON", Path(sys.executable))
+    monkeypatch.setattr(harness, "parse_args", lambda: args)
+    monkeypatch.setattr(
+        harness,
+        "cleanup_orphan_repl_daemons",
+        lambda *a, **k: {"killed": 0, "stale_files_removed": 0, "skipped_active": 0},
+    )
+
+    with pytest.raises(RuntimeError, match="Scorecard owner check failed"):
+        harness.main()
+
+    assert calls["get"] == 1
+    assert calls["open"] == 0

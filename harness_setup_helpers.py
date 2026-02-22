@@ -75,6 +75,14 @@ def parse_args_impl() -> argparse.Namespace:
             "If unset, derives from --arc-backend."
         ),
     )
+    parser.add_argument(
+        "--scorecard-owner-check-id",
+        default=None,
+        help=(
+            "Optional scorecard ID that must be readable before opening/reusing scorecards. "
+            "Use this to fail fast if ARC_API_KEY points to the wrong account."
+        ),
+    )
     return parser.parse_args()
 
 
