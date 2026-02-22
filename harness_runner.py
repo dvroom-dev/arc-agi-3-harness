@@ -101,6 +101,9 @@ def _open_shared_scorecard(
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
     scorecard_id = str(client.open_scorecard(tags=tags, opaque=opaque))
+    # Fail fast: ensure the created scorecard is immediately retrievable
+    # with the same credentials before starting expensive multi-game runs.
+    client.get_scorecard(scorecard_id)
     api_url = f"{arc_base_url.rstrip('/')}/api/scorecard/{scorecard_id}"
     web_url = f"{arc_base_url.rstrip('/')}/scorecards/{scorecard_id}"
     return client, scorecard_id, api_url, web_url
@@ -113,6 +116,27 @@ def _close_shared_scorecard(*, log, client, scorecard_id: str) -> None:
         log(f"[harness] scorecard closed: id={scorecard_id} score={score}")
     except Exception as exc:
         log(f"[harness] WARNING: failed to close shared scorecard id={scorecard_id}: {exc}")
+
+
+def _delete_supervisor_knowledge_files(
+    *,
+    project_root: Path,
+    session_name: str,
+    log,
+) -> None:
+    arc_dir = project_root / "runs" / session_name / "supervisor" / "arc"
+    for filename in ("game-knowledge.md", "level-knowledge.md"):
+        path = arc_dir / filename
+        if not path.exists():
+            continue
+        try:
+            path.unlink()
+        except Exception as exc:
+            raise RuntimeError(
+                "Failed deleting supervisor knowledge file during game transition: "
+                f"{path}: {exc}"
+            ) from exc
+        log(f"[harness] removed supervisor knowledge file: {path}")
 
 
 def _run_single_game(
@@ -420,6 +444,10 @@ def run_main(deps) -> None:
             if shared_scorecard_id:
                 game_args.open_scorecard = False
                 game_args.scorecard_id = shared_scorecard_id
+                # Only skip per-game GET validation when the shared scorecard
+                # was created by this process. For a user-supplied scorecard ID,
+                # revalidate in each game session to avoid silent bad-ID runs.
+                game_args.skip_scorecard_get_validation = bool(shared_scorecard_created_here)
             _run_single_game(
                 deps,
                 game_args,
@@ -428,6 +456,12 @@ def run_main(deps) -> None:
                 game_index=index,
                 total_games=len(game_ids),
             )
+            if len(game_ids) > 1 and index < len(game_ids):
+                _delete_supervisor_knowledge_files(
+                    project_root=deps.PROJECT_ROOT,
+                    session_name=str(game_args.session_name),
+                    log=lambda msg: print(msg, file=sys.stderr, flush=True),
+                )
     finally:
         if (
             len(game_ids) > 1
