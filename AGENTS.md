@@ -29,6 +29,18 @@ When diagnosing solver failures, find the first turn where a wrong belief appear
 - For background runs, use shell redirection that preserves both streams in one log file (for example: `> <logfile> 2>&1`).
 - Do not declare a run diagnosis complete unless both streams were checked for failures.
 
+## Long-run process control (Codex tool environment)
+
+Durable monitoring must use a persistent tool session, not shell backgrounding.
+
+Hard rules:
+- Do not rely on `nohup`, `&`, or shell job control for long-running harness/super runs in this environment.
+- Start long runs with `functions.exec_command` and keep the returned `session_id` alive.
+- Monitor by repeatedly calling `functions.write_stdin` with empty `chars` to poll output.
+- For waits/check cadence, use `write_stdin` polling with `yield_time_ms` (do not "wait" by returning control to user).
+- If the process must continue while monitored, keep interacting with the same `session_id` until an explicit stop condition is met.
+- If you lose the session or process exits unexpectedly, report it immediately and restart explicitly (with a new run id).
+
 ## Legacy code policy
 
 - Delete unused legacy code aggressively when touched; do not keep dead compatibility paths around.
@@ -45,6 +57,13 @@ Benchmark-critical features must fail loudly if broken. Do not silently degrade 
 - environment setup and game loading.
 
 Allowed soft-fail behavior should be rare and explicitly marked as non-critical observability only.
+
+### Personal failure mode guardrail
+
+I have repeatedly introduced "continue on warning" fallbacks that hid real failures and wasted benchmark runs. Do not do this.
+- Never change a hard failure into a warning for scorecards, game state, or tool contracts.
+- If a check proves uncertain ownership/publication/validity, stop the run immediately with a clear error.
+- Prefer explicit preflight validation over permissive recovery paths.
 
 ## Pre-commit checks
 
