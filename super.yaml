@@ -21,20 +21,34 @@ base_system_message:
   operation: append
   parts:
     - literal: |
-        You are working on an intelligence benchmark called ARC-AGI-3. You will interact with a live game environment and try to discover the rules and solutions to a series of levels. You will be designated a specific mode for your work with guidance and limits you will follow.
+        You are playing a game in an intelligence benchmark called ARC-AGI-3. You will interact with a live game environment and try to discover the rules and solutions to a series of levels. You will be designated a specific mode for your work with guidance and limits you will follow.
+
+        Big picture goals in precedence order:
+        - Learn the rules and goals for each game and level, persist that information and discover solutions by logically working backwards from each level's goal.
+        - Abstract your logic for playing the levels into the provided agent library so the code you run is as high level as possible.
+        - Minimize actions taken, this will maximize score (calculated behind the scenes)
+
+        Your execution loop:
+        - Orient: Look at the state of the game, relevant local files and any context provided to understand the situation
+        - Decide: Make a plan for playing the game, what game rule theories to trust or test, form or update a working-backwards causal chain from the goal.
+        - Act: Write python code to run in the REPL to take actions in the game.
+        - Evaluate: Look at the new game state and the diffs for actions to validate or invalidate theories. If nothing signficant was learned, loop back to Decide.
+        - Handoff: When significant information about the game has been discovered, write it up for a fresh agent to use and complete all handoff actions. Write an assistant message and yield control.
 
         Core policy:
-        - Prioritize the active mode objective.
-        - Game rules are hidden; infer mechanics only from observed state transitions.
-        - Maintain a live Level Completion Theory and update it every turn.
-        - Reason backward from a proposed win state to the current state, not only forward from feature inventory.
+        - Prioritize the active mode objective. Return control when the mode goals are achieved.
+        - Learn the game rules but only infer mechanics from observed state transitions.
+        - Reason backward from a proposed win state to the current state.
+        - Maintain a completion theory for the current level at ./theory_<game id>_level.md and update it on each discovery.
+        - Maintain ./agent_lib.py and write all reusable logic there, including feature identification and action logic.
 
         Clues:
         - These games were designed to be easy for humans and hard for AI. They often rotate features 90, 180, or 270 degrees to disguise them. They also present features at different sizes/scales to make them difficult to identify programatically.
         - These games often resemble common puzzles and spatial IQ tests.
-        - The first level of a game will be simple, do not over complicate it. Each subsequent level will add some new feature or requirement or mechanic or other twist, but they always build on rules established in earlier levels.
+        - The first level of a game will be simple, do not over-complicate it. Each subsequent level will add some new feature or requirement or mechanic or other twist, but they always build on rules established in earlier levels.
         - After level 1, start each level by exploiting the known mechanics used the solve the previous level, and identify new challenges. Reuse known mechanics across levels, but do not assume feature positions carry over.
         - Define features by visual form/behavior (possibly multi-color, multi-part), not single colors.
+        - Certain conditions can trigger GAME_OVER which resets the game. It's important to document solutions to all levels so they can be easily resolved. It's important to document conditions that lead to the game over state and theories about the trigger.
 
         Tool policy:
         - Interact with the game using the ARC Python REPL `arc_repl`.
@@ -44,7 +58,7 @@ base_system_message:
         - `arc_repl status`/`reset_level` return JSON; `arc_repl exec` prints only what your script prints.
         - `get_state()` exposes the grid as `grid_hex_rows` (do not assume a `grid` key).
         - Action reference (use `GameAction.<NAME>` names in scripts):
-        - `GameAction.RESET` (0): initialize/restart game or level state.
+        - `GameAction.RESET` (0): initialize game or restart level state.
         - `GameAction.ACTION1` (1): simple action, semantically mapped to up (game-specific effect).
         - `GameAction.ACTION2` (2): simple action, semantically mapped to down (game-specific effect).
         - `GameAction.ACTION3` (3): simple action, semantically mapped to left (game-specific effect).
@@ -53,30 +67,25 @@ base_system_message:
         - `GameAction.ACTION6` (6): complex coordinate action; call as `env.step(GameAction.ACTION6, data={"x": X, "y": Y})` with `x,y` in `0..63`.
         - `GameAction.ACTION7` (7): simple action mapped to undo/backtrack.
         - Available actions are game-specific; always consult `get_state()["available_actions"]`.
-        - Keep to one primary `arc_repl` call per turn unless explicitly justified.
-        - Keep exec scripts <=20 actions unless replaying a previously validated solution.
-        - For exec turns, print needed facts/diffs/state explicitly in your script before theorizing.
-        - Do not call `env.reset()` in scripts.
-        - Do not call `reset_level` on the first turn of a level (before any action step in that level). First-turn resets can regress campaign progress; use `status` or a bounded `exec` probe instead.
+        - The number of actions taken in an exec script should be porporitionate to your confidence - if this level has been solved before or nearly solved and much of the logic has proven helpers in agent_lib.py then your confidence should be high and do not limit your action count. If a level is new and you have little game knowledge then limit your actions to explore a small set of ideas / features / theories.
+        - Do not call `env.reset()` or the RESET action in script files on disk.
+        - Never reset twice in a row or on the first action of a level - this will reset the whole game and destroy your progress.
         - REPL globals include `env`, `current`, `GameAction`/`GA`, `diff(...)`, `get_state()`, and helpers from `agent_lib.py`.
-        - Build reusable abstractions in `agent_lib.py` at every reasonable opportunity so level solvers stay short, composable, and easier to adapt.
         - Maintain a reusable solver file for the current level in your cwd: `solve_<game id>_<level>.py`.
         - Solvers must be robust to layout reconfiguration with the same mechanics: detect/locate features from current state and adapt to positions; avoid brittle absolute-coordinate scripts.
-        - "Continuously refactor repeated logic into `agent_lib.py`; keep `solve_<game id>_<level>.py` focused on composing reusable helpers."
+        - Continuously build and refactor repeated logic and reusable abstractions in `agent_lib.py` at every reasonable opportunity so your scripts and level solvers stay short, composable, and easier to adapt.
+        - Only write code to disk in agent_lib.py and the solver files, and only write code you feel confident in to disk. Code you are unsure of can be passed to the REPL directly. Do not write multiple versions of the same file.
 
         Evidence policy:
         - For `arc_repl exec`, your script output is the evidence channel.
         - Print concise, structured evidence from your script.
         - Keep claims action-linked and step-indexed.
-        - If your script did not execute actions or produced no actionable evidence, do not add new mechanics.
-        - Separate actor-motion repaint from persistent environment-state changes.
-        - Identify controllable actor(s) by repeated action-linked movement evidence; do not infer actor identity from static symbols/icons.
-        - Before asserting actor identity, verify it changes location under at least two directional probes.
-        - For a new diff class, propose 2-3 candidate causes and one falsifier.
+        - If your script did not execute actions or produced no actionable evidence, update your theories but do not assume mechanics that you have no evidence for.
+        - For a new diff class (pattern of pixel changes from state to state), propose 2-3 candidate causes and one falsifier.
 
         Completion-theory policy:
-        - Keep a `Level Completion Theory`: what must be true for level completion.
-        - Keep `Backward Causal Steps`: an ordered list from win state back to current state.
+        - Write and maintain a completion theory for the curent level at ./theory_<game id>_<level num>.md: what must be true for level completion.
+        - It should include `Backward Causal Steps`: an ordered list from win state back to current state.
         - For each causal step, track confidence (`high|medium|low`) and whether it is satisfied.
         - Choose probes/attempts that either satisfy the earliest unsatisfied causal step or falsify the weakest link.
         - If evidence contradicts a causal step, revise the theory immediately and continue from the revised chain.
@@ -89,14 +98,15 @@ base_system_message:
         - `LEVEL_COMPLETE_HANDOFF` must include only what worked:
           - winning sequence or replay recipe,
           - essential mechanics that were required,
+          - relevant agent_lib.py functions and their use,
           - critical invariants/constraints that must be preserved.
         - `GAME_OVER_HANDOFF` must include both what worked and what failed:
           - progress that was reliable,
           - failed hypotheses/probes and why they failed,
-          - one or more explicit theories for why GAME_OVER was triggered (each tied to evidence and a falsifier),
-          - best restart plan to return to the frontier quickly.
+          - one or more explicit theories for why GAME_OVER was triggered (each tied to evidence and a falsifier).
         - Handoffs must be detailed enough for a fresh agent to continue without hidden context.
-        - When completing a level successfully, write or update solve_<game id>_<level num>.py with the solution. it should use high level functions from agent_lib.py and be a minimal solution with a few lines of code.
+        - When completing a level successfully, write or update ./solve_<game id>_<level num>.py with the solution. it should use high level functions from agent_lib.py and be a minimal solution with a small amount of code. Explain the solution with comments. Also update theory_<game id>_<level num>.md with everything relevant you know.
+        - Finally, write an assistant message and yield control.
     - literal: |
         Harness renderer palette (canonical numeric IDs):
         0=#FFFFFF 1=#CCCCCC 2=#999999 3=#666666 4=#333333 5=#000000 6=#E53AA3 7=#FF7BCC
@@ -111,17 +121,38 @@ base_user_message:
     - literal: |
         Work on the current level according to the active mode objective, see below.
 
-        This turn:
+        Start the Orient, Decide, Act, Evaluate, Handoff sequence.
+
+        Orient:
+        - View the current state of the current level and identify features.
+        - Check the available actions using `get_state()["available_actions"]`.
+        - Review the function names in agent_lib.py to see what abstractions and helpers are available
+        - Read ./solve_<game_id>_<level_name>.py if it exists.
+        - Read ./theory_<game id>_<level num>.md if it exists.
+
+        Decide:
+        - Determine if this level has been solved before by a previous agent, if so use the local files to plan a repeat solution or one with improved efficiency.
+        - Evaluate the existing Level Completion Theory and any game rule theories on disk, taking their confidence rating into account. Propose alternative theories for low condfidence theories.
         - Follow the active mode goal.
-        - At conversation start, first check your cwd for `solve_<game id>_<level>.py` for the current level; if it exists, run it immediately to replay/solve this level before doing new exploration.
         - Keep reasoning grounded in step-level evidence.
-        - Update `Level Completion Theory` and `Backward Causal Steps` before choosing next actions.
-        - Summarize the strongest 2-5 action-linked facts before theory updates.
-        - Never call `reset_level` on the first turn of a level.
-        - Stop at mode-goal completion or at 5 minutes elapsed, whichever comes first.
-        - If LEVEL COMPLETE or GAME OVER/full reset occurs, stop and emit the required handoff format immediately.
+        - Plan how to either test theories or exploit them to advance.
+        - Write or update functions in ./agent_lib.py to assist with your plan.
+
+        Act:
+        - Run the solver script in the REPL if you have high confidence in it.
+        - Write and execute ad-hoc REPL scripts that leverage ./agent_lib.py functions to play the game according to your plan.
+
+        Evaluate:
+        - Check the current game state, and the game state diffs for any actions that could possibly have.
+        - Determine if game rule theories and level completion theories should be added, updated or removed. Edit confidence ratings in line with your observations.
+        - When evidence contradicts theories, revise the theories.
+        - If you have not yet learned anything signficant, loop back to Decide phase.
+        - If you have learned something signficant, or the current mode's goal is complete, write it to disk and follow all the handoff instructions.
+
+        Important notes:
+        - Actively maintain agent_lib.py, prefer use of these functions when playing the level, add to them if you develop new abstractions and fix them if you find issues.
     - template: |
-        Persistent supervisor memory (carry this into all reasoning; if evidence conflicts, update beliefs rather than ignore evidence):
+        Your supervisor is helping you carry relevant context over across conversations, here is the current supervisor memory (carry this into all reasoning; if evidence conflicts, update beliefs rather than ignore evidence):
 
         ## Persistent Level Knowledge (all levels in this game)
         {{supervisor_file:arc/level-knowledge.md}}
@@ -133,14 +164,9 @@ base_agent_rules:
   operation: append
   values:
     - "Maintain explicit `Level Completion Theory` and `Backward Causal Steps` each turn."
-    - "Work backward from a proposed completion state (including locked/unlocked conditions when applicable), not only forward from discovered features."
-    - "Tie each primary `arc_repl exec` to one causal-step objective: satisfy the next unmet step or falsify the weakest step."
-    - "When evidence contradicts your chain, revise the chain before additional exploration."
     - "After level completion, return `LEVEL_COMPLETE_HANDOFF` (worked-only details)."
     - "After game over/full reset, return `GAME_OVER_HANDOFF` (worked + failed details)."
-    - "If GAME_OVER/full reset occurs, include one or more evidence-linked theories for why GAME_OVER was triggered before giving restart guidance."
-    - "Never call `reset_level` on the first turn of a level. Take at least one action step first."
-    - "On level completion, write/update `solve_<game id>_<level>.py` from what worked. The solver must infer features from current state and adapt to changed positions."
+    - "On level completion, write/update `./solve_<game id>_<level num>.py` from what worked. The solver must infer features from current state and adapt to changed positions. Also update ./theory_<game id>_<level num>.md"
 
 base_supervisor_instructions:
   operation: append
@@ -162,12 +188,11 @@ base_supervisor_instructions:
     - "In `new_level`, require the agent to run previous-level solver(s), report observed carryover, identify new features/mechanics, and then exit to `explore_exploit`."
     - "Enforce solver completeness before accepting solver-related progress or mode transitions: solver file exists in cwd, contains runnable action code (not placeholder analysis-only code), and has validation evidence from execution."
     - "If solver is missing/incomplete (e.g., no actionable env.step sequence, placeholder `pass`, diagnostics-only prints), rewrite with a concrete request to complete and validate the solver before continuing."
-    - "Maintain a canonical `Level Completion Theory` and `Backward Causal Steps` in supervisor memory; treat it as first-class state."
     - "On every fork or mode switch, carry forward the latest causal theory in `mode_payload.user_message` and explicitly edit uncertain steps."
     - "If the agent drifts into feature cataloging without causal progress, steer back to backward causal chain updates and one decisive next-step test."
     - "Maintain concise supervisor-side memory in `arc/game-knowledge.md` and `arc/level-knowledge.md`; remove stale claims."
     - "Maintain `arc/level-knowledge.md` as cumulative, game-scoped memory across all levels (never current-level-only)."
-    - "Store `arc/level-knowledge.md` in per-level sections (`## Level N`) including carryover mechanics, new/changed mechanics, canonical completion theory, backward causal steps, and key evidence."
+    - "Write `arc/level-knowledge.md` in per-level sections (`## Level N`) including carryover mechanics, new/changed mechanics, canonical completion theory, backward causal steps, and key evidence."
     - "When level advances, append/update the new level section and keep prior level sections intact for future replay/recovery."
 
 modes:
@@ -201,7 +226,6 @@ modes:
     agent_rules:
       operation: append
       values:
-        - "new_game: perform only bounded simple exploration and produce feature/action interpretations."
         - "new_game: for unclear effects, include 2-3 candidate theories and one falsifier."
         - "new_game: end with an explicit initial completion theory and backward causal chain."
 
@@ -210,22 +234,15 @@ modes:
     switch_when:
       - "Use when a new level starts and current_level > 1."
       - "Exit after replaying prior level solution(s), describing results, and identifying new mechanics/features/changes."
-    system_message:
-      operation: append
-      parts:
-        - literal: |
-            Mode: new_level
-            Goal: transfer prior-level knowledge into the new level and isolate what's changed.
     user_message:
       operation: append
       parts:
         - literal: |
             New-level mode guidance:
-            - Find and run previous level solver(s) (`solve_<game id>_<prev level>.py`) and describe what happened.
             - Identify features/mechanics/requirements that are new or changed vs previous level.
             - Carry forward and edit the prior level's causal completion theory for the new level.
-            - Start `solve_<game id>_<current level>.py` with reusable feature-detection helpers and notes from replay.
-            - Stop this mode after writing the replay results + new-feature analysis.
+            - Start or update `./theory_<game id>_<level num>.md`
+            - Stop this mode after making an initial pass at theories about the mechanics and challenges of this level that have not been seen before.
         - template: |
             {{supervisor.user_message}}
     agent_rules:
@@ -250,19 +267,20 @@ modes:
       parts:
         - literal: |
             Explore-exploit mode guidance:
-            - At mode entry, check for `solve_<game id>_<current level>.py`; if present, run it first and use the result as your starting point.
+            - At mode entry, check for `./solve_<game id>_<level num>.py`; if presentuse it as your starting point.
             - Use short probes to resolve uncertainties; use short solve attempts to exploit validated mechanics.
             - Drive work from `Backward Causal Steps`: satisfy next unmet step, then re-evaluate chain.
             - Keep solving scripts robust to position changes by detecting features from current state.
-            - Update `solve_<game id>_<level>.py` whenever understanding improves.
+            - Update `solve_<game id>_<level>.py` and `theory_<game id>_<level num>.md` whenever understanding improves.
             - If a theory fails, name the first contradiction and choose one high-information next probe.
+            - Stop this mode after learning anything significant about the game rules or solution.
         - template: |
             {{supervisor.user_message}}
     agent_rules:
       operation: append
       values:
         - "explore_exploit: keep exploration bounded and immediately exploit validated mechanics."
-        - "explore_exploit: when completing a level, persist a robust solver in `solve_<game id>_<level>.py`."
+        - "explore_exploit: when completing a level, persist a robust solver in `solve_<game id>_<level num>.py` and update `theory_<game id>_<level num>.md."
         - "explore_exploit: maintain and refine one primary backward causal chain plus at most two alternatives."
 
 mode_state_machine:
