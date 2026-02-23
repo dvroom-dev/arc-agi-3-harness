@@ -7,6 +7,7 @@ from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import harness
+import requests.utils
 
 
 def _seed_project(root: Path) -> None:
@@ -23,6 +24,7 @@ def test_harness_runs_multiple_games_under_one_shared_scorecard(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    monkeypatch.setenv("ARC_API_KEY", "test-key")
     root = tmp_path / "proj"
     _seed_project(root)
 
@@ -50,6 +52,7 @@ def test_harness_runs_multiple_games_under_one_shared_scorecard(
     }
     observed_status_requests: list[str] = []
     observed_scorecard_env: list[str | None] = []
+    observed_scorecard_cookies_env: list[str | None] = []
 
     class FakeOperationMode:
         @classmethod
@@ -59,6 +62,12 @@ def test_harness_runs_multiple_games_under_one_shared_scorecard(
     class FakeArcadeClient:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
+            self._session = SimpleNamespace(
+                cookies=requests.utils.cookiejar_from_dict(
+                    {"GAMESESSION": "cookie-batch"},
+                    overwrite=True,
+                )
+            )
 
         def open_scorecard(self, tags, opaque):
             calls["open"] += 1
@@ -81,6 +90,7 @@ def test_harness_runs_multiple_games_under_one_shared_scorecard(
         text_input = kwargs.get("input")
         env = kwargs.get("env", {})
         observed_scorecard_env.append(env.get("ARC_SCORECARD_ID"))
+        observed_scorecard_cookies_env.append(env.get("ARC_SCORECARD_COOKIES"))
         arc_state_dir = Path(env.get("ARC_STATE_DIR", root / "runs" / "batch" / "supervisor" / "arc"))
         arc_state_dir.mkdir(parents=True, exist_ok=True)
         if isinstance(text_input, str):
@@ -144,6 +154,8 @@ def test_harness_runs_multiple_games_under_one_shared_scorecard(
     assert observed_status_requests == ["ls20", "ft09"]
     assert observed_scorecard_env
     assert all(v == "sc-batch" for v in observed_scorecard_env)
+    assert observed_scorecard_cookies_env
+    assert all(v and "GAMESESSION" in v for v in observed_scorecard_cookies_env)
     assert (root / ".ctxs" / "batch-01-ls20").exists()
     assert (root / ".ctxs" / "batch-02-ft09").exists()
     first_arc = root / "runs" / "batch-01-ls20" / "supervisor" / "arc"
@@ -155,6 +167,7 @@ def test_harness_multi_game_reused_scorecard_validates_per_game(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    monkeypatch.setenv("ARC_API_KEY", "test-key")
     root = tmp_path / "proj"
     _seed_project(root)
 

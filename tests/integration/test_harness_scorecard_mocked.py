@@ -10,6 +10,7 @@ import harness
 
 
 def test_harness_open_and_close_scorecard_mocked(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("ARC_API_KEY", "test-key")
     root = tmp_path / "proj"
     (root / "tools").mkdir(parents=True)
     (root / "prompts").mkdir(parents=True)
@@ -114,4 +115,3 @@ def test_harness_open_and_close_scorecard_mocked(tmp_path: Path, monkeypatch) ->
     payload = json.loads(score_meta.read_text())
     assert payload["scorecard_id"] == "sc-1"
     assert payload["closed"] is True
-

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 import time
@@ -53,6 +54,31 @@ def _call_quiet(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
 
+def _apply_scorecard_cookies_from_env(arcade) -> None:
+    payload = str(os.getenv("ARC_SCORECARD_COOKIES", "") or "").strip()
+    if not payload:
+        return
+    try:
+        data = json.loads(payload)
+    except Exception as exc:
+        raise RuntimeError(f"invalid ARC_SCORECARD_COOKIES JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise RuntimeError("invalid ARC_SCORECARD_COOKIES JSON: expected object")
+    try:
+        import requests.utils
+    except Exception as exc:
+        raise RuntimeError(f"requests.utils unavailable for ARC scorecard cookies: {exc}") from exc
+    session = getattr(arcade, "_session", None)
+    if session is None:
+        raise RuntimeError("cannot apply ARC_SCORECARD_COOKIES: Arcade client has no _session")
+    existing_jar = getattr(session, "cookies", None)
+    session.cookies = requests.utils.cookiejar_from_dict(
+        {str(k): str(v) for k, v in data.items()},
+        cookiejar=existing_jar,
+        overwrite=True,
+    )
+
+
 def _get_pixels(env, frame: FrameDataRaw | None = None) -> np.ndarray:
     if frame is not None:
         data = getattr(frame, "frame", None)
@@ -77,12 +103,19 @@ def _get_pixels(env, frame: FrameDataRaw | None = None) -> np.ndarray:
 def _make_env(game_id: str):
     mode = _resolve_operation_mode()
     kwargs: dict[str, object] = {"operation_mode": mode}
+    arc_base_url = str(os.getenv("ARC_BASE_URL", "") or "").strip()
+    if arc_base_url:
+        kwargs["arc_base_url"] = arc_base_url
+    arc_api_key = str(os.getenv("ARC_API_KEY", "") or "").strip()
+    if arc_api_key:
+        kwargs["arc_api_key"] = arc_api_key
     env_value = os.getenv("ARC_ENVIRONMENTS_DIR", "").strip()
     if env_value:
         kwargs["environments_dir"] = str(Path(env_value).expanduser())
     elif mode == OperationMode.OFFLINE:
         kwargs["environments_dir"] = str(_resolve_environments_dir())
     arcade = arc_agi.Arcade(**kwargs)
+    _apply_scorecard_cookies_from_env(arcade)
     scorecard_id = str(os.getenv("ARC_SCORECARD_ID", "") or "").strip() or None
     tried: list[str] = []
     for candidate in _make_id_candidates(game_id):
@@ -153,4 +186,3 @@ def _replay_history(env, events: list[dict]) -> FrameDataRaw:
         frame = result
         terminal = str(getattr(frame, "state", "").value) in {"GAME_OVER", "WIN"}
     return frame
-

@@ -13,6 +13,11 @@ from harness_runtime_cleanup import (
     cleanup_repl_daemons_impl,
     close_scorecard_if_needed_impl,
 )
+from harness_scorecard_helpers import (
+    build_scorecard_client,
+    export_scorecard_cookies_json,
+    resolve_arc_api_key,
+)
 
 
 class HarnessRuntime:
@@ -78,8 +83,13 @@ class HarnessRuntime:
         self.auto_explore_once_marker = self.arc_state_dir / "auto_explore_once.done"
         self.cycle_limit = 1
         self.scorecard_meta_path = self.session_dir / "scorecard.json"
+        self.arc_api_key = resolve_arc_api_key()
+        self.arc_api_key_prefix = self.arc_api_key[:8] if self.arc_api_key else None
 
         self.active_scorecard_id = str(args.scorecard_id or "").strip() or None
+        self.scorecard_cookies_json = (
+            str(getattr(args, "scorecard_cookies_json", "") or "").strip() or None
+        )
         self.scorecard_created_here = False
         self.scorecard_api_url: str | None = None
         self.scorecard_web_url: str | None = None
@@ -90,9 +100,18 @@ class HarnessRuntime:
                 raise RuntimeError(
                     "Scorecards require ONLINE mode. Re-run with --operation-mode ONLINE."
                 )
+            if not self.arc_api_key:
+                raise RuntimeError(
+                    "ARC_API_KEY is required for scored runs. "
+                    "Refusing to run with an anonymous key."
+                )
             self.scorecard_client = self._build_scorecard_client()
             if self.active_scorecard_id:
-                self.scorecard_client.get_scorecard(self.active_scorecard_id)
+                skip_get_validation = bool(
+                    getattr(args, "skip_scorecard_get_validation", False)
+                )
+                if not skip_get_validation:
+                    self.scorecard_client.get_scorecard(self.active_scorecard_id)
             else:
                 tags = [
                     "arc-agi-harness",
@@ -108,6 +127,8 @@ class HarnessRuntime:
                     self.scorecard_client.open_scorecard(tags=tags, opaque=opaque)
                 )
                 self.scorecard_created_here = True
+            if not self.scorecard_cookies_json:
+                self.scorecard_cookies_json = export_scorecard_cookies_json(self.scorecard_client)
             self.scorecard_api_url = (
                 f"{self.arc_base_url.rstrip('/')}/api/scorecard/{self.active_scorecard_id}"
             )
@@ -123,6 +144,8 @@ class HarnessRuntime:
                         "created_here": self.scorecard_created_here,
                         "operation_mode": self.operation_mode_name,
                         "arc_base_url": self.arc_base_url,
+                        "api_key_prefix": self.arc_api_key_prefix,
+                        "scorecard_cookies_present": bool(self.scorecard_cookies_json),
                     },
                     indent=2,
                 )
@@ -147,22 +170,24 @@ class HarnessRuntime:
         self.super_env.setdefault("ARC_ENVIRONMENTS_DIR", str(self.arc_env_dir))
         self.super_env["ARC_STATE_DIR"] = str(self.arc_state_dir)
         self.super_env["ONLY_RESET_LEVELS"] = "true"
+        if self.arc_api_key:
+            self.super_env["ARC_API_KEY"] = self.arc_api_key
         if self.active_scorecard_id:
             self.super_env["ARC_SCORECARD_ID"] = self.active_scorecard_id
+        if self.scorecard_cookies_json:
+            self.super_env["ARC_SCORECARD_COOKIES"] = self.scorecard_cookies_json
         self.super_env["PATH"] = f"{self.run_bin_dir}:{os.environ.get('PATH', '')}"
 
     def log(self, msg: str) -> None:
         print(msg, file=self.deps.sys.stderr, flush=True)
 
     def _build_scorecard_client(self):
-        import arc_agi
-        from arc_agi import OperationMode
-
-        mode = OperationMode[self.operation_mode_name]
-        return arc_agi.Arcade(
-            operation_mode=mode,
+        return build_scorecard_client(
+            operation_mode_name=self.operation_mode_name,
             arc_base_url=self.arc_base_url,
-            environments_dir=str(self.arc_env_dir),
+            environments_dir=self.arc_env_dir,
+            arc_api_key=self.arc_api_key,
+            scorecard_cookies_json=self.scorecard_cookies_json,
         )
 
     def provider_args(self) -> list[str]:
@@ -259,9 +284,13 @@ class HarnessRuntime:
         child_env.setdefault("ARC_ENVIRONMENTS_DIR", str(self.arc_env_dir))
         child_env["ARC_STATE_DIR"] = str(self.arc_state_dir)
         child_env["ONLY_RESET_LEVELS"] = "true"
+        if self.arc_api_key:
+            child_env["ARC_API_KEY"] = self.arc_api_key
         child_env["ARC_CONVERSATION_ID"] = self.active_conversation_id
         if self.active_scorecard_id:
             child_env["ARC_SCORECARD_ID"] = self.active_scorecard_id
+        if self.scorecard_cookies_json:
+            child_env["ARC_SCORECARD_COOKIES"] = self.scorecard_cookies_json
 
         proc = self.deps.subprocess.run(
             cmd,

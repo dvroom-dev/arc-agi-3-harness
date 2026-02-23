@@ -83,6 +83,14 @@ def parse_args_impl() -> argparse.Namespace:
             "Use this to fail fast if ARC_API_KEY points to the wrong account."
         ),
     )
+    parser.add_argument(
+        "--scorecard-session-preflight",
+        action="store_true",
+        help=(
+            "Run a scored-session preflight before scored runs. "
+            "This exercises both positive and historical failure paths for scorecard/session binding."
+        ),
+    )
     return parser.parse_args()
 
 

@@ -22,6 +22,7 @@ def _seed_project(root: Path) -> None:
 
 
 def test_harness_reuses_existing_scorecard_without_closing(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("ARC_API_KEY", "test-key")
     root = tmp_path / "proj"
     _seed_project(root)
 
@@ -158,7 +159,44 @@ def test_harness_scorecard_requires_online_mode(tmp_path: Path, monkeypatch) -> 
         harness.main()
 
 
+def test_harness_scored_run_requires_api_key(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("ARC_API_KEY", raising=False)
+    monkeypatch.setattr("harness_runtime.resolve_arc_api_key", lambda **kwargs: "")
+    root = tmp_path / "proj"
+    _seed_project(root)
+
+    args = Namespace(
+        game_id="ls20",
+        max_turns=0,
+        operation_mode="ONLINE",
+        session_name="t-score-key-required",
+        verbose=False,
+        open_scorecard=True,
+        scorecard_id=None,
+        provider="mock",
+        no_supervisor=True,
+        no_explore=True,
+        max_game_over_resets=1,
+        arc_backend="api",
+        arc_base_url="http://example.test",
+    )
+
+    monkeypatch.setattr(harness, "PROJECT_ROOT", root)
+    monkeypatch.setattr(harness, "CTXS", root / ".ctxs")
+    monkeypatch.setattr(harness, "PROJECT_VENV_PYTHON", Path(sys.executable))
+    monkeypatch.setattr(harness, "parse_args", lambda: args)
+    monkeypatch.setattr(
+        harness,
+        "cleanup_orphan_repl_daemons",
+        lambda *a, **k: {"killed": 0, "stale_files_removed": 0, "skipped_active": 0},
+    )
+
+    with pytest.raises(RuntimeError, match="ARC_API_KEY is required"):
+        harness.main()
+
+
 def test_harness_owner_check_rejects_wrong_account_scorecard_id(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("ARC_API_KEY", "test-key")
     root = tmp_path / "proj"
     _seed_project(root)
 

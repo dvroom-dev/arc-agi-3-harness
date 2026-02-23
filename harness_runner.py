@@ -13,6 +13,7 @@ from harness_runtime import HarnessRuntime
 from harness_scorecard_helpers import (
     close_shared_scorecard,
     open_shared_scorecard,
+    run_scorecard_session_preflight,
     validate_scorecard_owner_check,
 )
 from harness_scorecard_timeout_hack import (
@@ -101,6 +102,8 @@ def _run_single_game(
     runtime.log(f"[harness] game: {args.game_id} ({game_index}/{total_games})")
     runtime.log(f"[harness] arc backend: {args.arc_backend}")
     runtime.log(f"[harness] arc base url: {arc_base_url}")
+    if runtime.arc_api_key_prefix:
+        runtime.log(f"[harness] arc api key prefix: {runtime.arc_api_key_prefix}")
     if runtime.offline_mode:
         runtime.log(
             "[harness] NOTE: operation-mode OFFLINE ignores ARC backend/base-url "
@@ -350,6 +353,9 @@ def run_main(deps) -> None:
     shared_scorecard_id = str(args.scorecard_id or "").strip() or None
     shared_scorecard_client = None
     shared_scorecard_created_here = False
+    shared_scorecard_cookies_json = (
+        str(getattr(args, "scorecard_cookies_json", "") or "").strip() or None
+    )
 
     if args.open_scorecard or shared_scorecard_id:
         validate_scorecard_owner_check(
@@ -358,6 +364,12 @@ def run_main(deps) -> None:
             arc_base_url=arc_base_url,
             session_base=session_base,
         )
+        if bool(getattr(args, "scorecard_session_preflight", False)):
+            run_scorecard_session_preflight(
+                operation_mode_name=operation_mode_name,
+                arc_base_url=arc_base_url,
+                log=lambda msg: print(msg, file=sys.stderr, flush=True),
+            )
 
     if len(game_ids) > 1 and args.open_scorecard:
         (
@@ -365,6 +377,7 @@ def run_main(deps) -> None:
             shared_scorecard_id,
             scorecard_api_url,
             scorecard_web_url,
+            shared_scorecard_cookies_json,
         ) = open_shared_scorecard(
             args=args,
             game_ids=game_ids,
@@ -390,6 +403,7 @@ def run_main(deps) -> None:
             if shared_scorecard_id:
                 game_args.open_scorecard = False
                 game_args.scorecard_id = shared_scorecard_id
+                game_args.scorecard_cookies_json = shared_scorecard_cookies_json
                 # Only skip per-game GET validation when the shared scorecard
                 # was created by this process. For a user-supplied scorecard ID,
                 # revalidate in each game session to avoid silent bad-ID runs.

@@ -4,6 +4,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import requests.utils
 
 import arc_action
 
@@ -77,8 +78,30 @@ def test_replay_history_reset_and_terminal_handling() -> None:
     assert frame is not None
 
 
+def test_make_env_applies_scorecard_cookies(monkeypatch) -> None:
+    created = []
+
+    class FakeArcade:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self._session = SimpleNamespace(cookies=requests.utils.cookiejar_from_dict({}))
+            created.append(self)
+
+        def make(self, gid, render_mode=None, scorecard_id=None):
+            assert scorecard_id == "sc-123"
+            return object()
+
+    monkeypatch.setenv("ARC_OPERATION_MODE", "NORMAL")
+    monkeypatch.setenv("ARC_SCORECARD_ID", "sc-123")
+    monkeypatch.setenv("ARC_SCORECARD_COOKIES", '{"GAMESESSION":"cookie-123"}')
+    monkeypatch.setattr(arc_action.arc_agi, "Arcade", FakeArcade)
+    _ = arc_action._make_env("ls20")
+    assert created
+    cookies = requests.utils.dict_from_cookiejar(created[0]._session.cookies)
+    assert cookies.get("GAMESESSION") == "cookie-123"
+
+
 def test_get_pixels_uses_frame_data() -> None:
     frame = _frame()
     pixels = arc_action._get_pixels(None, frame)
     assert pixels.shape == (2, 2)
-
