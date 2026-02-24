@@ -13,6 +13,7 @@ class FakeEnv:
     def __init__(self):
         self.steps = 0
         self.current_levels = 0
+        self.resets = 0
 
     def step(self, action, data=None, reasoning=None):
         self.steps += 1
@@ -36,6 +37,7 @@ class FakeEnv:
         )
 
     def reset(self):
+        self.resets += 1
         self.steps = 0
         self.current_levels = 0
         action_id = SimpleNamespace(name="RESET", value=0)
@@ -105,6 +107,44 @@ def test_repl_session_status_reset_exec(monkeypatch, tmp_path: Path) -> None:
     assert result["state"] in {"NOT_FINISHED", "WIN"}
 
 
+def test_repl_reset_level_is_noop_at_level_start(monkeypatch, tmp_path: Path) -> None:
+    _patch_session_dependencies(monkeypatch, tmp_path)
+    session = arc_repl.ReplSession(
+        cwd=tmp_path,
+        conversation_id="conv-1",
+        requested_game_id="ls20",
+    )
+    initial_resets = session.env.resets
+    result = session.do_reset_level("ls20", session_created=False)
+    assert result["ok"] is True
+    assert result["action"] == "reset_level"
+    assert result["reset_noop"] is True
+    assert result["noop_reason"] == "already_at_level_start"
+    assert session.env.resets == initial_resets
+    assert session.events == []
+
+
+def test_repl_reset_level_executes_after_step_in_level(monkeypatch, tmp_path: Path) -> None:
+    _patch_session_dependencies(monkeypatch, tmp_path)
+    session = arc_repl.ReplSession(
+        cwd=tmp_path,
+        conversation_id="conv-1",
+        requested_game_id="ls20",
+    )
+    initial_resets = session.env.resets
+    _ = session.do_exec(
+        "ls20",
+        "env.step(GameAction.ACTION1)\n",
+        session_created=False,
+    )
+    result = session.do_reset_level("ls20", session_created=False)
+    assert result["ok"] is True
+    assert result["action"] == "reset_level"
+    assert result["reset_noop"] is False
+    assert session.env.resets == initial_resets + 1
+    assert any(str(e.get("kind", "")).strip() == "reset" for e in session.events)
+
+
 def test_repl_main_status_via_send_request(monkeypatch, capsys) -> None:
     monkeypatch.setattr(arc_repl.sys, "argv", ["arc_repl"])
     monkeypatch.setattr(
@@ -130,4 +170,3 @@ def test_repl_main_status_via_send_request(monkeypatch, capsys) -> None:
     payload = json.loads(out)
     assert payload["ok"] is True
     assert payload["repl"]["session_created"] is True
-

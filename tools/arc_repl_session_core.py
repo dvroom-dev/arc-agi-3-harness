@@ -55,8 +55,8 @@ class BaseReplSession:
         self.turn = int(self.history.get("turn", 0))
         self.events: list[dict] = list(self.history.get("events", []))
 
-        self.env = deps._call_quiet(deps._make_env, game_id)
-        self.frame = deps._call_quiet(deps._replay_history, self.env, self.events)
+        self.env = deps._make_env(game_id)
+        self.frame = deps._replay_history(self.env, self.events)
         self.pixels = deps._get_pixels(self.env, self.frame)
         self.game_id = str(getattr(self.frame, "game_id", "")).strip() or game_id
         self.history["game_id"] = self.game_id
@@ -115,6 +115,27 @@ class BaseReplSession:
         self.history["events"] = self.events
         self.history["turn"] = self.turn
         self.deps._save_history(self.cwd, self.history)
+
+    def _steps_since_level_start(self) -> int:
+        steps_in_level = 0
+        current_levels = 0
+        for event in self.events:
+            kind = str(event.get("kind", "")).strip()
+            if kind == "reset":
+                steps_in_level = 0
+                continue
+            if kind != "step":
+                continue
+            try:
+                levels_now = int(event.get("levels_completed", current_levels))
+            except Exception:
+                levels_now = current_levels
+            if levels_now != current_levels:
+                steps_in_level = 0
+            else:
+                steps_in_level += 1
+            current_levels = levels_now
+        return steps_in_level
 
     def _write_state_artifacts(
         self,
@@ -367,7 +388,36 @@ class BaseReplSession:
 
         state_before = str(self.frame.state.value)
         levels_before = int(self.frame.levels_completed)
-        self.frame = self.deps._call_quiet(self.env.reset)
+        if self._steps_since_level_start() == 0:
+            self.turn += 1
+            self._sync_history_file()
+            trace_path = self._write_state_artifacts(
+                action_label="reset_level(noop)",
+                script_output="",
+                error="",
+                pre_pixels=None,
+                step_snapshots=[],
+                step_results=[],
+            )
+            result = self._finalize_result(
+                action="reset_level",
+                requested_game_id=requested_game_id,
+                state_before_action=state_before,
+                levels_before_action=levels_before,
+                pre_pixels=None,
+                step_snapshots=[],
+                step_results=[],
+                script_output="",
+                script_error="",
+                transitions=[],
+                trace_path=trace_path,
+                session_created=session_created,
+            )
+            result["reset_noop"] = True
+            result["noop_reason"] = "already_at_level_start"
+            return result
+
+        self.frame = self.env.reset()
         if self.frame is None:
             raise RuntimeError("env.reset() returned None")
         self.pixels = self.deps._get_pixels(self.env, self.frame)
@@ -383,7 +433,7 @@ class BaseReplSession:
             step_snapshots=[],
             step_results=[],
         )
-        return self._finalize_result(
+        result = self._finalize_result(
             action="reset_level",
             requested_game_id=requested_game_id,
             state_before_action=state_before,
@@ -397,6 +447,8 @@ class BaseReplSession:
             trace_path=trace_path,
             session_created=session_created,
         )
+        result["reset_noop"] = False
+        return result
 
     def do_exec(self, requested_game_id: str, script: str, *, session_created: bool) -> dict:
         return execute_exec_turn(
