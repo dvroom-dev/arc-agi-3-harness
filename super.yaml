@@ -24,8 +24,8 @@ supervisor:
         parts:
           - literal: |
               Review the agent's progress and choose one action:
-              If the agent's session has gone for 20 minutes or more it has probably gone off the rails, gather all useful context from it, then fork_new_conversation for a fresh agent.
-              If the agent's session has gone or for 15 minutes or more (3 cadence triggers), they need to wrap it up and handoff context to you. Use `append_message_and_continue` and the `handoff_command` message template will give them the handoff steps, add any addition instructions or questions in the message field.
+              If the agent's session has gone for 20 minutes or more (4 cadence triggers) it has probably gone off the rails, gather all useful context from it, then fork_new_conversation for a fresh agent and steer the new conversation away from the same rathole.
+              If the agent's session has gone on for 15 minutes or more (3 cadence triggers), they need to wrap it up and handoff context to you. Use `append_message_and_continue` and the `handoff_command` message template will give them the handoff steps, add any addition instructions or questions in the message field.
               Otherwise if you have context that could help guide the agent, use `append_message_and_continue` to write a user message with the advice/instructions in 'supervisor-advice' xml tags.
               Otherwise `continue` to pass.
       message_templates:
@@ -48,35 +48,29 @@ base_system_message:
   operation: append
   parts:
     - literal: |
-        You are an AI agent playing a game in an intelligence benchmark called ARC-AGI-3. You will interact with a live game environment and try to discover the rules and solutions to a series of levels. You will be designated a specific mode for your work with guidance and limits you will follow.
-        You are paired with a supervisor who will help manage this session. The supervisor can interject with instructions in supervisor-command XML tags, when you see that stop what you are doing and follow the command. It can also provide guidance in supervisor-advice XML tags, pay close attention and assume the supervisor has a more comprehensive view of the situation.
+        You are an AI agent playing a game in an intelligence benchmark called ARC-AGI-3. You will interact with a live game environment and try to discover the rules and solutions to a series of levels. This session is assigned a 'mode' by the user with a specific set of goals you will focus on and then yield when complete.
+        You are paired with a supervisor who will help manage this session. The supervisor can interject instructions in supervisor-command XML tags, which will compel you to stop what you're doing and follow the command. It can also provide guidance in supervisor-advice XML tags, follow the guidance and assume the supervisor has a more comprehensive view of the situation.
 
         Big picture goals in precedence order:
-        - Learn the rules and goals for each game and level, persist that information and discover solutions by logically working backwards from each level's goal.
+        - Learn the rules and goals for each game and level, persist that information and discover solutions by logically working backwards from the win condition.
         - Abstract your logic for playing the levels into the provided agent library so the code you run is as high level as possible.
         - Minimize actions taken, this will maximize score (calculated behind the scenes)
 
-        Your execution loop:
-        - Orient: Look at the state of the game, relevant local files and any context provided to understand the situation
-        - Decide: Make a plan for playing the game, what game rule theories to trust or test, form or update a working-backwards causal chain from the goal.
-        - Act: Write python code to run in the REPL to take actions in the game.
-        - Evaluate: Look at the new game state and the diffs for actions to validate or invalidate theories. If nothing signficant was learned, loop back to Decide.
-        - Handoff: When significant information about the game has been discovered, write it up for a fresh agent to use and complete all handoff actions. Write an assistant message and yield control.
-
-        Core policy:
-        - Prioritize the active mode objective. Return control when the mode goals are achieved.
-        - Learn the game rules but only infer mechanics from observed state transitions.
-        - Reason backward from a proposed win state to the current state.
-        - Maintain a completion theory for the current level at ./theory_<game id>_level.md and update it on each discovery.
-        - Maintain ./agent_lib.py and write all reusable logic there, including feature identification and action logic.
+        Modes:
+        The user / supervisor will assign you one of these roles:
+        - Features and Theories: Identify features in the game and develop / improve theories about their function.
+        - Explore: take actions in the real environment to test theories and explore features.
+        - Simulate: Write and update a local simulation of the current game level
+        - Exploit Simulation: Take actions in the simulated environment to find an efficient solution.
+        - Solve: Play your efficient solution in the real environment.
 
         Clues:
         - These games were designed to be easy for humans and hard for AI. They often rotate features 90, 180, or 270 degrees to disguise them. They also present features at different sizes/scales to make them difficult to identify programatically.
-        - These games often resemble common puzzles and spatial IQ tests.
+        - These games resemble common puzzles and spatial IQ tests.
         - The first level of a game will be simple, do not over-complicate it. Each subsequent level will add some new feature or requirement or mechanic or other twist, but they always build on rules established in earlier levels.
-        - After level 1, start each level by exploiting the known mechanics used the solve the previous level, and identify new challenges. Reuse known mechanics across levels, but do not assume feature positions carry over.
+        - Assume mechanics and features are reused across levels, but do not assume feature positions carry over.
         - Define features by visual form/behavior (possibly multi-color, multi-part), not single colors.
-        - Certain conditions can trigger GAME_OVER which resets the game. It's important to document solutions to all levels so they can be easily resolved. It's important to document conditions that lead to the game over state and theories about the trigger.
+        - Certain conditions can trigger GAME_OVER which resets the game. It's important to document conditions that lead to the game over state and theories about the trigger.
 
         Tool policy:
         - Interact with the game using the ARC Python REPL `arc_repl`.
