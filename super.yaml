@@ -13,15 +13,43 @@ stop_condition: |
 
 supervisor:
   enabled: true
-  review_timeout_ms: 960000
+  cadence_time_ms: 300000
+  review_timeout_ms: 300000
   disable_synthetic_check_supervisor_on_rule_failure: false
   context_carryover_limit_bytes: 98304
+  supervisor_triggers:
+    cadence:
+      supervisor_prompt:
+        operation: append
+        parts:
+          - literal: |
+              Review the agent's progress and choose one action:
+              If the agent's session has gone for 20 minutes or more it has probably gone off the rails, gather all useful context from it, then fork_new_conversation for a fresh agent.
+              If the agent's session has gone or for 15 minutes or more (3 cadence triggers), they need to wrap it up and handoff context to you. Use `append_message_and_continue` and the `handoff_command` message template will give them the handoff steps, add any addition instructions or questions in the message field.
+              Otherwise if you have context that could help guide the agent, use `append_message_and_continue` to write a user message with the advice/instructions in 'supervisor-advice' xml tags.
+              Otherwise `continue` to pass.
+      message_templates:
+        - name: handoff_command
+          description: "Tell the agent this session is wrapping up and require the full mid-level handoff checklist."
+          message_type: user
+          text: |
+            <supervisor-command trigger="cadence">
+            {{message}}
+
+            This session is wrapping up. Before yielding control, complete all mid-level handoff steps:
+            1) Update `./theory_<game id>_<level num>.md` with all new evidence, backward-causal-step updates, confidence changes, and open questions.
+            2) Update `./solve_<game id>_<level num>.py` with any newly validated or corrected solver logic.
+            3) Update `./agent_lib.py` with any useful abstractions or fixes discovered.
+            4) In your final assistant message, include the same updates you wrote to disk, plus the current state and what you were trying to do.
+            5) Yield control to the user.
+            </supervisor-command>
 
 base_system_message:
   operation: append
   parts:
     - literal: |
-        You are playing a game in an intelligence benchmark called ARC-AGI-3. You will interact with a live game environment and try to discover the rules and solutions to a series of levels. You will be designated a specific mode for your work with guidance and limits you will follow.
+        You are an AI agent playing a game in an intelligence benchmark called ARC-AGI-3. You will interact with a live game environment and try to discover the rules and solutions to a series of levels. You will be designated a specific mode for your work with guidance and limits you will follow.
+        You are paired with a supervisor who will help manage this session. The supervisor can interject with instructions in supervisor-command XML tags, when you see that stop what you are doing and follow the command. It can also provide guidance in supervisor-advice XML tags, pay close attention and assume the supervisor has a more comprehensive view of the situation.
 
         Big picture goals in precedence order:
         - Learn the rules and goals for each game and level, persist that information and discover solutions by logically working backwards from each level's goal.
@@ -68,9 +96,25 @@ base_system_message:
         - `GameAction.ACTION7` (7): simple action mapped to undo/backtrack.
         - Available actions are game-specific; always consult `get_state()["available_actions"]`.
         - The number of actions taken in an exec script should be porporitionate to your confidence - if this level has been solved before or nearly solved and much of the logic has proven helpers in agent_lib.py then your confidence should be high and do not limit your action count. If a level is new and you have little game knowledge then limit your actions to explore a small set of ideas / features / theories.
-        - Do not call `env.reset()` or the RESET action in script files on disk.
+        - Do not call `env.reset()` or reset_level or the RESET action in script files on disk.
         - Never reset twice in a row or on the first action of a level - this will reset the whole game and destroy your progress.
         - REPL globals include `env`, `current`, `GameAction`/`GA`, `diff(...)`, `get_state()`, and helpers from `agent_lib.py`.
+        - Do not import `agent_lib` inside REPL scripts (`from agent_lib import ...`); helpers from `agent_lib.py` are already injected into REPL globals.
+        - Example (direct helper use in `arc_repl exec`):
+          <example>
+          arc_repl exec <<'PY'
+          s = get_state()
+          print({"state": s["state"], "level": s["current_level"], "available_actions": s["available_actions"]})
+
+          # Helpers from agent_lib.py are available directly in globals.
+          # If you created helper `plan_next_actions` in agent_lib.py, call it directly:
+          if "plan_next_actions" in globals():
+              actions = plan_next_actions(s)
+              for i, a in enumerate(actions[:10], 1):
+                  r = env.step(a)
+                  print({"step": i, "action": int(a), "state": r.state.name, "level": r.current_level})
+          PY
+          </example>
         - Maintain a reusable solver file for the current level in your cwd: `solve_<game id>_<level>.py`.
         - Solvers must be robust to layout reconfiguration with the same mechanics: detect/locate features from current state and adapt to positions; avoid brittle absolute-coordinate scripts.
         - Continuously build and refactor repeated logic and reusable abstractions in `agent_lib.py` at every reasonable opportunity so your scripts and level solvers stay short, composable, and easier to adapt.
@@ -171,6 +215,8 @@ base_agent_rules:
 base_supervisor_instructions:
   operation: append
   values:
+    - "Every 5 minutes a 'cadence' trigger will fire, your job is it determine whether to give the agent advice, command them to wrap up the session and hand off, or take no action (continue)"
+    - "Limit most agent conversations to ~10 minutes. That means when the cadence trigger fires, you should usually tell the agent the session is wrapping up, list the handoff tasks it needs to complete and tell it to write an assistant message with all new information and yield control. Use the supervisor-command xml tag for the whole message."
     - "Treat rules as forward guidance; never require undoing prior actions."
     - "Optimize for conceptual progress and evidence quality over formatting."
     - "Advice should identify unsupported belief, missing evidence, and one high-information next probe."
