@@ -22,7 +22,7 @@ def test_harness_main_handles_game_over_then_reset(tmp_path: Path, monkeypatch) 
     (root / "prompts").mkdir(parents=True)
     (root / "runs").mkdir(parents=True)
     (root / "super.yaml").write_text("runtime_defaults: {}\n")
-    for f in ("arc_action.py", "arc_repl.py", "arc_repl_cli.py"):
+    for f in ("arc_repl.py", "arc_repl_cli.py", "arc_repl_daemon.py"):
         (root / "tools" / f).write_text("#!/usr/bin/env python3\n")
     (root / "prompts" / "new_game_auto_explore.py").write_text("print('x')\n")
 
@@ -43,10 +43,12 @@ def test_harness_main_handles_game_over_then_reset(tmp_path: Path, monkeypatch) 
     )
 
     state_counter = {"status_calls": 0}
+    seen_repl_session_keys: list[str] = []
 
     def fake_subprocess_run(cmd, **kwargs):
         text_input = kwargs.get("input")
         env = kwargs.get("env", {})
+        seen_repl_session_keys.append(str(env.get("ARC_REPL_SESSION_KEY", "")))
         arc_state_dir = Path(env.get("ARC_STATE_DIR", root / "runs" / "t-loop" / "supervisor" / "arc"))
         arc_state_dir.mkdir(parents=True, exist_ok=True)
         history_file = arc_state_dir / "tool-engine-history.json"
@@ -111,7 +113,7 @@ def test_harness_main_handles_game_over_then_reset(tmp_path: Path, monkeypatch) 
             return "assistant"
         if "resume" in args_list:
             out = Path(args_list[args_list.index("--output") + 1])
-            _write_session_file(out, conversation_id="conv-1")
+            _write_session_file(out, conversation_id="conv-2")
             return "assistant"
         return ""
 
@@ -125,4 +127,5 @@ def test_harness_main_handles_game_over_then_reset(tmp_path: Path, monkeypatch) 
 
     harness.main()
     assert (root / ".ctxs" / "t-loop" / "session.md").exists()
-
+    assert seen_repl_session_keys
+    assert all(k == "t-loop__ls20" for k in seen_repl_session_keys)

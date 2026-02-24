@@ -14,6 +14,20 @@ def test_conversation_id_sanitization(monkeypatch: pytest.MonkeyPatch) -> None:
     assert cid == "bad_id_with_chars"
 
 
+def test_session_key_prefers_arc_repl_session_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ARC_CONVERSATION_ID", "conv-raw")
+    monkeypatch.setenv("ARC_REPL_SESSION_KEY", "  run key/with:chars  ")
+    skey = arc_repl._session_key()
+    assert skey == "run_key_with_chars"
+
+
+def test_session_key_falls_back_to_conversation_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("ARC_REPL_SESSION_KEY", raising=False)
+    monkeypatch.setenv("ARC_CONVERSATION_ID", "conv x")
+    skey = arc_repl._session_key()
+    assert skey == "conv_x"
+
+
 def test_same_game_lineage() -> None:
     assert arc_repl._same_game_lineage("ls20", "ls20-cb3b57cc")
     assert arc_repl._same_game_lineage("ls20-cb3b57cc", "ls20")

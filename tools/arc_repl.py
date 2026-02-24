@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Stateful ARC Python REPL tool for super shell usage.
-
-JSON stdin contract:
-- action=status
-- action=exec (inline script only via `script`)
-- action=reset_level
-- action=shutdown (stop conversation REPL daemon)
-
-The REPL is conversation-scoped (ARC_CONVERSATION_ID) and persists Python globals
-across calls in a daemon process. New conversations start a fresh REPL namespace,
-seeded with an `env` already positioned at the current game state via replay history.
-"""
+"""Stateful ARC Python REPL tool for super shell usage."""
 
 from __future__ import annotations
 
@@ -26,33 +15,73 @@ import traceback
 from hashlib import sha1
 from pathlib import Path
 
-from arc_action import (
-    _action_from_event_name,
-    _arc_dir,
-    _append_level_completion,
-    _call_quiet,
-    _change_bbox,
-    _completion_action_windows_by_level,
-    _default_game_id,
-    _ensure_agent_lib_file,
-    _ensure_level_completions_file,
-    _error_payload,
-    _get_pixels,
-    _iter_cell_changes,
-    _load_history,
-    _make_env,
-    _make_id_candidates,
-    _read_max_recorded_completion_level,
-    _replay_history,
-    _save_history,
-    _write_turn_trace,
-    build_aggregate_diff_record,
-    build_step_diff_records,
-    format_diff_minimal,
-    frame_action_metadata,
-    write_game_state,
-    write_machine_state,
-)
+try:
+    from arc_repl_daemon import run_daemon
+except Exception:
+    from tools.arc_repl_daemon import run_daemon
+
+try:
+    from arc_action_diffs import (
+        _change_bbox,
+        _iter_cell_changes,
+        build_aggregate_diff_record,
+        build_step_diff_records,
+        format_diff_minimal,
+        frame_action_metadata,
+        write_game_state,
+        write_machine_state,
+    )
+    from arc_action_env import (
+        _action_from_event_name,
+        _get_pixels,
+        _make_env,
+        _make_id_candidates,
+        _replay_history,
+    )
+    from arc_action_exec import _write_turn_trace
+    from arc_action_state import (
+        _append_level_completion,
+        _arc_dir,
+        _completion_action_windows_by_level,
+        _default_game_id,
+        _ensure_agent_lib_file,
+        _ensure_level_completions_file,
+        _error_payload,
+        _read_max_recorded_completion_level,
+        _save_history,
+    )
+    from arc_action_state import _load_history as _load_history_impl
+except Exception:
+    from tools.arc_action_diffs import (
+        _change_bbox,
+        _iter_cell_changes,
+        build_aggregate_diff_record,
+        build_step_diff_records,
+        format_diff_minimal,
+        frame_action_metadata,
+        write_game_state,
+        write_machine_state,
+    )
+    from tools.arc_action_env import (
+        _action_from_event_name,
+        _get_pixels,
+        _make_env,
+        _make_id_candidates,
+        _replay_history,
+    )
+    from tools.arc_action_exec import _write_turn_trace
+    from tools.arc_action_state import (
+        _append_level_completion,
+        _arc_dir,
+        _completion_action_windows_by_level,
+        _default_game_id,
+        _ensure_agent_lib_file,
+        _ensure_level_completions_file,
+        _error_payload,
+        _read_max_recorded_completion_level,
+        _save_history,
+    )
+    from tools.arc_action_state import _load_history as _load_history_impl
 
 try:
     from arc_repl_session_core import (
@@ -75,6 +104,29 @@ except Exception:
 
 SCHEMA_VERSION = "arc_repl.v1"
 SOCKET_WAIT_TIMEOUT_S = 90.0
+
+
+def _load_history(cwd: Path, game_id: str) -> dict:
+    return _load_history_impl(cwd, game_id, _make_id_candidates)
+
+
+def _lifecycle_path(cwd: Path, conversation_id: str) -> Path:
+    return _session_dir(cwd, conversation_id) / "daemon.lifecycle.jsonl"
+
+
+def _append_lifecycle_event(cwd: Path, conversation_id: str, event: str, **fields: object) -> None:
+    try:
+        session_dir = _session_dir(cwd, conversation_id)
+        session_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "ts_unix": time.time(),
+            "event": str(event),
+            **fields,
+        }
+        with _lifecycle_path(cwd, conversation_id).open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception:
+        pass
 
 
 def _error(*, action: str, requested_game_id: str, message: str, error_type: str, details: str = "") -> dict:
@@ -114,6 +166,14 @@ def _conversation_id() -> str:
         raw = "default"
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._")
     return safe[:120] or "default"
+
+
+def _session_key() -> str:
+    raw = str(os.getenv("ARC_REPL_SESSION_KEY", "") or "").strip()
+    if raw:
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._")
+        return safe[:120] or "default"
+    return _conversation_id()
 
 
 def _session_dir(cwd: Path, conversation_id: str) -> Path:
@@ -184,6 +244,16 @@ def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
             stderr=subprocess.STDOUT,
         )
     _pid_path(cwd, conversation_id).write_text(str(proc.pid) + "\n")
+    _append_lifecycle_event(
+        cwd,
+        conversation_id,
+        "spawned",
+        daemon_pid=int(proc.pid),
+        game_id=str(game_id),
+        parent_pid=int(os.getpid()),
+        socket=str(socket_path),
+        log_file=str(log_path),
+    )
 
 
 def _wait_for_daemon(cwd: Path, conversation_id: str, timeout_s: float = SOCKET_WAIT_TIMEOUT_S) -> None:
@@ -209,14 +279,17 @@ def _wait_for_daemon(cwd: Path, conversation_id: str, timeout_s: float = SOCKET_
                 except Exception:
                     pass
         time.sleep(0.05)
+    _append_lifecycle_event(
+        cwd,
+        conversation_id,
+        "wait_timeout",
+        timeout_s=float(timeout_s),
+        socket=str(socket_path),
+    )
     raise RuntimeError(f"arc_repl daemon did not start within {timeout_s}s")
 
 
 def _send_request(cwd: Path, conversation_id: str, request: dict) -> tuple[dict, bool]:
-    """Send request to conversation daemon, starting it if needed.
-
-    Returns (response, session_created).
-    """
     socket_path = _socket_path(cwd, conversation_id)
     session_created = False
 
@@ -231,17 +304,34 @@ def _send_request(cwd: Path, conversation_id: str, request: dict) -> tuple[dict,
         finally:
             conn.close()
 
-    try:
-        return _try_send(), session_created
-    except Exception:
+    def _spawn_for_request(reason: str) -> None:
+        nonlocal session_created
         requested_game_id = str(request.get("game_id", "") or "").strip() or _default_game_id(cwd)
         if not requested_game_id:
             raise RuntimeError(
                 "game_id is required (or initialize state first with action=status and game_id)"
             )
+        _append_lifecycle_event(
+            cwd,
+            conversation_id,
+            "spawn_request",
+            reason=str(reason),
+            requested_game_id=str(requested_game_id),
+            request_action=str(request.get("action", "") or ""),
+        )
         _spawn_daemon(cwd, conversation_id, requested_game_id)
         _wait_for_daemon(cwd, conversation_id)
         session_created = True
+
+    if not socket_path.exists():
+        _spawn_for_request("socket_missing")
+
+    try:
+        return _try_send(), session_created
+    except (FileNotFoundError, ConnectionRefusedError):
+        if session_created:
+            return _try_send(), session_created
+        _spawn_for_request("connect_race")
         return _try_send(), session_created
 
 
@@ -255,90 +345,22 @@ def _daemon_main(cwd: Path, conversation_id: str, requested_game_id: str) -> int
             socket_path.unlink()
         except Exception:
             pass
-
-    session = ReplSession(cwd=cwd, conversation_id=conversation_id, requested_game_id=requested_game_id)
-    _meta_path(cwd, conversation_id).write_text(
-        json.dumps(
-            {
-                "conversation_id": conversation_id,
-                "game_id": session.game_id,
-                "socket": str(socket_path),
-                "pid": os.getpid(),
-                "started_at_unix": time.time(),
-            },
-            indent=2,
-        )
-        + "\n"
+    return run_daemon(
+        cwd=cwd,
+        conversation_id=conversation_id,
+        requested_game_id=requested_game_id,
+        socket_path=socket_path,
+        meta_path=_meta_path(cwd, conversation_id),
+        make_session=lambda: ReplSession(
+            cwd=cwd,
+            conversation_id=conversation_id,
+            requested_game_id=requested_game_id,
+        ),
+        append_lifecycle_event=_append_lifecycle_event,
+        error_payload=_error,
+        schema_version=SCHEMA_VERSION,
+        listener_factory=multiprocessing.connection.Listener,
     )
-
-    listener = multiprocessing.connection.Listener(str(socket_path), family="AF_UNIX")
-    should_stop = False
-    try:
-        while not should_stop:
-            conn = listener.accept()
-            try:
-                request = conn.recv()
-                if not isinstance(request, dict):
-                    conn.send({"ok": False, "error": "request must be an object"})
-                    continue
-                action = str(request.get("action", "")).strip()
-                requested_game_id = str(request.get("game_id", "") or "").strip()
-
-                if action == "ping":
-                    conn.send({"ok": True, "action": "ping"})
-                    continue
-                if action == "status":
-                    result = session.do_status(requested_game_id, session_created=False)
-                elif action == "reset_level":
-                    result = session.do_reset_level(requested_game_id, session_created=False)
-                elif action == "exec":
-                    script = str(request.get("script", "") or "")
-                    result = session.do_exec(requested_game_id, script, session_created=False)
-                elif action == "shutdown":
-                    result = {
-                        "schema_version": SCHEMA_VERSION,
-                        "ok": True,
-                        "action": "shutdown",
-                        "conversation_id": conversation_id,
-                        "game_id": session.game_id,
-                    }
-                    should_stop = True
-                else:
-                    result = _error(
-                        action=action,
-                        requested_game_id=requested_game_id,
-                        message="unknown action. expected: status|exec|reset_level|shutdown",
-                        error_type="unknown_action",
-                    )
-                conn.send(result)
-            except Exception as exc:
-                conn.send(
-                    {
-                        "schema_version": SCHEMA_VERSION,
-                        "ok": False,
-                        "error": {
-                            "type": "daemon_exception",
-                            "message": str(exc),
-                            "details": traceback.format_exc(),
-                        },
-                    }
-                )
-            finally:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-    finally:
-        try:
-            listener.close()
-        except Exception:
-            pass
-        try:
-            if socket_path.exists():
-                socket_path.unlink()
-        except Exception:
-            pass
-    return 0
 
 
 def _parse_daemon_args(argv: list[str]) -> argparse.Namespace:
@@ -354,12 +376,20 @@ def main() -> int:
     daemon_args = _parse_daemon_args(sys.argv[1:])
     if daemon_args.daemon:
         cwd = Path(daemon_args.cwd).resolve()
-        conversation_id = str(daemon_args.conversation_id).strip() or _conversation_id()
+        conversation_id = str(daemon_args.conversation_id).strip() or _session_key()
         requested_game_id = str(daemon_args.game_id).strip()
         try:
             return _daemon_main(cwd, conversation_id, requested_game_id)
-        except Exception:
-            traceback.print_exc()
+        except Exception as exc:
+            _append_lifecycle_event(
+                cwd,
+                conversation_id,
+                "daemon_fatal_exception",
+                daemon_pid=int(os.getpid()),
+                requested_game_id=str(requested_game_id),
+                error=str(exc),
+            )
+            traceback.print_exc(file=sys.stderr)
             return 1
 
     cwd = Path.cwd().resolve()
@@ -400,7 +430,7 @@ def main() -> int:
         )
         return 1
 
-    conversation_id = _conversation_id()
+    conversation_id = _session_key()
     request = {
         "action": action,
         "game_id": requested_game_id,

@@ -63,7 +63,7 @@ def test_send_request_spawns_when_first_send_fails(monkeypatch, tmp_path: Path) 
     def fake_client(path, family=None):
         state["n"] += 1
         if state["n"] == 1:
-            raise RuntimeError("no socket yet")
+            raise FileNotFoundError("no socket yet")
         return Conn()
 
     monkeypatch.setattr(arc_repl.multiprocessing.connection, "Client", fake_client)
@@ -110,4 +110,3 @@ def test_main_exec_error_prints_stderr(monkeypatch, capsys) -> None:
     rc = arc_repl.main()
     assert rc == 1
     assert "boom" in capsys.readouterr().err
-

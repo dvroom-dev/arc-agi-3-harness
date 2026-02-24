@@ -7,36 +7,41 @@ import time
 from pathlib import Path
 
 
-def _session_pid_file(rt, conversation_id: str) -> Path:
-    return rt.arc_state_dir / "repl-sessions" / conversation_id / "daemon.pid"
+def _session_pid_file(rt, session_key: str) -> Path:
+    return rt.arc_state_dir / "repl-sessions" / session_key / "daemon.pid"
 
 
-def _shutdown_repl_session(rt, conversation_id: str) -> None:
-    cid = str(conversation_id or "").strip()
-    if not cid:
+def _shutdown_repl_session(rt, session_key: str) -> None:
+    skey = str(session_key or "").strip()
+    if not skey:
         return
-    pid_file = _session_pid_file(rt, cid)
+    pid_file = _session_pid_file(rt, skey)
     if not pid_file.exists():
         return
     prev_conversation_id = rt.active_conversation_id
+    prev_repl_session_key = getattr(rt, "active_repl_session_key", None)
     try:
-        rt.active_conversation_id = cid
+        rt.active_conversation_id = skey
+        if prev_repl_session_key is not None:
+            rt.active_repl_session_key = skey
         result, stdout, rc = rt.run_arc_repl({"action": "shutdown", "game_id": rt.args.game_id})
         if rc == 0:
-            rt.log(f"[harness] arc_repl shutdown sent for conversation={cid}")
+            rt.log(f"[harness] arc_repl shutdown sent for session={skey}")
         else:
             detail = stdout.strip() if stdout.strip() else "no stdout"
             rt.log(
                 "[harness] arc_repl shutdown failed for "
-                f"conversation={cid}: rc={rc} detail={detail}"
+                f"session={skey}: rc={rc} detail={detail}"
             )
         if result and isinstance(result, dict) and not bool(result.get("ok", False)):
             err = result.get("error")
-            rt.log(f"[harness] arc_repl shutdown response error conversation={cid}: {err}")
+            rt.log(f"[harness] arc_repl shutdown response error session={skey}: {err}")
     except Exception as exc:
-        rt.log(f"[harness] arc_repl shutdown exception conversation={cid}: {exc}")
+        rt.log(f"[harness] arc_repl shutdown exception session={skey}: {exc}")
     finally:
         rt.active_conversation_id = prev_conversation_id
+        if prev_repl_session_key is not None:
+            rt.active_repl_session_key = prev_repl_session_key
 
 
 def _terminate_pid_local(pid: int) -> bool:
@@ -75,6 +80,9 @@ def cleanup_repl_daemons_impl(rt) -> None:
         cids.add(rt.active_actual_conversation_id)
     if rt.active_conversation_id:
         cids.add(rt.active_conversation_id)
+    repl_session_key = str(getattr(rt, "active_repl_session_key", "") or "").strip()
+    if repl_session_key:
+        cids.add(repl_session_key)
 
     sessions_root = rt.arc_state_dir / "repl-sessions"
     if sessions_root.exists():

@@ -84,19 +84,22 @@ def _get_pixels(env, frame: FrameDataRaw | None = None) -> np.ndarray:
         data = getattr(frame, "frame", None)
         if isinstance(data, (list, tuple)) and data:
             pixels = data[-1]
-            if isinstance(pixels, np.ndarray):
-                return pixels
-            return np.array(pixels)
+            # Always return an owned snapshot to avoid mutable-buffer aliasing
+            # across tool calls/frames.
+            return np.array(pixels, copy=True)
         raise RuntimeError(
             "FrameDataRaw.frame is unavailable; cannot compute authoritative diff/state grid."
         )
 
     game = env._game
-    return game.get_pixels(
-        game.camera.x,
-        game.camera.y,
-        game.camera.width,
-        game.camera.height,
+    return np.array(
+        game.get_pixels(
+            game.camera.x,
+            game.camera.y,
+            game.camera.width,
+            game.camera.height,
+        ),
+        copy=True,
     )
 
 
@@ -161,14 +164,24 @@ def _replay_history(env, events: list[dict]) -> FrameDataRaw:
 
     frame = _reset_with_retry("at replay start")
     terminal = str(getattr(frame, "state", "").value) in {"GAME_OVER", "WIN"}
-    for event in events:
+    current_levels = int(getattr(frame, "levels_completed", 0))
+    steps_in_level = 0
+    for idx, event in enumerate(events):
         kind = str(event.get("kind", "")).strip()
         if kind == "reset":
+            if steps_in_level == 0:
+                # Never replay reset-level calls at the first turn of a level.
+                # In ARC API sessions this can trigger a full campaign reset.
+                continue
             try:
                 frame = _reset_with_retry("during replay")
-            except RuntimeError:
-                break
+            except RuntimeError as exc:
+                raise RuntimeError(
+                    f"history replay reset failed at event[{idx}]"
+                ) from exc
             terminal = str(getattr(frame, "state", "").value) in {"GAME_OVER", "WIN"}
+            current_levels = int(getattr(frame, "levels_completed", 0))
+            steps_in_level = 0
             continue
         if kind != "step":
             continue
@@ -178,11 +191,19 @@ def _replay_history(env, events: list[dict]) -> FrameDataRaw:
         data = event.get("data")
         try:
             result = env.step(_action_from_event_name(action_name), data=data)
-        except Exception:
-            break
+        except Exception as exc:
+            raise RuntimeError(
+                f"history replay step failed at event[{idx}] action={action_name!r}"
+            ) from exc
         if result is None:
             terminal = True
             continue
         frame = result
+        levels_now = int(getattr(frame, "levels_completed", current_levels))
+        if levels_now != current_levels:
+            steps_in_level = 0
+        else:
+            steps_in_level += 1
+        current_levels = levels_now
         terminal = str(getattr(frame, "state", "").value) in {"GAME_OVER", "WIN"}
     return frame

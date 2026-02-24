@@ -16,6 +16,7 @@ def test_spawn_daemon_writes_pid(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(arc_repl, "_socket_path", lambda cwd, cid: tmp_path / "sock")
     monkeypatch.setattr(arc_repl, "_daemon_log_path", lambda cwd, cid: tmp_path / "s" / "daemon.log")
     monkeypatch.setattr(arc_repl, "_pid_path", lambda cwd, cid: tmp_path / "s" / "daemon.pid")
+    monkeypatch.setattr(arc_repl, "_lifecycle_path", lambda cwd, cid: tmp_path / "s" / "daemon.lifecycle.jsonl")
     monkeypatch.setattr(
         arc_repl.subprocess,
         "Popen",
@@ -23,6 +24,8 @@ def test_spawn_daemon_writes_pid(monkeypatch, tmp_path: Path) -> None:
     )
     arc_repl._spawn_daemon(tmp_path, "c1", "ls20")
     assert (tmp_path / "s" / "daemon.pid").read_text().strip() == "1234"
+    lifecycle = (tmp_path / "s" / "daemon.lifecycle.jsonl").read_text()
+    assert '"event": "spawned"' in lifecycle
 
 
 def test_wait_for_daemon_timeout(monkeypatch, tmp_path: Path) -> None:
@@ -102,4 +105,3 @@ def test_main_daemon_mode_exception(monkeypatch, capsys) -> None:
     rc = arc_repl.main()
     assert rc == 1
     assert "RuntimeError: boom" in capsys.readouterr().err
-

@@ -87,9 +87,7 @@ class HarnessRuntime:
         self.arc_api_key_prefix = self.arc_api_key[:8] if self.arc_api_key else None
 
         self.active_scorecard_id = str(args.scorecard_id or "").strip() or None
-        self.scorecard_cookies_json = (
-            str(getattr(args, "scorecard_cookies_json", "") or "").strip() or None
-        )
+        self.scorecard_cookies_json = str(getattr(args, "scorecard_cookies_json", "") or "").strip() or None
         self.scorecard_created_here = False
         self.scorecard_api_url: str | None = None
         self.scorecard_web_url: str | None = None
@@ -107,34 +105,22 @@ class HarnessRuntime:
                 )
             self.scorecard_client = self._build_scorecard_client()
             if self.active_scorecard_id:
-                skip_get_validation = bool(
-                    getattr(args, "skip_scorecard_get_validation", False)
-                )
+                skip_get_validation = bool(getattr(args, "skip_scorecard_get_validation", False))
                 if not skip_get_validation:
                     self.scorecard_client.get_scorecard(self.active_scorecard_id)
             else:
-                tags = [
-                    "arc-agi-harness",
-                    "tool-driven",
-                    f"game:{args.game_id}",
-                ]
+                tags = ["arc-agi-harness", "tool-driven", f"game:{args.game_id}"]
                 opaque = {
                     "session_name": self.session_name,
                     "game_id": str(args.game_id),
                     "started_at": datetime.now(timezone.utc).isoformat(),
                 }
-                self.active_scorecard_id = str(
-                    self.scorecard_client.open_scorecard(tags=tags, opaque=opaque)
-                )
+                self.active_scorecard_id = str(self.scorecard_client.open_scorecard(tags=tags, opaque=opaque))
                 self.scorecard_created_here = True
             if not self.scorecard_cookies_json:
                 self.scorecard_cookies_json = export_scorecard_cookies_json(self.scorecard_client)
-            self.scorecard_api_url = (
-                f"{self.arc_base_url.rstrip('/')}/api/scorecard/{self.active_scorecard_id}"
-            )
-            self.scorecard_web_url = (
-                f"{self.arc_base_url.rstrip('/')}/scorecards/{self.active_scorecard_id}"
-            )
+            self.scorecard_api_url = f"{self.arc_base_url.rstrip('/')}/api/scorecard/{self.active_scorecard_id}"
+            self.scorecard_web_url = f"{self.arc_base_url.rstrip('/')}/scorecards/{self.active_scorecard_id}"
             self.scorecard_meta_path.write_text(
                 json.dumps(
                     {
@@ -153,9 +139,12 @@ class HarnessRuntime:
             )
 
         self.active_game_id = str(args.game_id).strip()
+        self.repl_session_key = f"{self.session_name}__{(re.sub(r'[^A-Za-z0-9_.-]+', '_', self.active_game_id).strip('._') or 'game')}"
+        self.active_repl_session_key = self.repl_session_key
         self.active_conversation_id = "harness_bootstrap"
         self.active_actual_conversation_id: str | None = None
         self.conversation_aliases: dict[str, str] = {}
+        self.last_repl_daemon_pid: int | None = None
 
         self.prompt_file_counter = 0
         self.enable_level_start_images = False
@@ -176,6 +165,7 @@ class HarnessRuntime:
             self.super_env["ARC_SCORECARD_ID"] = self.active_scorecard_id
         if self.scorecard_cookies_json:
             self.super_env["ARC_SCORECARD_COOKIES"] = self.scorecard_cookies_json
+        self.super_env["ARC_REPL_SESSION_KEY"] = self.active_repl_session_key
         self.super_env["PATH"] = f"{self.run_bin_dir}:{os.environ.get('PATH', '')}"
 
     def log(self, msg: str) -> None:
@@ -291,6 +281,7 @@ class HarnessRuntime:
             child_env["ARC_SCORECARD_ID"] = self.active_scorecard_id
         if self.scorecard_cookies_json:
             child_env["ARC_SCORECARD_COOKIES"] = self.scorecard_cookies_json
+        child_env["ARC_REPL_SESSION_KEY"] = self.active_repl_session_key
 
         proc = self.deps.subprocess.run(
             cmd,
@@ -338,6 +329,36 @@ class HarnessRuntime:
                     resolved_game_id = str(parsed.get("game_id", "")).strip()
                     if resolved_game_id:
                         self.active_game_id = resolved_game_id
+                    repl_meta = parsed.get("repl")
+                    if isinstance(repl_meta, dict):
+                        daemon_pid_raw = repl_meta.get("daemon_pid")
+                        daemon_pid: int | None = None
+                        try:
+                            daemon_pid = int(daemon_pid_raw)
+                        except Exception:
+                            daemon_pid = None
+                        if daemon_pid is not None:
+                            session_created = bool(repl_meta.get("session_created", False))
+                            if self.last_repl_daemon_pid is None:
+                                self.log(
+                                    "[harness] arc_repl daemon active: "
+                                    f"pid={daemon_pid} session_key={self.active_repl_session_key} "
+                                    f"session_created={session_created}"
+                                )
+                            elif daemon_pid != self.last_repl_daemon_pid:
+                                daemon_dir = (
+                                    self.arc_state_dir
+                                    / "repl-sessions"
+                                    / self.active_repl_session_key
+                                )
+                                self.log(
+                                    "[harness] WARNING: arc_repl daemon pid changed: "
+                                    f"old={self.last_repl_daemon_pid} new={daemon_pid} "
+                                    f"action={action_name} session_created={session_created}. "
+                                    f"Inspect {daemon_dir / 'daemon.log'} and "
+                                    f"{daemon_dir / 'daemon.lifecycle.jsonl'}."
+                                )
+                            self.last_repl_daemon_pid = daemon_pid
                 elif proc.returncode == 0:
                     raise RuntimeError(
                         "arc_repl returned JSON that is not an object on success."

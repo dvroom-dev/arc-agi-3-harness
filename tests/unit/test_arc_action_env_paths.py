@@ -78,6 +78,71 @@ def test_replay_history_reset_and_terminal_handling() -> None:
     assert frame is not None
 
 
+def test_replay_history_raises_on_step_exception() -> None:
+    class Env:
+        def reset(self):
+            return _frame()
+
+        def step(self, action, data=None):
+            raise RuntimeError("boom")
+
+    env = Env()
+    events = [{"kind": "step", "action": "ACTION1", "levels_completed": 0}]
+    with pytest.raises(RuntimeError, match=r"history replay step failed at event\[0\].*ACTION1"):
+        arc_action._replay_history(env, events)
+
+
+def test_replay_history_skips_reset_on_first_turn_of_level() -> None:
+    class Env:
+        def __init__(self):
+            self.reset_calls = 0
+            self.step_calls = 0
+
+        def reset(self):
+            self.reset_calls += 1
+            return _frame("NOT_FINISHED", levels_completed=0)
+
+        def step(self, action, data=None):
+            self.step_calls += 1
+            return _frame("NOT_FINISHED", levels_completed=0)
+
+    env = Env()
+    events = [
+        {"kind": "reset"},
+        {"kind": "step", "action": "ACTION1", "levels_completed": 0},
+    ]
+    frame = arc_action._replay_history(env, events)
+    assert frame is not None
+    assert env.reset_calls == 1  # initial replay reset only
+    assert env.step_calls == 1
+
+
+def test_replay_history_applies_reset_after_progress_in_level() -> None:
+    class Env:
+        def __init__(self):
+            self.reset_calls = 0
+            self.step_calls = 0
+
+        def reset(self):
+            self.reset_calls += 1
+            return _frame("NOT_FINISHED", levels_completed=0)
+
+        def step(self, action, data=None):
+            self.step_calls += 1
+            return _frame("NOT_FINISHED", levels_completed=0)
+
+    env = Env()
+    events = [
+        {"kind": "step", "action": "ACTION1", "levels_completed": 0},
+        {"kind": "reset"},
+        {"kind": "step", "action": "ACTION2", "levels_completed": 0},
+    ]
+    frame = arc_action._replay_history(env, events)
+    assert frame is not None
+    assert env.reset_calls == 2  # initial replay reset + one explicit reset replayed
+    assert env.step_calls == 2
+
+
 def test_make_env_applies_scorecard_cookies(monkeypatch) -> None:
     created = []
 
@@ -105,3 +170,14 @@ def test_get_pixels_uses_frame_data() -> None:
     frame = _frame()
     pixels = arc_action._get_pixels(None, frame)
     assert pixels.shape == (2, 2)
+
+
+def test_get_pixels_returns_owned_copy_from_frame() -> None:
+    source = np.array([[1, 2], [3, 4]], dtype=np.int8)
+    frame = SimpleNamespace(frame=[source])
+    pixels = arc_action._get_pixels(None, frame)
+    assert pixels.shape == (2, 2)
+    assert np.array_equal(pixels, source)
+    assert not np.shares_memory(pixels, source)
+    source[0, 0] = 9
+    assert int(pixels[0, 0]) == 1
