@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import shutil
 from pathlib import Path
 
@@ -104,6 +105,10 @@ def setup_run_dir_impl(
     level_knowledge_template: str,
     level_completions_template: str,
     agent_lib_template: str,
+    theory_template: str,
+    simulator_template: str,
+    play_template: str,
+    game_id: str,
 ) -> None:
     """Set up an isolated run directory with split agent/supervisor dirs."""
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -128,6 +133,24 @@ def setup_run_dir_impl(
     agent_lib = agent_dir / "agent_lib.py"
     if not agent_lib.exists():
         agent_lib.write_text(agent_lib_template)
+
+    safe_game_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(game_id or "").strip()).strip("._")
+    if not safe_game_id:
+        safe_game_id = "game"
+    game_dir = agent_dir / f"game_{safe_game_id}"
+    game_dir.mkdir(parents=True, exist_ok=True)
+
+    theory_file = game_dir / "theory.md"
+    if not theory_file.exists():
+        theory_file.write_text(theory_template)
+
+    simulator_file = game_dir / "simulator.py"
+    if not simulator_file.exists():
+        simulator_file.write_text(simulator_template)
+
+    play_file = game_dir / "play.py"
+    if not play_file.exists():
+        play_file.write_text(play_template)
 
 
 def setup_run_config_dir_impl(

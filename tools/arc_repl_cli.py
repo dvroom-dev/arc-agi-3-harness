@@ -5,6 +5,7 @@ Usage:
   arc_repl status [--game-id GAME]
   arc_repl reset_level [--game-id GAME]
   arc_repl exec [--game-id GAME] < script.py
+  arc_repl exec_file [--game-id GAME] SCRIPT_PATH
   arc_repl shutdown
 
 Output contract:
@@ -80,6 +81,10 @@ def main() -> int:
     p_exec = sub.add_parser("exec")
     p_exec.add_argument("--game-id", default="")
 
+    p_exec_file = sub.add_parser("exec_file")
+    p_exec_file.add_argument("--game-id", default="")
+    p_exec_file.add_argument("script_path")
+
     sub.add_parser("shutdown")
 
     args = parser.parse_args()
@@ -119,6 +124,54 @@ def main() -> int:
                 }
             )
             return 2
+        payload["script"] = script
+    elif args.action == "exec_file":
+        script_path = Path(str(getattr(args, "script_path", "") or "").strip())
+        if not script_path:
+            _emit_json(
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "ok": False,
+                    "action": "exec_file",
+                    "requested_game_id": game_id,
+                    "error": {
+                        "type": "invalid_exec_file_args",
+                        "message": "exec_file requires SCRIPT_PATH",
+                    },
+                }
+            )
+            return 2
+        try:
+            script = script_path.read_text()
+        except Exception as exc:
+            _emit_json(
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "ok": False,
+                    "action": "exec_file",
+                    "requested_game_id": game_id,
+                    "error": {
+                        "type": "invalid_exec_file_args",
+                        "message": f"failed reading script file: {script_path}: {exc}",
+                    },
+                }
+            )
+            return 2
+        if not script.strip():
+            _emit_json(
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "ok": False,
+                    "action": "exec_file",
+                    "requested_game_id": game_id,
+                    "error": {
+                        "type": "invalid_exec_file_args",
+                        "message": f"exec_file script is empty: {script_path}",
+                    },
+                }
+            )
+            return 2
+        payload["action"] = "exec"
         payload["script"] = script
 
     return _run(payload)

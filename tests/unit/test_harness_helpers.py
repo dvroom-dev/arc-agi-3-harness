@@ -138,11 +138,20 @@ def test_setup_run_dir_seeds_expected_files(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     agent_dir = run_dir / "agent"
     supervisor_dir = run_dir / "supervisor"
-    harness.setup_run_dir(run_dir, agent_dir, supervisor_dir, log=lambda _m: None)
+    harness.setup_run_dir(
+        run_dir,
+        agent_dir,
+        supervisor_dir,
+        log=lambda _m: None,
+        game_id="ls20",
+    )
     assert (agent_dir / "agent_lib.py").exists()
     assert (supervisor_dir / "arc" / "game-knowledge.md").exists()
     assert (supervisor_dir / "arc" / "level-knowledge.md").exists()
     assert (supervisor_dir / "arc" / "level_completions.md").exists()
+    assert (agent_dir / "game_ls20" / "theory.md").exists()
+    assert (agent_dir / "game_ls20" / "simulator.py").exists()
+    assert (agent_dir / "game_ls20" / "play.py").exists()
 
 
 def test_setup_run_config_dir_creates_wrappers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

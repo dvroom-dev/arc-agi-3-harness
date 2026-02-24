@@ -74,6 +74,41 @@ def test_arc_repl_cli_exec_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "print('ok')" in captured["payload"]["script"]
 
 
+def test_arc_repl_cli_exec_file_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured = {}
+    script_path = tmp_path / "script.py"
+    script_path.write_text("print('from file')\n")
+
+    def fake_run(payload):
+        captured["payload"] = payload
+        return 0
+
+    monkeypatch.setattr(arc_repl_cli, "_run", fake_run)
+    monkeypatch.setattr(
+        arc_repl_cli.sys,
+        "argv",
+        ["arc_repl", "exec_file", "--game-id", "ls20", str(script_path)],
+    )
+    rc = arc_repl_cli.main()
+    assert rc == 0
+    assert captured["payload"]["action"] == "exec"
+    assert captured["payload"]["game_id"] == "ls20"
+    assert "from file" in captured["payload"]["script"]
+
+
+def test_arc_repl_cli_exec_file_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        arc_repl_cli.sys,
+        "argv",
+        ["arc_repl", "exec_file", "missing_script.py"],
+    )
+    rc = arc_repl_cli.main()
+    assert rc == 2
+
+
 def test_arc_repl_cli_run_writes_stdout_stderr(monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     monkeypatch.setattr(
         arc_repl_cli.subprocess,

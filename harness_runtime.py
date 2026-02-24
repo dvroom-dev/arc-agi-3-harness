@@ -57,7 +57,13 @@ class HarnessRuntime:
         self.agent_dir = self.run_dir / "agent"
         self.supervisor_dir = self.run_dir / "supervisor"
         self.run_config_dir = self.run_dir / "config"
-        deps.setup_run_dir(self.run_dir, self.agent_dir, self.supervisor_dir, self.log)
+        deps.setup_run_dir(
+            self.run_dir,
+            self.agent_dir,
+            self.supervisor_dir,
+            self.log,
+            game_id=str(args.game_id),
+        )
         self.run_bin_dir, self.run_tools_dir = deps.setup_run_config_dir(self.run_config_dir)
         deps.assert_no_game_files_in_agent_dir(self.agent_dir)
         self.run_super_config = self.run_dir / "super.yaml"

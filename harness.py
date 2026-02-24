@@ -119,6 +119,17 @@ AGENT_LIB_TEMPLATE = textwrap.dedent("""\
     #         env.step(action)
 """)
 
+def _load_agent_workspace_template(name: str) -> str:
+    path = PROJECT_ROOT / "templates" / "agent_workspace" / name
+    if not path.exists():
+        raise RuntimeError(f"Missing agent workspace template: {path}")
+    return path.read_text()
+
+
+THEORY_TEMPLATE = _load_agent_workspace_template("theory.md")
+PLAY_TEMPLATE = _load_agent_workspace_template("play.py")
+SIMULATOR_TEMPLATE = _load_agent_workspace_template("simulator.py")
+
 
 def _drain_stderr(proc, prefix="[super] "):
     """Read proc.stderr line-by-line and print to our stderr. Runs in a thread."""
@@ -352,7 +363,14 @@ def parse_args():
     return parse_args_impl()
 
 
-def setup_run_dir(run_dir: Path, agent_dir: Path, supervisor_dir: Path, log) -> None:
+def setup_run_dir(
+    run_dir: Path,
+    agent_dir: Path,
+    supervisor_dir: Path,
+    log,
+    *,
+    game_id: str = "game",
+) -> None:
     setup_run_dir_impl(
         run_dir,
         agent_dir,
@@ -362,6 +380,10 @@ def setup_run_dir(run_dir: Path, agent_dir: Path, supervisor_dir: Path, log) -> 
         level_knowledge_template=LEVEL_KNOWLEDGE_TEMPLATE,
         level_completions_template=LEVEL_COMPLETIONS_TEMPLATE,
         agent_lib_template=AGENT_LIB_TEMPLATE,
+        theory_template=THEORY_TEMPLATE,
+        simulator_template=SIMULATOR_TEMPLATE,
+        play_template=PLAY_TEMPLATE,
+        game_id=game_id,
     )
 
 
