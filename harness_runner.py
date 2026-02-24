@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from harness_explore import run_input_exploration_from_reset
+from harness_repl_health import format_repl_health_summary
 from harness_runtime import HarnessRuntime
 from harness_scorecard_helpers import (
     close_shared_scorecard,
@@ -222,6 +223,7 @@ def _run_single_game(
             state = runtime.load_state()
             prev_completed = int(state.get("levels_completed", 0)) if state else 0
             runtime.log(f"[harness] turn {super_turn}: {runtime.format_state_summary(state)}")
+            runtime.log(f"[harness] {format_repl_health_summary(runtime)}")
 
             if state and state.get("state") == "WIN":
                 runtime.log(f"[harness] GAME WON after {super_turn} turns")

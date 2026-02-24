@@ -16,7 +16,7 @@ def test_harness_open_and_close_scorecard_mocked(tmp_path: Path, monkeypatch) ->
     (root / "prompts").mkdir(parents=True)
     (root / "runs").mkdir(parents=True)
     (root / "super.yaml").write_text("runtime_defaults: {}\n")
-    for f in ("arc_action.py", "arc_repl.py", "arc_repl_cli.py"):
+    for f in ("arc_repl.py", "arc_repl_cli.py", "arc_repl_daemon.py"):
         (root / "tools" / f).write_text("#!/usr/bin/env python3\n")
     (root / "prompts" / "new_game_auto_explore.py").write_text("print('x')\n")
 

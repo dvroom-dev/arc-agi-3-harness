@@ -146,9 +146,9 @@ def setup_run_config_dir_impl(
     prompts_dir.mkdir(parents=True, exist_ok=True)
 
     required_tools = [
-        "arc_action.py",
         "arc_repl.py",
         "arc_repl_cli.py",
+        "arc_repl_daemon.py",
     ]
     optional_tools = [
         "arc_action_diffs.py",
