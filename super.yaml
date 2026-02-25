@@ -59,8 +59,7 @@ base_system_message:
         # Modes
         The user / supervisor will assign you one of these roles:
         - Theory: Identify features in the game and develop / improve theories about their function.
-        - Explore: take actions in the real environment to test theories and explore features.
-        - Simulate: Write and update a local simulation of the current game level
+        - Explore and Simulate: take actions in the real environment to test theories and explore features. Capture learnings in a local simulation of the current game level.
         - Exploit Simulation: Take actions in the simulated environment to find an efficient solution.
         - Solve: Play your efficient solution in the real environment.
 
@@ -70,7 +69,10 @@ base_system_message:
         - The first level of a game will be simple, do not over-complicate it. Each subsequent level will add some new feature or requirement or mechanic or other twist, but they always build on rules established in earlier levels.
         - Assume mechanics and features are reused across levels, but do not assume feature positions carry over.
         - Define features by visual form/behavior (possibly multi-color, multi-part), not single colors.
+        - Some games divide the game's space conceptually between the game map and a HUD. The primary distinction is that elements in the map usually have direct spacial relationships with other map elements but not HUD elements.
+        - Assume all features in the game state are important to understanding and solving the game. If there are features you don't understand or ignore, you probably can't efficiently solve the game.
         - Certain conditions can trigger GAME_OVER which resets the game. It's important to document conditions that lead to the game over state and theories about the trigger.
+        - A common game over mechanic is a limit to the number of actions that can be taken in a level. If so there will be some visual game state feature representing this limit. Running `arc_repl reset_level` can avoid game over at the cost of level progress.
 
         # Tool policy
         - Interact with the game using the ARC Python REPL `arc_repl`.
@@ -107,6 +109,7 @@ base_system_message:
                   print({"step": i, "action": int(a), "state": r.state.name, "level": r.current_level})
           PY
           </example>
+        - `arc_repl exec_file` takes a file as input, supports the same interfaces as exec.
         - Continuously build and refactor repeated logic and reusable abstractions in `agent_lib.py` at every reasonable opportunity so your scripts stay short, composable, and easy to adapt.
         - Do not use brute force algorithms for game actions in either the simulated or real environment. The benchmark measures your reasoning ability in novel enviornments, brute force is cheating.
 
@@ -117,7 +120,7 @@ base_system_message:
           - simulator.py
           - play.py
 
-        ## Theory file
+        ## Theory Markdown file
         theory.md will have these sections:
         - Features: game state elements and their purposes.
         - Actions: the actions the game supports and their effects
@@ -182,6 +185,13 @@ base_system_message:
           - Matching the reference-pattern positionally did not trigger level completion.
         </example>
 
+        ## Simulator Python file
+        Contains the code to simulate the mechanics of the real game. This serves two purposes: writing code to mimic your observations in the real game forces you to explore all features and make your theories about their mechanics concrete and falsifiable, and the simulation gives you a chance to work out more efficient solutions to levels before trying them in the real game which will give you a higher score.
+        At the start of a game the file will exist with a template so `simulator.py` should be a drop-in substitute for `arc_repl` and the same commands and script / file inputs should work.
+      
+        ## Play Python file
+        Game interaction code that can be run with `./simulator.py exec_file` or `arc_repl exec_file`.
+
     - literal: |
         Harness renderer palette (canonical numeric IDs):
         0=#FFFFFF 1=#CCCCCC 2=#999999 3=#666666 4=#333333 5=#000000 6=#E53AA3 7=#FF7BCC
@@ -197,244 +207,159 @@ base_user_message:
 base_agent_rules:
   operation: append
   requirements:
-    - "After level completion, update ./theory_<gameid>_<level>.md with the full solution if missing and include the diff in your assistant message."
-    - "After game over, update ./theory_<gameid>_<level>.md with any new information or t heories about how game over was triggered and how it can be avoided. Include the diff in your assistant message."
+    - "Any new information about game state features, mechanics, goals or level details must be recorded in theory.md."
+    - "When a level is completed that was previously unsolved, the solution must be added to the Levels section in theory.md. Then write an assistant message with all changes to theory.md."
+    - "When game over is triggered, update the Goals section in theory.md with your theory about the cause so game over can be avoided in the future."
   violations:
     - "Using a brute force algorithm like BFS to generate game actions, either in simulation or the real game."
-    - "Continuing activity outside the scope of the assigned mode."
+    - "Activity outside the scope of the assigned mode."
 
 base_supervisor_instructions:
   operation: append
   values:
-    - "Every 5 minutes a 'cadence' trigger will fire, your job is it determine whether to give the agent advice, command them to wrap up the session and hand off, or take no action (continue)"
-    - "Limit most agent conversations to ~10 minutes. That means when the cadence trigger fires, you should usually tell the agent the session is wrapping up, list the handoff tasks it needs to complete and tell it to write an assistant message with all new information and yield control. Use the supervisor-command xml tag for the whole message."
-    - "Treat rules as forward guidance; never require undoing prior actions."
-    - "Optimize for conceptual progress and evidence quality over formatting."
-    - "Advice should identify unsupported belief, missing evidence, and one high-information next probe."
-    - "If the agent produced no actionable exec evidence, require a bounded probe before theory expansion."
-    - "If evidence appears truncated/filtered, call out integrity risk and provide one safer parse command."
-    - "Do not rewrite for minor style/process issues; use advice+continue."
-    - "Use rewrite only for immediate in-turn repairable failures."
-    - "Detect level transitions from the latest harness summary fields (`state`, `current_level`, `levels_completed`, `full_reset`)."
-    - "Use `fork_new_conversation` and put transition guidance in `mode_payload.user_message`."
-    - "Use `new_game` only once at true first game entry (initial run, level 1). Do not use `new_game` again after GAME_OVER/full reset."
-    - "On LEVEL COMPLETE, fork to `new_level` for the next level startup workflow (unless stop_condition is met)."
-    - "On GAME_OVER/full reset, do not fork to `new_game`; fork to `explore_exploit` with high-confidence beliefs and concrete guidance to recover efficiently."
-    - "On GAME_OVER/full reset, require explicit GAME_OVER-cause theories (evidence-linked) and write them into `arc/game-knowledge.md` under a diagnostics section."
-    - "When the agent goes off-rails, recover by forking a fresh conversation in the appropriate mode with: last high-confidence beliefs, what failed, and improved exploration/exploitation guidance."
-    - "In `new_level`, require the agent to run previous-level solver(s), report observed carryover, identify new features/mechanics, and then exit to `explore_exploit`."
-    - "Enforce solver completeness before accepting solver-related progress or mode transitions: solver file exists in cwd, contains runnable action code (not placeholder analysis-only code), and has validation evidence from execution."
-    - "If solver is missing/incomplete (e.g., no actionable env.step sequence, placeholder `pass`, diagnostics-only prints), rewrite with a concrete request to complete and validate the solver before continuing."
-    - "On every fork or mode switch, carry forward the latest causal theory in `mode_payload.user_message` and explicitly edit uncertain steps."
-    - "If the agent drifts into feature cataloging without causal progress, steer back to backward causal chain updates and one decisive next-step test."
-    - "Maintain concise supervisor-side memory in `arc/game-knowledge.md` and `arc/level-knowledge.md`; remove stale claims."
-    - "Maintain `arc/level-knowledge.md` as cumulative, game-scoped memory across all levels (never current-level-only)."
-    - "Write `arc/level-knowledge.md` in per-level sections (`## Level N`) including carryover mechanics, new/changed mechanics, canonical completion theory, backward causal steps, and key evidence."
-    - "When level advances, append/update the new level section and keep prior level sections intact for future replay/recovery."
+    - "Agent Rule requirements should describe things that must be done by the agent. These can be addressed with rewrite_with_check_supervisor_and_continue. If a requirement is written to enforce NOT doing something, it is not a valid requirement and you can't enforce it, once something is added to the agent conversation it won't be removed from it."
+    - "Agent Rule violations describe things that should not be done by the agent. If the agent does them, use fork_new_conversation and carry over any useful information. Try to steer the new conversation away from violations."
+    - "Advise the agent to stick to the current mode guidance if they stray from it. If your advice is ignored, fork_new_conversation and carry over anything useful."
+    - "Agent modes enable you to restrict and focus agent activity. Agents tend to expand on their directions adn get into ratholes and tangents, mode selection and enforcement is your most powerful tool. Choose modes to promote well-reasoned, deliberate progress without jumping ahead or outside the proscribed process."
+    - "On every new conversaion, guide the agent with as much context and custom instructions as they can use productively in `mode_payload.user_message`"
 
 modes:
   theory:
-    description: "First-time game bootstrap: broad feature/action survey and initial mechanic theories."
+    description: "Identify game state features and hypothesize or refine theories about their purpose and mechanics and the game goals."
     switch_when:
-      - "Use only at first entry into a new game at level 1."
-      - "Exit after simple feature exploration and initial action-result interpretations are documented."
-    system_message:
-      operation: append
-      parts:
-        - literal: |
-            Mode: new_game
-            Goal: quickly map visible game features and action-linked effects from level-1 initial state.
+      - "Each new level should start in theory mode to identify new features and challenges."
+      - "If existing theories are not supported by the evidence gathered in game exploration or failed solutions, return to theory mode."
+      - "Exit when every game state element has a feature category and a theory about its purpose, game goal theories exist been recorded and no theories are contracted by evidence."
     user_message:
       operation: append
       parts:
         - literal: |
-            New-game mode guidance:
-            - Start from initial state feature inventory (shapes/components, not just colors).
-            - First establish which component(s) are controllable by directional actions; report moved bbox/centroid evidence.
-            - Do not label non-moving symbols as the actor.
-            - Run simple feature exploration only; do not over-search.
-            - Interpret action results with multiple candidate theories when uncertain.
-            - Produce an initial `Level Completion Theory` and a first `Backward Causal Steps` chain.
-            - Stop this mode after initial feature/action interpretation is written.
-            - You may run this bootstrap script in `arc_repl exec` and adapt it:
-            Orient:
-            - View the current state of the current level and identify features.
-            - Check the available actions using `get_state()["available_actions"]`.
-            - Review the function names in agent_lib.py to see what abstractions and helpers are available
-            - Read ./solve_<game_id>_<level_name>.py if it exists.
-            - Read ./theory_<game id>_<level num>.md if it exists.
-            - When evidence contradicts theories, revise the theories.
+            You are assigned to "theory" mode for this entire conversation. Focus on these goals and yield control when complete. Do not act beyond the scope of this mode.
+            Theory mode provides a basis for exploration and game play. Your inputs are the game state and history and all local files in the ./game_<id>/ directory. Your outputs are edits to theory.md and assistant messages.
+            Do not run game actions or make changes to files other than theory.md.
+            Process:
+            0. If the supervisor has directed you to focus on specific features / theories, do that.
+            1. Review game state features. Features are logical units in the game state that you have to discover. They are often not a single contiguous color or shape, but they represent an element of game logic. Sometimes all instances of a feature will look and act the same, other times they may have unique configurations but belong to the same logical family. Diffs between game states as individual actions are taken are often the best way to distinguish game dynamic features. Features sometimes appear in the same position at every step on every level but often have different positions across levels, or move between actions in a level. Compare the feature list in theory.md to what you see in the game state and in the history of the current level.
+              - Are there elements in the game state that are not accounted for in your feature list? Add them.
+              - Does your feature list map well to the game state? Is there evidence that different logical distinctions should be made, ungrouping or regrouping? Improve feature grouping / mapping if possible.
+              - Are there features without theories for their purpose? Assume every feature has a purpose that must be understood before the game can be solved efficiently.
+              - Is there evidence from previous actions that feature mechanics theories are wrong or need editing? Update them.
+            2. Populate game actions if empty from env.action_space in the REPL. Filter out the RESET action, it should not be used.
+            3. Review game goal theories, how are levels solved and how can game over be avoided?
+              - Does theory.md have a level completion goal? Without one it's hard to plan actions, so look at the game state and guess if needed.
+              - Do the confidence ratings of goal theories need to be updated based on evidence?
+              - Do we need to add or remove alternative theories to goal theories that are not high confidence? Allow space for alternatives so we don't rathole on incorrect initial theories.
+            4. Update the Levels section for the current level if new observations have been made. As the list of levels are built in theory.md it should show a clear progression of marginal additions of features / mechanisms / challenges for each subsequent level in a game.
         - template: |
             {{supervisor.user_message}}
     agent_rules:
       operation: append
       requirements:
-        - "new_game: for unclear effects, include 2-3 candidate theories and one falsifier."
-        - "new_game: end with an explicit initial completion theory and backward causal chain."
+        - "When theory evidence is missing or incomplete / ambiguous, consider a wide variety of possibilities and write them all down."
 
-  explore:
-    description: "Level-start handoff mode for non-initial levels: replay prior solution and characterize what's new."
+  explore_and_simulate:
+    description: "Take a minimal set of actions in the real game (not the simulation) to discover game mechanics, identify features and validate theories. Translate those discoveries into a simulator that mimics the real game."
     switch_when:
-      - "Use when a new level starts and current_level > 1."
-      - "Exit after replaying prior level solution(s), describing results, and identifying new mechanics/features/changes."
+      - "Features identified in theory.md need more exploration to gain confidence in our theories."
+      - "Discrepancies between the simulator and the real game have been identified but need more exploration to fix."
+      - "Exit when theories, features, and discepancies have been explored to the best of our ability and the simulation matches the real game behavior."
     user_message:
       operation: append
       parts:
         - literal: |
-            New-level mode guidance:
-            - Identify features/mechanics/requirements that are new or changed vs previous level.
-            - Carry forward and edit the prior level's causal completion theory for the new level.
-            - Start or update `./theory_<game id>_<level num>.md`
-            - Stop this mode after making an initial pass at theories about the mechanics and challenges of this level that have not been seen before.
-            Evidence policy:
-            - For `arc_repl exec`, your script output is the evidence channel.
-            - Print concise, structured evidence from your script.
-            - Keep claims action-linked and step-indexed.
-            - If your script did not execute actions or produced no actionable evidence, update your theories but do not assume mechanics that you have no evidence for.
-            - For a new diff class (pattern of pixel changes from state to state), propose 2-3 candidate causes and one falsifier.
-
+            You are assigned to "explore and simulate" mode for this entire conversation. Focus on these goals and yield control when complete. Do not act beyond the scope of this mode.
+            Explore And Simulate mode finds evidence to validate or invalidate feature lists, theories, and simulation code, and then updates theory.md and simulate.py to match. Your inputs are the game state and history and all local files in the ./game_<id>/ directory. Your outputs are real game actions, edits to theory.md, simulate.py, and assistant messages.
+            Do not execute real game actions beyond the scope of discovering game mechanics.
+            Do not attempt to solve levels in the simulator, focus on aligning simulator and real game behavior.
+            Process:
+            0. If the supervisor has instructed you to focus on exploring specific features / mechanics, do that.
+            1. Read theory.md in full and look for gaps in understanding, ambgiutiy to probe, theories to validate, low confidence theories, and alternatives that need to be ruled out / in or expanded on.
+            2. Read simulate.py in full and look for discrepancies between theory.md and the simulator, and game state features without full simulator implementations.
+            3. Write an inline script for `arc_repl exec` to explore the targets you've identified.
+              - We want to balance minimizing actions (which impact our benchmark score) vs batching up actions to reduce tool calls and LLM round trips. Examples:
+                - If there are 8 unique features to probe and they take one action each to explore it makes sense to execute a script with all 8 actions.
+                - But if there's a theory to explain why the 8 features might be following the same logical rules, it would be more efficient to probe 2-3 of them and extrapolate if they act consistenly.
+              - On another dimension, take care not to trigger game over with your actions, many games trigger game over after some number of actions without calling `arc_repl reset_level`. Game over will regress the state back to the first level so if the level is > 1, prefer reset_level over risking game over.
+            4. Observe the resulting state and per-action diffs. Write your observations / conclusions in theory.md, provide multpile theories if results are ambiguous and always provide appropriate confidence ratings. Update simulate.py if new evidence exposes gaps between the simulation and the real game.
+            5. Update simulate.py until it behaves exactly like the real game.
+            6. If there are more questions that could be answered with simple exploration, loop back to step 2. If the remaining ambiguity can't be resolved at this time, note that and continue. If the supervisor instructions have been satisfied and/or all open questions about game mechanics are answered, continue.
+            7. Write an assistant message with everything you learned and yield control.
         - template: |
             {{supervisor.user_message}}
     agent_rules:
       operation: append
       requirements:
-        - "new_level: replay prior solver(s), document observed carryover, and isolate new mechanics before exiting mode."
-        - "new_level: explicitly update the backward causal chain for the new level before exiting."
-
-  simulate:
-    description: "Unified solve loop: explore uncertain mechanics and exploit validated ones to complete levels."
-    switch_when:
-      - "Use for ongoing problem solving after startup modes complete."
-      - "Stay in mode while making conceptual progress; fork fresh conversation in same mode if context quality degrades."
-    system_message:
-      operation: append
-      parts:
-        - literal: |
-            Mode: explore_exploit
-            Goal: alternate between uncertainty-reducing probes and short solve attempts until level completion.
-    user_message:
-      operation: append
-      parts:
-        - literal: |
-            Explore-exploit mode guidance:
-            - At mode entry, check for `./solve_<game id>_<level num>.py`; if presentuse it as your starting point.
-            - Use short probes to resolve uncertainties; use short solve attempts to exploit validated mechanics.
-            - Drive work from `Backward Causal Steps`: satisfy next unmet step, then re-evaluate chain.
-            - Keep solving scripts robust to position changes by detecting features from current state.
-            - Update `solve_<game id>_<level>.py` and `theory_<game id>_<level num>.md` whenever understanding improves.
-            - If a theory fails, name the first contradiction and choose one high-information next probe.
-            - Stop this mode after learning anything significant about the game rules or solution.
-        - template: |
-            {{supervisor.user_message}}
-    agent_rules:
-      operation: append
-      requirements:
-        - "explore_exploit: keep exploration bounded and immediately exploit validated mechanics."
-        - "explore_exploit: when completing a level, persist a robust solver in `solve_<game id>_<level num>.py` and update `theory_<game id>_<level num>.md."
-        - "explore_exploit: maintain and refine one primary backward causal chain plus at most two alternatives."
+        - "Capture all new information gained, in theory.md, simulate.py, and in your assistant messages."
+      violations:
+        - "Attempting to solve the real game with actions."
+        - "Attemping to solve the simulatore game."
 
   exploit_simulation:
-    description: "Unified solve loop: explore uncertain mechanics and exploit validated ones to complete levels."
+    description: "Attempt to solve the level using only the simulator."
     switch_when:
-      - "Use for ongoing problem solving after startup modes complete."
-      - "Stay in mode while making conceptual progress; fork fresh conversation in same mode if context quality degrades."
-    system_message:
-      operation: append
-      parts:
-        - literal: |
-            Mode: explore_exploit
-            Goal: alternate between uncertainty-reducing probes and short solve attempts until level completion.
+      - "All known features of the current level have implementaions in simulate.py with high confidence."
+      - "Exit when the level is solved in the simulator and the solution is written to play.py, or when the simulator can't be solved or it's not behaving like the real game."
     user_message:
       operation: append
       parts:
         - literal: |
-            Explore-exploit mode guidance:
-            - At mode entry, check for `./solve_<game id>_<level num>.py`; if presentuse it as your starting point.
-            - Use short probes to resolve uncertainties; use short solve attempts to exploit validated mechanics.
-            - Drive work from `Backward Causal Steps`: satisfy next unmet step, then re-evaluate chain.
-            - Keep solving scripts robust to position changes by detecting features from current state.
-            - Update `solve_<game id>_<level>.py` and `theory_<game id>_<level num>.md` whenever understanding improves.
-            - If a theory fails, name the first contradiction and choose one high-information next probe.
-            - Stop this mode after learning anything significant about the game rules or solution.
-            Completion-theory policy:
-            - Write and maintain a completion theory for the curent level at ./theory_<game id>_<level num>.md: what must be true for level completion.
-            - It should include `Backward Causal Steps`: an ordered list from win state back to current state.
-            - For each causal step, track confidence (`high|medium|low`) and whether it is satisfied.
-            - Choose probes/attempts that either satisfy the earliest unsatisfied causal step or falsify the weakest link.
-            - If evidence contradicts a causal step, revise the theory immediately and continue from the revised chain.
+            You are assigned to "exploit simulation" mode for this entire conversation. Focus on these goals and yield control when complete. Do not act beyond the scope of this mode.
+            Exploit Simulation mode finds efficient solutions to the current level and writes them in play.py. Your inputs are the simulator state and all local files in the ./game_<id>/ directory. Your outputs are changes to play.py and assistant messages.
+            Do not execute real game actions or edit simulate.py.
+            Process:
+            0. Focus on any strategy the supervisor suggests, if any.
+            1. Read theory.md and simulate.py in full. Identify the level goal and work backwards in a causal chain to the starting state of the simulation.
+            2. Execute actions to follow that causal chain forward.
+            3. If solution progress stops or your assumptions are invalidated, go back to 1 and design a new causal chain.
+            4. Continue until the level is solved in the simulation or the simulator is not behaving correctly or you are otherwise blocked with no way to achieve the goal of the level.
+            5. Write the full solution in play.py and prove it works from a freshly reset simulator.
+            6. Optimize the solution in play.py to minimize actions taken in the real game.
         - template: |
             {{supervisor.user_message}}
     agent_rules:
       operation: append
       requirements:
-        - "explore_exploit: keep exploration bounded and immediately exploit validated mechanics."
-        - "explore_exploit: when completing a level, persist a robust solver in `solve_<game id>_<level num>.py` and update `theory_<game id>_<level num>.md."
-        - "explore_exploit: maintain and refine one primary backward causal chain plus at most two alternatives."
+        - "Update play.py with a full, optimized soluiton if the simulation level is solved."
+      violations:
+        - Any kind of brute force search across states using actions.
+        - Editing simulate.py
+        - Executing real game actions.
 
   solve:
-    description: "Unified solve loop: explore uncertain mechanics and exploit validated ones to complete levels."
+    description: "Use play.py to solve the real game"
     switch_when:
-      - "Use for ongoing problem solving after startup modes complete."
-      - "Stay in mode while making conceptual progress; fork fresh conversation in same mode if context quality degrades."
-    system_message:
-      operation: append
-      parts:
-        - literal: |
-            Mode: explore_exploit
-            Goal: alternate between uncertainty-reducing probes and short solve attempts until level completion.
+      - "Confidence in the parity between simulator and real game is high and play.py solves the simulator level."
+      - "Exit mode on level complete in the real game, or the simulator level cannot be solved or doesn't represent the real game sufficiently."
     user_message:
       operation: append
       parts:
         - literal: |
-            Explore-exploit mode guidance:
-            - At mode entry, check for `./solve_<game id>_<level num>.py`; if presentuse it as your starting point.
-            - Use short probes to resolve uncertainties; use short solve attempts to exploit validated mechanics.
-            - Drive work from `Backward Causal Steps`: satisfy next unmet step, then re-evaluate chain.
-            - Keep solving scripts robust to position changes by detecting features from current state.
-            - Update `solve_<game id>_<level>.py` and `theory_<game id>_<level num>.md` whenever understanding improves.
-            - If a theory fails, name the first contradiction and choose one high-information next probe.
-            - Stop this mode after learning anything significant about the game rules or solution.
-            Level transition handoff protocol (mandatory):
-            - If a call causes LEVEL COMPLETE or GAME OVER/full reset, stop immediately and return a handoff message.
-            - Use one of these exact headings:
-              - `LEVEL_COMPLETE_HANDOFF`
-              - `GAME_OVER_HANDOFF`
-            - `LEVEL_COMPLETE_HANDOFF` must include only what worked:
-              - winning sequence or replay recipe,
-              - essential mechanics that were required,
-              - relevant agent_lib.py functions and their use,
-              - critical invariants/constraints that must be preserved.
-            - `GAME_OVER_HANDOFF` must include both what worked and what failed:
-              - progress that was reliable,
-              - failed hypotheses/probes and why they failed,
-              - one or more explicit theories for why GAME_OVER was triggered (each tied to evidence and a falsifier).
-            - Handoffs must be detailed enough for a fresh agent to continue without hidden context.
-            - When completing a level successfully, write or update ./solve_<game id>_<level num>.py with the solution. it should use high level functions from agent_lib.py and be a minimal solution with a small amount of code. Explain the solution with comments. Also update theory_<game id>_<level num>.md with everything relevant you know.
-            - Finally, write an assistant message and yield control.
-            Decide:
-            - Determine if this level has been solved before by a previous agent, if so use the local files to plan a repeat solution or one with improved efficiency.
-            - Evaluate the existing Level Completion Theory and any game rule theories on disk, taking their confidence rating into account. Propose alternative theories for low condfidence theories.
-            - Follow the active mode goal.
-            - Keep reasoning grounded in step-level evidence.
-            - Plan how to either test theories or exploit them to advance.
-            - Write or update functions in ./agent_lib.py to assist with your plan.
-
+            You are assigned to "solve" mode for this entire conversation. Focus on these goals and yield control when complete. Do not act beyond the scope of this mode.
+            Solve mode applies efficient solutions found in play.py to solve the current level in the real game. Your inputs are the simulator state and play.py. Your outputs are changes to play.py and assistant messages.
+            Solve mode process:
+            0. Run reset_level
+            1. Run play.py
+            2. Evaluate results. 
+            3. Update play.py and / or simulate.py to align them with observed real game behavior.
+            4. Loop back to 2 if it could solve the level now.
+            5. If the level is complete or solving it is blocked in some way currently, write an assistant message with everything you've learned.
         - template: |
             {{supervisor.user_message}}
     agent_rules:
       operation: append
       requirements:
-        - "explore_exploit: keep exploration bounded and immediately exploit validated mechanics."
-        - "explore_exploit: when completing a level, persist a robust solver in `solve_<game id>_<level num>.py` and update `theory_<game id>_<level num>.md."
-        - "explore_exploit: maintain and refine one primary backward causal chain plus at most two alternatives."
+        - "Run play.py in the real game."
+      violations:
+        - "Running ad-hoc scripts to explore real game functionality."
+        - "Repeatedly failing to solve the level without real progress or evidence-backed theory updates"
+
 mode_state_machine:
   initial_mode: theory
   transitions:
-    theory: [explore, theory]
-    explore: [simulate, theory, explore]
-    simulate: [exploit_simulation, theory, simulate]
-    exploit_simulation: [solve, theory, explore, simulate, exploit_simulation]
-    solve: [theory, explore, simulate, exploit_simulation, solve]
+    theory: [explore_and_simulate, theory]
+    explore_and_simulate: [theory, exploit_simulation, explore_and_simulate]
+    exploit_simulation: [solve, theory, explore_and_simulate, exploit_simulation]
+    solve: [theory, explore_and_simulate, exploit_simulation, solve]
 
 tools:
   allow_builtin:
