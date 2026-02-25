@@ -21,6 +21,19 @@ Mechanics:
 
 # Levels
 1: SOLVED|UNSOLVED
+Observations:
   - Key observations
   - Mechanics used
   - What is still uncertain
+Level Delta:
+  - What changed vs previous level
+  - New feature/mechanic/challenge/twist
+
+2: SOLVED|UNSOLVED
+Observations:
+  - Key observations
+  - Mechanics used
+  - What is still uncertain
+Level Delta:
+  - What changed vs previous level
+  - New feature/mechanic/challenge/twist

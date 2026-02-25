@@ -19,7 +19,7 @@ def execute_exec_turn(session, requested_game_id: str, script: str, *, session_c
     if not str(script or "").strip():
         raise RuntimeError("exec requires non-empty inline script")
 
-    session._refresh_agent_lib()
+    session._refresh_play_lib()
 
     session.script_counter += 1
     script_label = f"<arc_repl_exec_{session.script_counter:04d}>"

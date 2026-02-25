@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Stateful ARC Python REPL tool for super shell usage."""
-
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import multiprocessing.connection
 import os
@@ -15,104 +15,54 @@ import traceback
 from hashlib import sha1
 from pathlib import Path
 
-try:
-    from arc_repl_daemon import run_daemon
-except Exception:
-    from tools.arc_repl_daemon import run_daemon
-
-try:
-    from arc_action_diffs import (
-        _change_bbox,
-        _iter_cell_changes,
-        build_aggregate_diff_record,
-        build_step_diff_records,
-        format_diff_minimal,
-        frame_action_metadata,
-        write_game_state,
-        write_machine_state,
-    )
-    from arc_action_env import (
-        _action_from_event_name,
-        _get_pixels,
-        _make_env,
-        _make_id_candidates,
-        _replay_history,
-    )
-    from arc_action_exec import _write_turn_trace
-    from arc_action_state import (
-        _append_level_completion,
-        _arc_dir,
-        _completion_action_windows_by_level,
-        _default_game_id,
-        _ensure_agent_lib_file,
-        _ensure_level_completions_file,
-        _error_payload,
-        _read_max_recorded_completion_level,
-        _save_history,
-    )
-    from arc_action_state import _load_history as _load_history_impl
-except Exception:
-    from tools.arc_action_diffs import (
-        _change_bbox,
-        _iter_cell_changes,
-        build_aggregate_diff_record,
-        build_step_diff_records,
-        format_diff_minimal,
-        frame_action_metadata,
-        write_game_state,
-        write_machine_state,
-    )
-    from tools.arc_action_env import (
-        _action_from_event_name,
-        _get_pixels,
-        _make_env,
-        _make_id_candidates,
-        _replay_history,
-    )
-    from tools.arc_action_exec import _write_turn_trace
-    from tools.arc_action_state import (
-        _append_level_completion,
-        _arc_dir,
-        _completion_action_windows_by_level,
-        _default_game_id,
-        _ensure_agent_lib_file,
-        _ensure_level_completions_file,
-        _error_payload,
-        _read_max_recorded_completion_level,
-        _save_history,
-    )
-    from tools.arc_action_state import _load_history as _load_history_impl
-
-try:
-    from arc_repl_session_core import (
-        BaseReplSession,
-        _StopScript,
-        _chunk_for_bbox,
-        _coerce_grid,
-        _grid_from_hex_rows,
-        _same_game_lineage as _same_game_lineage_impl,
-    )
-except Exception:
-    from tools.arc_repl_session_core import (
-        BaseReplSession,
-        _StopScript,
-        _chunk_for_bbox,
-        _coerce_grid,
-        _grid_from_hex_rows,
-        _same_game_lineage as _same_game_lineage_impl,
-    )
+from arc_action_diffs import (
+    _change_bbox,
+    _iter_cell_changes,
+    build_aggregate_diff_record,
+    build_step_diff_records,
+    format_diff_minimal,
+    frame_action_metadata,
+    write_game_state,
+    write_machine_state,
+)
+from arc_action_env import (
+    _action_from_event_name,
+    _get_pixels,
+    _make_env,
+    _make_id_candidates,
+    _replay_history,
+)
+from arc_action_exec import _write_turn_trace
+from arc_action_state import (
+    _append_level_completion,
+    _arc_dir,
+    _completion_action_windows_by_level,
+    _default_game_id,
+    _ensure_play_lib_file,
+    _ensure_level_completions_file,
+    _error_payload,
+    _read_max_recorded_completion_level,
+    _save_history,
+)
+from arc_action_state import _load_history as _load_history_impl
+from arc_repl_daemon import run_daemon
+from arc_repl_session_core import (
+    BaseReplSession,
+    _StopScript,
+    _chunk_for_bbox,
+    _coerce_grid,
+    _grid_from_hex_rows,
+    _same_game_lineage as _same_game_lineage_impl,
+)
 
 SCHEMA_VERSION = "arc_repl.v1"
 SOCKET_WAIT_TIMEOUT_S = 90.0
 
-
 def _load_history(cwd: Path, game_id: str) -> dict:
     return _load_history_impl(cwd, game_id, _make_id_candidates)
 
-
 def _lifecycle_path(cwd: Path, conversation_id: str) -> Path:
     return _session_dir(cwd, conversation_id) / "daemon.lifecycle.jsonl"
-
 
 def _append_lifecycle_event(cwd: Path, conversation_id: str, event: str, **fields: object) -> None:
     try:
@@ -128,7 +78,6 @@ def _append_lifecycle_event(cwd: Path, conversation_id: str, event: str, **field
     except Exception:
         pass
 
-
 def _error(*, action: str, requested_game_id: str, message: str, error_type: str, details: str = "") -> dict:
     payload = _error_payload(
         action=action,
@@ -139,7 +88,6 @@ def _error(*, action: str, requested_game_id: str, message: str, error_type: str
     )
     payload["schema_version"] = SCHEMA_VERSION
     return payload
-
 
 def _read_args() -> dict:
     raw = sys.stdin.read().strip()
@@ -153,12 +101,10 @@ def _read_args() -> dict:
         return {"_error": "JSON args must be an object"}
     return parsed
 
-
 def _emit_json(payload: dict) -> None:
     sys.stdout.write(json.dumps(payload, indent=2))
     if not sys.stdout.isatty():
         sys.stdout.write("\n")
-
 
 def _conversation_id() -> str:
     raw = str(os.getenv("ARC_CONVERSATION_ID", "") or "").strip()
@@ -167,7 +113,6 @@ def _conversation_id() -> str:
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._")
     return safe[:120] or "default"
 
-
 def _session_key() -> str:
     raw = str(os.getenv("ARC_REPL_SESSION_KEY", "") or "").strip()
     if raw:
@@ -175,32 +120,44 @@ def _session_key() -> str:
         return safe[:120] or "default"
     return _conversation_id()
 
-
 def _session_dir(cwd: Path, conversation_id: str) -> Path:
     return _arc_dir(cwd) / "repl-sessions" / conversation_id
 
+def _is_socket_permission_error(exc: BaseException) -> bool:
+    """True when sandbox/policy blocks AF_UNIX connect/listen operations."""
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, PermissionError):
+            return True
+        if isinstance(cur, OSError) and getattr(cur, "errno", None) in {
+            errno.EPERM,
+            errno.EACCES,
+        }:
+            return True
+        msg = str(cur).lower()
+        if "operation not permitted" in msg or "permission denied" in msg:
+            return True
+        cur = cur.__cause__ or cur.__context__
+    return False
 
 def _socket_path(cwd: Path, conversation_id: str) -> Path:
     key = f"{_arc_dir(cwd)}::{conversation_id}"
     digest = sha1(key.encode("utf-8")).hexdigest()[:20]
     return Path("/tmp") / f"arc-repl-{digest}.sock"
 
-
 def _pid_path(cwd: Path, conversation_id: str) -> Path:
     return _session_dir(cwd, conversation_id) / "daemon.pid"
-
 
 def _meta_path(cwd: Path, conversation_id: str) -> Path:
     return _session_dir(cwd, conversation_id) / "session.json"
 
-
 def _daemon_log_path(cwd: Path, conversation_id: str) -> Path:
     return _session_dir(cwd, conversation_id) / "daemon.log"
 
-
 def _same_game_lineage(existing_game_id: str, requested_game_id: str) -> bool:
     return _same_game_lineage_impl(existing_game_id, requested_game_id, _make_id_candidates)
-
 
 class ReplSession(BaseReplSession):
     def __init__(self, *, cwd: Path, conversation_id: str, requested_game_id: str) -> None:
@@ -210,7 +167,6 @@ class ReplSession(BaseReplSession):
             requested_game_id=requested_game_id,
             deps=sys.modules[__name__],
         )
-
 
 def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
     session_dir = _session_dir(cwd, conversation_id)
@@ -255,7 +211,6 @@ def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
         log_file=str(log_path),
     )
 
-
 def _wait_for_daemon(cwd: Path, conversation_id: str, timeout_s: float = SOCKET_WAIT_TIMEOUT_S) -> None:
     socket_path = _socket_path(cwd, conversation_id)
     deadline = time.time() + timeout_s
@@ -263,7 +218,9 @@ def _wait_for_daemon(cwd: Path, conversation_id: str, timeout_s: float = SOCKET_
         if socket_path.exists():
             try:
                 conn = multiprocessing.connection.Client(str(socket_path), family="AF_UNIX")
-            except Exception:
+            except Exception as exc:
+                if _is_socket_permission_error(exc):
+                    raise
                 time.sleep(0.05)
                 continue
             try:
@@ -287,7 +244,6 @@ def _wait_for_daemon(cwd: Path, conversation_id: str, timeout_s: float = SOCKET_
         socket=str(socket_path),
     )
     raise RuntimeError(f"arc_repl daemon did not start within {timeout_s}s")
-
 
 def _send_request(cwd: Path, conversation_id: str, request: dict) -> tuple[dict, bool]:
     socket_path = _socket_path(cwd, conversation_id)
@@ -334,7 +290,6 @@ def _send_request(cwd: Path, conversation_id: str, request: dict) -> tuple[dict,
         _spawn_for_request("connect_race")
         return _try_send(), session_created
 
-
 def _daemon_main(cwd: Path, conversation_id: str, requested_game_id: str) -> int:
     session_dir = _session_dir(cwd, conversation_id)
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -362,7 +317,6 @@ def _daemon_main(cwd: Path, conversation_id: str, requested_game_id: str) -> int
         listener_factory=multiprocessing.connection.Listener,
     )
 
-
 def _parse_daemon_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--daemon", action="store_true")
@@ -370,7 +324,6 @@ def _parse_daemon_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--conversation-id", default="")
     parser.add_argument("--game-id", default="")
     return parser.parse_args(argv)
-
 
 def main() -> int:
     daemon_args = _parse_daemon_args(sys.argv[1:])
@@ -493,7 +446,6 @@ def main() -> int:
             )
         )
         return 1
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

@@ -67,7 +67,7 @@ def test_execute_script_runs_steps_and_stops_on_terminal() -> None:
         env,
         script_label="<test_script>",
         initial_frame=_initial_frame(),
-        agent_lib_source="def helper():\n    return 1\n",
+        play_lib_source="def helper():\n    return 1\n",
     )
 
     assert last_frame is not None
@@ -98,9 +98,9 @@ def test_arc_action_main_run_script_branch(tmp_path: Path, monkeypatch) -> None:
         "_read_args",
         lambda: {"action": "run_script", "game_id": "ls20", "script": "print('x')"},
     )
-    agent_lib = cwd / "agent_lib.py"
-    agent_lib.write_text("def helper():\n    return 1\n")
-    monkeypatch.setattr(arc_action, "_ensure_agent_lib_file", lambda cwd_: agent_lib)
+    play_lib = cwd / "play_lib.py"
+    play_lib.write_text("def helper():\n    return 1\n")
+    monkeypatch.setattr(arc_action, "_ensure_play_lib_file", lambda cwd_: play_lib)
     monkeypatch.setattr(arc_action, "_load_history", lambda cwd_, gid: {"game_id": gid, "events": [], "turn": 0})
     monkeypatch.setattr(arc_action, "_make_env", lambda gid: object())
     monkeypatch.setattr(arc_action, "_replay_history", lambda env, events: frame0)

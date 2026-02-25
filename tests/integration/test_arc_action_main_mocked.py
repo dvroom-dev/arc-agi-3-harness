@@ -33,7 +33,7 @@ def test_arc_action_main_status_mocked(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("ARC_STATE_DIR", str(arc_dir))
 
     monkeypatch.setattr(arc_action, "_read_args", lambda: {"action": "status", "game_id": "ls20"})
-    monkeypatch.setattr(arc_action, "_ensure_agent_lib_file", lambda cwd: cwd / "agent_lib.py")
+    monkeypatch.setattr(arc_action, "_ensure_play_lib_file", lambda cwd: cwd / "play_lib.py")
     monkeypatch.setattr(arc_action, "_load_history", lambda cwd, gid: {"game_id": gid, "events": [], "turn": 0})
     monkeypatch.setattr(arc_action, "_make_env", lambda gid: object())
     monkeypatch.setattr(arc_action, "_replay_history", lambda env, events: _frame())

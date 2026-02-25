@@ -23,6 +23,14 @@ If leakage is found, fix the setup/root cause (what gets mounted/copied into run
 
 When diagnosing solver failures, find the first turn where a wrong belief appears and trace it to the exact evidence/tool output that triggered it. Prefer action-linked movement evidence over visual salience when identifying controllable actors.
 
+## Prompt source of truth
+
+Hard rule:
+- Do not add hardcoded agent/supervisor prompt instructions in harness Python code.
+- Harness should pass neutral runtime state only (for example: structured status/diffs/events), not policy text.
+- All behavioral instructions must live in `super.yaml` (mode prompts, supervisor templates, rules), not `harness_runner.py`/other harness modules.
+- If a new instruction is needed, update `super.yaml` instead of injecting freeform text from the harness.
+
 ## Run logging discipline
 
 - Always capture both `stdout` and `stderr` for harness runs and monitoring commands.
@@ -114,5 +122,5 @@ Use this section to calibrate run analysis quality. It is for evaluator understa
 
 ## Post-Run Prompt TODOs
 
-- Instruct agent to build reusable code abstractions first (helpers in `agent_lib.py`), then keep per-level `solve_*.py` scripts thin and compositional.
+- Instruct agent to build reusable code abstractions first (helpers in `play_lib.py`), then keep per-level `solve_*.py` scripts thin and compositional.
 - On any `GAME_OVER`, require a written causal theory of why it happened (resource exhaustion/pathing/mechanic mismatch), with concrete evidence and the minimal fix plan before retry.

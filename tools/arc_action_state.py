@@ -14,10 +14,10 @@ Canonical record of completed levels and the exact action sequence
 for each completed level window.
 """
 
-AGENT_LIB_TEMPLATE = """\"\"\"Persistent helper library for ARC scripts.
+PLAY_LIB_TEMPLATE = """\"\"\"Persistent helper library for ARC scripts.
 
-Define reusable functions here. Every `arc_action` run_script call auto-loads this file,
-so your inline scripts can call helpers directly without imports or boilerplate.
+Define reusable functions here. `arc_repl exec` and simulator exec calls auto-load this file,
+so inline scripts can call helpers directly without imports or boilerplate.
 \"\"\"
 
 # Example:
@@ -96,14 +96,14 @@ def _ensure_level_completions_file(cwd: Path) -> Path:
     return path
 
 
-def _agent_lib_path(cwd: Path) -> Path:
-    return cwd / "agent_lib.py"
+def _play_lib_path(cwd: Path) -> Path:
+    return cwd / "play_lib.py"
 
 
-def _ensure_agent_lib_file(cwd: Path) -> Path:
-    path = _agent_lib_path(cwd)
+def _ensure_play_lib_file(cwd: Path) -> Path:
+    path = _play_lib_path(cwd)
     if not path.exists():
-        path.write_text(AGENT_LIB_TEMPLATE)
+        path.write_text(PLAY_LIB_TEMPLATE)
     return path
 
 
@@ -224,4 +224,3 @@ def _load_history(cwd: Path, game_id: str, make_id_candidates) -> dict:
 
 def _save_history(cwd: Path, history: dict) -> None:
     _history_path(cwd).write_text(json.dumps(history, indent=2))
-

@@ -100,7 +100,7 @@ def test_state_and_history_file_helpers(tmp_path: Path, monkeypatch: pytest.Monk
 
     lc = arc_action._ensure_level_completions_file(cwd)
     assert lc.exists()
-    al = arc_action._ensure_agent_lib_file(cwd)
+    al = arc_action._ensure_play_lib_file(cwd)
     assert al.exists()
 
     history = {"game_id": "ls20", "events": [], "turn": 3}

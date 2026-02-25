@@ -43,13 +43,13 @@ try:
     from arc_action_exec import _script_worker_main
     from arc_action_exec import _write_turn_trace
     from arc_action_state import (
-        _agent_lib_path,
+        _play_lib_path,
         _append_level_completion,
         _arc_dir,
         _completion_action_windows_by_level,
         _default_game_id,
         _emit_json,
-        _ensure_agent_lib_file,
+        _ensure_play_lib_file,
         _ensure_level_completions_file,
         _error_payload,
         _history_path,
@@ -87,13 +87,13 @@ except Exception:
     from tools.arc_action_exec import _script_worker_main
     from tools.arc_action_exec import _write_turn_trace
     from tools.arc_action_state import (
-        _agent_lib_path,
+        _play_lib_path,
         _append_level_completion,
         _arc_dir,
         _completion_action_windows_by_level,
         _default_game_id,
         _emit_json,
-        _ensure_agent_lib_file,
+        _ensure_play_lib_file,
         _ensure_level_completions_file,
         _error_payload,
         _history_path,
@@ -135,14 +135,14 @@ def _execute_script(
     *,
     script_label: str,
     initial_frame,
-    agent_lib_source: str = "",
+    play_lib_source: str = "",
 ):
     return _execute_script_impl(
         script_source,
         env,
         script_label=script_label,
         initial_frame=initial_frame,
-        agent_lib_source=agent_lib_source,
+        play_lib_source=play_lib_source,
         get_pixels=_get_pixels,
     )
 
@@ -187,7 +187,7 @@ def main() -> int:
             )
             return 1
 
-        agent_lib_file = _ensure_agent_lib_file(cwd)
+        play_lib_file = _ensure_play_lib_file(cwd)
         history = _load_history(cwd, game_id)
         events = list(history.get("events", []))
         turn = int(history.get("turn", 0))
@@ -242,7 +242,7 @@ def main() -> int:
                 return 1
             script_source = str(script_inline)
 
-            agent_lib_source = agent_lib_file.read_text()
+            play_lib_source = play_lib_file.read_text()
             (
                 last_frame,
                 script_output,
@@ -256,7 +256,7 @@ def main() -> int:
                 env,
                 script_label=script_label,
                 initial_frame=frame,
-                agent_lib_source=agent_lib_source,
+                play_lib_source=play_lib_source,
             )
             if last_frame is not None:
                 frame = last_frame

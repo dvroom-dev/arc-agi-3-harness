@@ -145,12 +145,12 @@ def test_setup_run_dir_seeds_expected_files(tmp_path: Path) -> None:
         log=lambda _m: None,
         game_id="ls20",
     )
-    assert (agent_dir / "agent_lib.py").exists()
+    assert (agent_dir / "play_lib.py").exists()
     assert (supervisor_dir / "arc" / "game-knowledge.md").exists()
     assert (supervisor_dir / "arc" / "level-knowledge.md").exists()
     assert (supervisor_dir / "arc" / "level_completions.md").exists()
     assert (agent_dir / "game_ls20" / "theory.md").exists()
-    assert (agent_dir / "game_ls20" / "simulator.py").exists()
+    assert (agent_dir / "game_ls20" / "simulate.py").exists()
     assert (agent_dir / "game_ls20" / "play.py").exists()
 
 

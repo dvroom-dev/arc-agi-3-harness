@@ -52,8 +52,11 @@ def parse_args_impl() -> argparse.Namespace:
         help="Disable supervision (pass --no-supervisor to super CLI)",
     )
     parser.add_argument(
-        "--no-explore", action="store_true",
-        help="Skip automated input exploration at game start",
+        "--explore-inputs", action="store_true",
+        help=(
+            "Opt-in: run one-time automated input exploration at the first level "
+            "of a fresh game start."
+        ),
     )
     parser.add_argument(
         "--max-game-over-resets", type=int, default=8,
@@ -104,9 +107,9 @@ def setup_run_dir_impl(
     game_knowledge_template: str,
     level_knowledge_template: str,
     level_completions_template: str,
-    agent_lib_template: str,
+    play_lib_template: str,
     theory_template: str,
-    simulator_template: str,
+    simulate_template: str,
     play_template: str,
     game_id: str,
 ) -> None:
@@ -130,23 +133,28 @@ def setup_run_dir_impl(
     if not lc.exists():
         lc.write_text(level_completions_template)
 
-    agent_lib = agent_dir / "agent_lib.py"
-    if not agent_lib.exists():
-        agent_lib.write_text(agent_lib_template)
-
     safe_game_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(game_id or "").strip()).strip("._")
     if not safe_game_id:
         safe_game_id = "game"
     game_dir = agent_dir / f"game_{safe_game_id}"
     game_dir.mkdir(parents=True, exist_ok=True)
 
+    # Keep a root play_lib for REPL auto-loading, and a game-local copy for clarity.
+    play_lib_root = agent_dir / "play_lib.py"
+    if not play_lib_root.exists():
+        play_lib_root.write_text(play_lib_template)
+
+    play_lib_game = game_dir / "play_lib.py"
+    if not play_lib_game.exists():
+        play_lib_game.write_text(play_lib_template)
+
     theory_file = game_dir / "theory.md"
     if not theory_file.exists():
         theory_file.write_text(theory_template)
 
-    simulator_file = game_dir / "simulator.py"
-    if not simulator_file.exists():
-        simulator_file.write_text(simulator_template)
+    simulate_file = game_dir / "simulate.py"
+    if not simulate_file.exists():
+        simulate_file.write_text(simulate_template)
 
     play_file = game_dir / "play.py"
     if not play_file.exists():

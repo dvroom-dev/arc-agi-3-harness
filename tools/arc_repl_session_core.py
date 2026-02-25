@@ -49,7 +49,7 @@ class BaseReplSession:
                 "game_id is required (or initialize state first with action=status and game_id)"
             )
 
-        self.agent_lib_file = deps._ensure_agent_lib_file(cwd)
+        self.play_lib_file = deps._ensure_play_lib_file(cwd)
         self.completions_path = deps._ensure_level_completions_file(cwd)
         self.history = deps._load_history(cwd, game_id)
         self.turn = int(self.history.get("turn", 0))
@@ -62,7 +62,7 @@ class BaseReplSession:
         self.history["game_id"] = self.game_id
 
         self.script_counter = 0
-        self.last_agent_lib_mtime_ns: int | None = None
+        self.last_play_lib_mtime_ns: int | None = None
         self.globals: dict[str, Any] = {
             "np": np,
             "json": json,
@@ -73,7 +73,7 @@ class BaseReplSession:
             "get_state": self._state_payload,
             "diff": self.diff,
         }
-        self._refresh_agent_lib(force=True)
+        self._refresh_play_lib(force=True)
 
     def _same_game_lineage(self, requested_game_id: str) -> bool:
         return _same_game_lineage(
@@ -82,17 +82,17 @@ class BaseReplSession:
             self.deps._make_id_candidates,
         )
 
-    def _refresh_agent_lib(self, *, force: bool = False) -> None:
+    def _refresh_play_lib(self, *, force: bool = False) -> None:
         try:
-            stat = self.agent_lib_file.stat()
+            stat = self.play_lib_file.stat()
             mtime_ns = int(stat.st_mtime_ns)
         except Exception:
             return
-        if not force and self.last_agent_lib_mtime_ns == mtime_ns:
+        if not force and self.last_play_lib_mtime_ns == mtime_ns:
             return
-        source = self.agent_lib_file.read_text()
-        exec(compile(source, str(self.agent_lib_file), "exec"), self.globals)
-        self.last_agent_lib_mtime_ns = mtime_ns
+        source = self.play_lib_file.read_text()
+        exec(compile(source, str(self.play_lib_file), "exec"), self.globals)
+        self.last_play_lib_mtime_ns = mtime_ns
 
     def _state_payload(self) -> dict:
         frame = self.frame

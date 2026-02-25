@@ -68,7 +68,7 @@ SAFE_BUILTINS = {
 }
 
 
-def _script_worker_main(conn, script_source: str, agent_lib_source: str, script_label: str) -> None:
+def _script_worker_main(conn, script_source: str, play_lib_source: str, script_label: str) -> None:
     class _StopScript(Exception):
         pass
 
@@ -125,8 +125,8 @@ def _script_worker_main(conn, script_source: str, agent_lib_source: str, script_
 
     try:
         with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-            if agent_lib_source.strip():
-                exec(compile(agent_lib_source, "agent_lib.py", "exec"), script_globals)
+            if play_lib_source.strip():
+                exec(compile(play_lib_source, "play_lib.py", "exec"), script_globals)
             exec(compile(script_source, script_label, "exec"), script_globals)
     except _StopScript:
         pass
@@ -219,7 +219,7 @@ def _execute_script(
     *,
     script_label: str,
     initial_frame: FrameDataRaw,
-    agent_lib_source: str = "",
+    play_lib_source: str = "",
     get_pixels,
 ) -> tuple[
     FrameDataRaw | None,
@@ -299,7 +299,7 @@ def _execute_script(
 
     ctx = multiprocessing.get_context("spawn")
     parent_conn, child_conn = ctx.Pipe()
-    proc = ctx.Process(target=_script_worker_main, args=(child_conn, script_source, agent_lib_source, script_label))
+    proc = ctx.Process(target=_script_worker_main, args=(child_conn, script_source, play_lib_source, script_label))
     proc.start()
     child_conn.close()
     last_frame = initial_frame

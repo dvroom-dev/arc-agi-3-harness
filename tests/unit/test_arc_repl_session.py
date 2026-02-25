@@ -58,15 +58,15 @@ class FakeEnv:
 def _patch_session_dependencies(monkeypatch, tmp_path: Path):
     arc_dir = tmp_path / "arc"
     arc_dir.mkdir()
-    agent_lib = tmp_path / "agent_lib.py"
-    agent_lib.write_text("def helper():\n    return 1\n")
+    play_lib = tmp_path / "play_lib.py"
+    play_lib.write_text("def helper():\n    return 1\n")
     completions = arc_dir / "level_completions.md"
     completions.write_text("# Level Completions\n")
     history = {"game_id": "ls20-cb3b57cc", "events": [], "turn": 0}
 
     monkeypatch.setenv("ARC_STATE_DIR", str(arc_dir))
     monkeypatch.setattr(arc_repl, "_arc_dir", lambda cwd: arc_dir)
-    monkeypatch.setattr(arc_repl, "_ensure_agent_lib_file", lambda cwd: agent_lib)
+    monkeypatch.setattr(arc_repl, "_ensure_play_lib_file", lambda cwd: play_lib)
     monkeypatch.setattr(arc_repl, "_ensure_level_completions_file", lambda cwd: completions)
     monkeypatch.setattr(arc_repl, "_load_history", lambda cwd, gid: dict(history))
     monkeypatch.setattr(arc_repl, "_save_history", lambda cwd, h: history.update(h))

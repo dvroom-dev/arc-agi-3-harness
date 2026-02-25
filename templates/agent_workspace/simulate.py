@@ -8,8 +8,9 @@ Supported commands:
   - exec_file [--game-id GAME] PATH
   - shutdown
 
-This is intentionally minimal. Extend `SimulatorEnv.step/reset/get_state` with
-game logic as you learn mechanics.
+Dry-run workflow:
+  - Run `./simulate.py exec_file ./play.py` before `arc_repl exec_file ./play.py`.
+  - Compare simulator output and real-game output to maintain parity.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ import json
 import sys
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -112,7 +114,26 @@ class _Frame:
         self.frame = [np.array(env.grid, dtype=np.int8, copy=True)]
 
 
+@dataclass(frozen=True)
+class LevelConfig:
+    level_num: int
+    name: str
+    turn_budget: int
+
+
+LEVEL_REGISTRY = {
+    1: LevelConfig(level_num=1, name="level_1", turn_budget=100),
+}
+
+
 class SimulatorEnv:
+    """Incremental simulator scaffold.
+
+    Organize mechanics as:
+    1) always-on base mechanics in `_apply_base_mechanics`
+    2) level-specific additions in `_apply_level_mechanics`
+    """
+
     def __init__(self, game_id):
         self.game_id = str(game_id or "game")
         self.guid = "sim-guid"
@@ -121,19 +142,61 @@ class SimulatorEnv:
         self.win_levels = 7
         self.full_reset = False
         self.turn = 0
-        self.grid = np.zeros((8, 8), dtype=np.int8)
         self.available_actions = [int(a.value) for a in GameAction]
         self.action_space = [a for a in GameAction]
 
-    def step(self, action, data=None, reasoning=None):
-        _ = data, reasoning
-        self.turn += 1
-        return _Frame(self, action_name=getattr(action, "name", str(action)))
+        self.current_level = 1
+        self.turn_budget = 100
+        self.grid = np.zeros((8, 8), dtype=np.int8)
+        self._init_level(1)
 
-    def reset(self):
+    def _init_level(self, level_num: int) -> None:
+        cfg = LEVEL_REGISTRY.get(level_num)
+        self.current_level = level_num
         self.turn = 0
         self.state = "NOT_FINISHED"
         self.full_reset = False
+        if cfg is not None:
+            self.turn_budget = int(cfg.turn_budget)
+        self.grid = np.zeros((8, 8), dtype=np.int8)
+
+    def _apply_base_mechanics(self, action, data=None, reasoning=None):
+        """Mechanics shared across levels."""
+        _ = action, data, reasoning
+        self.turn += 1
+        self.turn_budget -= 1
+
+    def _apply_level_1(self, action, data=None, reasoning=None):
+        """Level 1-only mechanics.
+
+        Replace this with game-specific mechanics validated by evidence.
+        """
+        _ = action, data, reasoning
+
+    def _apply_level_mechanics(self, action, data=None, reasoning=None):
+        """Level-specific mechanics dispatcher."""
+        handler = getattr(self, f"_apply_level_{self.current_level}", None)
+        if callable(handler):
+            handler(action, data=data, reasoning=reasoning)
+
+    def _check_level_complete(self):
+        """Set completion transition when level win condition is met."""
+        # TODO: Replace with evidence-backed completion condition.
+        return False
+
+    def step(self, action, data=None, reasoning=None):
+        self._apply_base_mechanics(action, data=data, reasoning=reasoning)
+        self._apply_level_mechanics(action, data=data, reasoning=reasoning)
+        if self._check_level_complete():
+            self.levels_completed += 1
+            if self.levels_completed >= self.win_levels:
+                self.state = "WIN"
+            else:
+                self._init_level(self.levels_completed + 1)
+        return _Frame(self, action_name=getattr(action, "name", str(action)))
+
+    def reset(self):
+        self._init_level(self.current_level)
         return _Frame(self, action_name="reset_level")
 
 
@@ -259,33 +322,66 @@ def main():
                     },
                 }
             )
-            return 2
+            return 1
         try:
             session.execute(script)
+            _print_json({"ok": True, "action": "exec", **session.get_state()})
             return 0
-        except Exception:
-            traceback.print_exc()
+        except Exception as exc:
+            _print_json(
+                {
+                    "ok": False,
+                    "action": "exec",
+                    "error": {"type": "exec_error", "message": str(exc), "details": traceback.format_exc()},
+                }
+            )
             return 1
     if args.action == "exec_file":
+        script_path = Path(args.script_path)
+        if not script_path.exists():
+            _print_json(
+                {
+                    "ok": False,
+                    "action": "exec_file",
+                    "error": {
+                        "type": "missing_script_file",
+                        "message": f"script file not found: {script_path}",
+                    },
+                }
+            )
+            return 1
         try:
-            script = Path(args.script_path).read_text()
+            script = script_path.read_text()
+            if not str(script or "").strip():
+                _print_json(
+                    {
+                        "ok": False,
+                        "action": "exec_file",
+                        "error": {
+                            "type": "invalid_exec_file_args",
+                            "message": "script file is empty",
+                        },
+                    }
+                )
+                return 1
+            session.execute(script)
+            _print_json({"ok": True, "action": "exec_file", **session.get_state()})
+            return 0
         except Exception as exc:
             _print_json(
                 {
                     "ok": False,
                     "action": "exec_file",
-                    "error": {"type": "invalid_exec_file_args", "message": str(exc)},
+                    "error": {
+                        "type": "exec_file_error",
+                        "message": str(exc),
+                        "details": traceback.format_exc(),
+                    },
                 }
             )
-            return 2
-        try:
-            session.execute(script)
-            return 0
-        except Exception:
-            traceback.print_exc()
             return 1
-    _print_json({"ok": False, "error": {"type": "unknown_action", "message": str(args.action)}})
-    return 2
+    _print_json({"ok": False, "error": {"type": "unknown_action", "message": f"unknown action: {args.action}"}})
+    return 1
 
 
 if __name__ == "__main__":

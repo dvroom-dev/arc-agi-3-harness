@@ -26,6 +26,7 @@ supervisor:
               Review the agent's progress, choose an action (in decreasing precedence):
               - If the agent's session has gone for 20 minutes or more (4 cadence triggers) it has probably gone off the rails, gather all useful context from it, then fork_new_conversation for a fresh agent and steer the new conversation away from the same rathole.
               - If the agent's session has gone on for 15 minutes or more (3 cadence triggers), they need to wrap it up and handoff context to you. Use `append_message_and_continue` and the `handoff_command` message template will give them the handoff steps, add any addition instructions or questions in the message field.
+              - If the agent is violating the rules, fork_new_conversation, choose a mode (potentially the same mode) based on the mode switch criteria, and propagate all useful context into the new conversation, including guidance to avoid the same violation if repeating the same mode.
               - If the current mode's goals are satisfied or you determine switching modes is appropriate now without handoff from the agent, fork_new_conversation.
               - If you have context that could help guide the agent, use `append_message_and_continue` to write a user message with the advice/instructions in 'supervisor-advice' xml tags.
               - Otherwise `continue` to pass.
@@ -38,11 +39,10 @@ supervisor:
             {{message}}
 
             This session is wrapping up. Before yielding control, complete all mid-level handoff steps:
-            1) Update `./theory_<game id>_<level num>.md` with all new evidence, backward-causal-step updates, confidence changes, and open questions.
-            2) Update `./solve_<game id>_<level num>.py` with any newly validated or corrected solver logic.
-            3) Update `./agent_lib.py` with any useful abstractions or fixes discovered.
-            4) In your final assistant message, include the same updates you wrote to disk, plus the current state and what you were trying to do.
-            5) Yield control to the user.
+            1) Update `theory.md` with all new evidence, backward-causal-step updates, confidence changes, and open questions.
+            2) Update `play.py` and `play_lib.py` with any newly validated or corrected solution logic for this level.
+            3) In your final assistant message, include the same updates you wrote to disk, plus the current state and what you were trying to do.
+            4) Yield control to the user.
             </supervisor-command>
 
 base_system_message:
@@ -92,16 +92,16 @@ base_system_message:
         - `GameAction.ACTION6` (6): complex coordinate action; call as `env.step(GameAction.ACTION6, data={"x": X, "y": Y})` with `x,y` in `0..63`.
         - `GameAction.ACTION7` (7): simple action mapped to undo/backtrack.
         - Available actions are game-specific; always consult `get_state()["available_actions"]`.
-        - REPL globals include `env`, `current`, `GameAction`/`GA`, `diff(...)`, `get_state()`, and helpers from `agent_lib.py`.
-        - Do not import `agent_lib` inside REPL scripts (`from agent_lib import ...`); helpers from `agent_lib.py` are already injected into REPL globals.
+        - REPL globals include `env`, `current`, `GameAction`/`GA`, `diff(...)`, `get_state()`, and helpers from `play_lib.py`.
+        - Do not import `play_lib` inside REPL scripts (`from play_lib import ...`); helpers from `play_lib.py` are already injected into REPL globals.
         - Example (direct helper use in `arc_repl exec`):
           <example>
           arc_repl exec <<'PY'
           s = get_state()
           print({"state": s["state"], "level": s["current_level"], "available_actions": s["available_actions"]})
 
-          # Helpers from agent_lib.py are available directly in globals.
-          # If you created helper `plan_next_actions` in agent_lib.py, call it directly:
+          # Helpers from play_lib.py are available directly in globals.
+          # If you created helper `plan_next_actions` in play_lib.py, call it directly:
           if "plan_next_actions" in globals():
               actions = plan_next_actions(s)
               for i, a in enumerate(actions[:10], 1):
@@ -110,15 +110,16 @@ base_system_message:
           PY
           </example>
         - `arc_repl exec_file` takes a file as input, supports the same interfaces as exec.
-        - Continuously build and refactor repeated logic and reusable abstractions in `agent_lib.py` at every reasonable opportunity so your scripts stay short, composable, and easy to adapt.
-        - Do not use brute force algorithms for game actions in either the simulated or real environment. The benchmark measures your reasoning ability in novel enviornments, brute force is cheating.
+        - Continuously build and refactor repeated logic and reusable abstractions in `play_lib.py` at every reasonable opportunity so your scripts stay short, composable, and easy to adapt.
+        - Do not use brute force algorithms for game actions in either the simulated or real environment. The benchmark measures your reasoning ability in novel environments; brute force is cheating.
 
         # Memory and code
         Maintain a local filesystem for a game with this structure:
         - ./game_<id>/
           - theory.md
-          - simulator.py
+          - simulate.py
           - play.py
+          - play_lib.py
 
         ## Theory Markdown file
         theory.md will have these sections:
@@ -163,7 +164,7 @@ base_system_message:
             Evidence: Level 1 Turn 43: Arrows indicate clockwise pattern, level completed when split-squares map to reference-pattern in clockwise order.
 
         # Actions (from `env.action_space` ignoring RESET)
-          - ACTION6: changes split-square colors, specific to color-contiguous half or qaudrant
+          - ACTION6: changes split-square colors, specific to color-contiguous half or quadrant
           - ACTION7: undo one ACTION6
 
         # Goals
@@ -176,21 +177,26 @@ base_system_message:
 
         # Levels
         1: SOLVED
+        Observations:
           - Four split-squares with two colors each.
           - four-arrows in clockwise order
           - ACTION6 on split-squares to match the reference-pattern pixels positionally cause level completion.
         2: UNSOLVED
+        Observations:
           - Four split-squares with four colors each.
           - four-arrows in counter-clockwise order
           - Matching the reference-pattern positionally did not trigger level completion.
+        Level Delta:
+          - Four-arrows changed direction.
+          - Reference pattern changed.
         </example>
 
         ## Simulator Python file
         Contains the code to simulate the mechanics of the real game. This serves two purposes: writing code to mimic your observations in the real game forces you to explore all features and make your theories about their mechanics concrete and falsifiable, and the simulation gives you a chance to work out more efficient solutions to levels before trying them in the real game which will give you a higher score.
-        At the start of a game the file will exist with a template so `simulator.py` should be a drop-in substitute for `arc_repl` and the same commands and script / file inputs should work.
+        At the start of a game the file will exist with a template so `simulate.py` should be a drop-in substitute for `arc_repl` and the same commands and script / file inputs should work.
       
-        ## Play Python file
-        Game interaction code that can be run with `./simulator.py exec_file` or `arc_repl exec_file`.
+        ## Play and Play Library Python files
+        Game interaction code that can be run with `simulate.py exec_file` or `arc_repl exec_file`. It's split into level-specific sections and that organization should be maintained. play.py should primarily call functions in play_lib.py and use common logic and high level abstractions to identify features and interact.
 
     - literal: |
         Harness renderer palette (canonical numeric IDs):
@@ -198,6 +204,16 @@ base_system_message:
         8=#F93C31 9=#1E93FF A=#88D8F1 B=#FFDC00 C=#FF851B D=#921231 E=#4FCC30 F=#A356D6
 
         Use numeric IDs first; names are aliases only.
+    - literal: |
+        ## Runtime Event Handling (required)
+        - Treat runtime state fields as source of truth: `state`, `current_level`, `levels_completed`, `full_reset`.
+        - Whenever you execute actions, immediately inspect resulting state (either print `get_state()` in script output or run `arc_repl status`).
+        - If `state == "GAME_OVER"`, stop further actions in that turn and record:
+          1) likely cause sequence,
+          2) prevention theory,
+          3) minimal recovery plan.
+        - Detect level transitions by comparing `levels_completed` / `current_level` before vs after actions.
+        - Never assume continuation state; verify via runtime state fields before planning next actions.
     - builtin: tools
 
 base_user_message:
@@ -220,8 +236,8 @@ base_supervisor_instructions:
     - "Agent Rule requirements should describe things that must be done by the agent. These can be addressed with rewrite_with_check_supervisor_and_continue. If a requirement is written to enforce NOT doing something, it is not a valid requirement and you can't enforce it, once something is added to the agent conversation it won't be removed from it."
     - "Agent Rule violations describe things that should not be done by the agent. If the agent does them, use fork_new_conversation and carry over any useful information. Try to steer the new conversation away from violations."
     - "Advise the agent to stick to the current mode guidance if they stray from it. If your advice is ignored, fork_new_conversation and carry over anything useful."
-    - "Agent modes enable you to restrict and focus agent activity. Agents tend to expand on their directions adn get into ratholes and tangents, mode selection and enforcement is your most powerful tool. Choose modes to promote well-reasoned, deliberate progress without jumping ahead or outside the proscribed process."
-    - "On every new conversaion, guide the agent with as much context and custom instructions as they can use productively in `mode_payload.user_message`"
+    - "Agent modes enable you to restrict and focus agent activity. Agents tend to expand on their directions and get into ratholes and tangents; mode selection and enforcement is your most powerful tool. Choose modes to promote well-reasoned, deliberate progress without jumping ahead or outside the prescribed process."
+    - "On every new conversation, guide the agent with as much context and custom instructions as they can use productively in `mode_payload.user_message`."
 
 modes:
   theory:
@@ -229,7 +245,7 @@ modes:
     switch_when:
       - "Each new level should start in theory mode to identify new features and challenges."
       - "If existing theories are not supported by the evidence gathered in game exploration or failed solutions, return to theory mode."
-      - "Exit when every game state element has a feature category and a theory about its purpose, game goal theories exist been recorded and no theories are contracted by evidence."
+      - "Exit when every game state element has a feature category and a theory about its purpose, game goal theories have been recorded, and no theories are contradicted by evidence."
     user_message:
       operation: append
       parts:
@@ -262,7 +278,7 @@ modes:
     switch_when:
       - "Features identified in theory.md need more exploration to gain confidence in our theories."
       - "Discrepancies between the simulator and the real game have been identified but need more exploration to fix."
-      - "Exit when theories, features, and discepancies have been explored to the best of our ability and the simulation matches the real game behavior."
+      - "Exit when theories, features, and discrepancies have been explored to the best of our ability and the simulation matches the real game behavior."
     user_message:
       operation: append
       parts:
@@ -273,14 +289,14 @@ modes:
             Do not attempt to solve levels in the simulator, focus on aligning simulator and real game behavior.
             Process:
             0. If the supervisor has instructed you to focus on exploring specific features / mechanics, do that.
-            1. Read theory.md in full and look for gaps in understanding, ambgiutiy to probe, theories to validate, low confidence theories, and alternatives that need to be ruled out / in or expanded on.
+            1. Read theory.md in full and look for gaps in understanding, ambiguity to probe, theories to validate, low-confidence theories, and alternatives that need to be ruled out / in or expanded.
             2. Read simulate.py in full and look for discrepancies between theory.md and the simulator, and game state features without full simulator implementations.
             3. Write an inline script for `arc_repl exec` to explore the targets you've identified.
               - We want to balance minimizing actions (which impact our benchmark score) vs batching up actions to reduce tool calls and LLM round trips. Examples:
                 - If there are 8 unique features to probe and they take one action each to explore it makes sense to execute a script with all 8 actions.
-                - But if there's a theory to explain why the 8 features might be following the same logical rules, it would be more efficient to probe 2-3 of them and extrapolate if they act consistenly.
+                - But if there's a theory to explain why the 8 features might be following the same logical rules, it would be more efficient to probe 2-3 of them and extrapolate if they act consistently.
               - On another dimension, take care not to trigger game over with your actions, many games trigger game over after some number of actions without calling `arc_repl reset_level`. Game over will regress the state back to the first level so if the level is > 1, prefer reset_level over risking game over.
-            4. Observe the resulting state and per-action diffs. Write your observations / conclusions in theory.md, provide multpile theories if results are ambiguous and always provide appropriate confidence ratings. Update simulate.py if new evidence exposes gaps between the simulation and the real game.
+            4. Observe the resulting state and per-action diffs. Write your observations / conclusions in theory.md, provide multiple theories if results are ambiguous, and always provide appropriate confidence ratings. Update simulate.py if new evidence exposes gaps between the simulation and the real game.
             5. Update simulate.py until it behaves exactly like the real game.
             6. If there are more questions that could be answered with simple exploration, loop back to step 2. If the remaining ambiguity can't be resolved at this time, note that and continue. If the supervisor instructions have been satisfied and/or all open questions about game mechanics are answered, continue.
             7. Write an assistant message with everything you learned and yield control.
@@ -290,21 +306,22 @@ modes:
       operation: append
       requirements:
         - "Capture all new information gained, in theory.md, simulate.py, and in your assistant messages."
+        - "Verify all changes made to the simulator result in the correct behavior by running actions in the simulator."
       violations:
         - "Attempting to solve the real game with actions."
-        - "Attemping to solve the simulatore game."
+        - "Attempting to solve the simulated game."
 
   exploit_simulation:
     description: "Attempt to solve the level using only the simulator."
     switch_when:
-      - "All known features of the current level have implementaions in simulate.py with high confidence."
+      - "All known features of the current level have implementations in simulate.py with high confidence."
       - "Exit when the level is solved in the simulator and the solution is written to play.py, or when the simulator can't be solved or it's not behaving like the real game."
     user_message:
       operation: append
       parts:
         - literal: |
             You are assigned to "exploit simulation" mode for this entire conversation. Focus on these goals and yield control when complete. Do not act beyond the scope of this mode.
-            Exploit Simulation mode finds efficient solutions to the current level and writes them in play.py. Your inputs are the simulator state and all local files in the ./game_<id>/ directory. Your outputs are changes to play.py and assistant messages.
+            Exploit Simulation mode finds efficient solutions to the current level and writes them in play.py and play_lib.py. Your inputs are the simulator state and all local files in the ./game_<id>/ directory. Your outputs are changes to play.py and play_lib.py and assistant messages.
             Do not execute real game actions or edit simulate.py.
             Process:
             0. Focus on any strategy the supervisor suggests, if any.
@@ -312,14 +329,15 @@ modes:
             2. Execute actions to follow that causal chain forward.
             3. If solution progress stops or your assumptions are invalidated, go back to 1 and design a new causal chain.
             4. Continue until the level is solved in the simulation or the simulator is not behaving correctly or you are otherwise blocked with no way to achieve the goal of the level.
-            5. Write the full solution in play.py and prove it works from a freshly reset simulator.
+            5. Write the full solution in play.py and play_lib.py and prove it works from a freshly reset simulator.
             6. Optimize the solution in play.py to minimize actions taken in the real game.
+            7. Move complex logic to play_lib.py so play.py has clean high-level function calls.
         - template: |
             {{supervisor.user_message}}
     agent_rules:
       operation: append
       requirements:
-        - "Update play.py with a full, optimized soluiton if the simulation level is solved."
+        - "Update play.py and play_lib.py with a full, optimized solution if the simulation level is solved."
       violations:
         - Any kind of brute force search across states using actions.
         - Editing simulate.py
@@ -335,14 +353,15 @@ modes:
       parts:
         - literal: |
             You are assigned to "solve" mode for this entire conversation. Focus on these goals and yield control when complete. Do not act beyond the scope of this mode.
-            Solve mode applies efficient solutions found in play.py to solve the current level in the real game. Your inputs are the simulator state and play.py. Your outputs are changes to play.py and assistant messages.
+            Solve mode applies efficient solutions found in play.py to solve the current level in the real game. Your inputs are the simulator state, play.py, play_lib.py, and simulate.py. Your outputs are changes to play.py, play_lib.py, simulate.py, and assistant messages.
             Solve mode process:
             0. Run reset_level
-            1. Run play.py
-            2. Evaluate results. 
-            3. Update play.py and / or simulate.py to align them with observed real game behavior.
-            4. Loop back to 2 if it could solve the level now.
-            5. If the level is complete or solving it is blocked in some way currently, write an assistant message with everything you've learned.
+            1. Run a dry run first: `./game_<id>/simulate.py exec_file ./game_<id>/play.py` and inspect output.
+            2. Run play.py in the real game.
+            3. Evaluate results.
+            4. Update play.py, play_lib.py and / or simulate.py to align them with observed real game behavior.
+            5. Loop back to step 1 if it could solve the level now.
+            6. If the level is complete or solving it is blocked in some way currently, write an assistant message with everything you've learned.
         - template: |
             {{supervisor.user_message}}
     agent_rules:

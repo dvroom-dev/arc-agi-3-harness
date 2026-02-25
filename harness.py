@@ -105,20 +105,6 @@ LEVEL_COMPLETIONS_TEMPLATE = textwrap.dedent("""\
     for each completed level window.
 """)
 
-AGENT_LIB_TEMPLATE = textwrap.dedent("""\
-    \"\"\"Persistent helper library for ARC REPL exec turns.
-
-    Put reusable game-agnostic helpers here.
-    Every arc_repl exec call auto-loads this module before executing
-    the turn script, so functions defined here are directly callable.
-    \"\"\"
-
-    # Example:
-    # def step_many(env, action, count):
-    #     for _ in range(count):
-    #         env.step(action)
-""")
-
 def _load_agent_workspace_template(name: str) -> str:
     path = PROJECT_ROOT / "templates" / "agent_workspace" / name
     if not path.exists():
@@ -128,7 +114,8 @@ def _load_agent_workspace_template(name: str) -> str:
 
 THEORY_TEMPLATE = _load_agent_workspace_template("theory.md")
 PLAY_TEMPLATE = _load_agent_workspace_template("play.py")
-SIMULATOR_TEMPLATE = _load_agent_workspace_template("simulator.py")
+SIMULATE_TEMPLATE = _load_agent_workspace_template("simulate.py")
+PLAY_LIB_TEMPLATE = _load_agent_workspace_template("play_lib.py")
 
 
 def _drain_stderr(proc, prefix="[super] "):
@@ -379,9 +366,9 @@ def setup_run_dir(
         game_knowledge_template=GAME_KNOWLEDGE_TEMPLATE,
         level_knowledge_template=LEVEL_KNOWLEDGE_TEMPLATE,
         level_completions_template=LEVEL_COMPLETIONS_TEMPLATE,
-        agent_lib_template=AGENT_LIB_TEMPLATE,
+        play_lib_template=PLAY_LIB_TEMPLATE,
         theory_template=THEORY_TEMPLATE,
-        simulator_template=SIMULATOR_TEMPLATE,
+        simulate_template=SIMULATE_TEMPLATE,
         play_template=PLAY_TEMPLATE,
         game_id=game_id,
     )

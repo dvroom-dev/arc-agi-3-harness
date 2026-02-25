@@ -19,7 +19,7 @@ Sibling project for ARC-AGI-3 harness experiments using package imports (`arc-ag
   - `arc_repl` (status/reset_level/exec/shutdown)
   - `arc_repl exec` accepts script content on stdin only (heredoc/pipe).
 - `arc_repl exec` interface:
-  - Persistent globals per conversation: `env`, `current`, `GameAction`, `GA`, `diff()`, `get_state()`, and helpers from `agent_lib.py`.
+  - Persistent globals per conversation: `env`, `current`, `GameAction`, `GA`, `diff()`, `get_state()`, and helpers from `play_lib.py`.
   - `get_state()` grid payload is `grid_hex_rows` (not `grid`).
   - Action enum members are `GameAction.ACTION1..ACTION7` plus `RESET`.
   - `diff(before, after, output=\"json\"|\"text\", pad=0)`:
