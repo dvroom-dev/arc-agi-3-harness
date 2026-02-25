@@ -111,4 +111,3 @@ def test_daemon_main_dispatch(monkeypatch, tmp_path: Path) -> None:
     assert rc == 0
     assert ("status", "ls20") in session_calls
     assert ("reset_level", "ls20") in session_calls
-

@@ -39,6 +39,19 @@ def test_wait_for_daemon_success(monkeypatch, tmp_path: Path) -> None:
     arc_repl._wait_for_daemon(tmp_path, "c1", timeout_s=0.2)
 
 
+def test_wait_for_daemon_permission_error_raises(monkeypatch, tmp_path: Path) -> None:
+    sock = tmp_path / "sock"
+    sock.write_text("x")
+    monkeypatch.setattr(arc_repl, "_socket_path", lambda cwd, cid: sock)
+    monkeypatch.setattr(
+        arc_repl.multiprocessing.connection,
+        "Client",
+        lambda *a, **k: (_ for _ in ()).throw(PermissionError(1, "Operation not permitted")),
+    )
+    with pytest.raises(PermissionError):
+        arc_repl._wait_for_daemon(tmp_path, "c1", timeout_s=0.2)
+
+
 def test_send_request_spawns_when_first_send_fails(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(arc_repl, "_default_game_id", lambda cwd: "ls20")
     monkeypatch.setattr(arc_repl, "_spawn_daemon", lambda *a, **k: None)

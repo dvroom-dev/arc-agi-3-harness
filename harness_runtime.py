@@ -187,14 +187,10 @@ class HarnessRuntime:
         )
 
     def provider_args(self) -> list[str]:
-        if self.args.provider:
-            return ["--provider", self.args.provider]
-        return []
+        return ["--provider", self.args.provider] if self.args.provider else []
 
     def supervisor_args(self) -> list[str]:
-        if self.args.no_supervisor:
-            return ["--no-supervisor"]
-        return []
+        return ["--no-supervisor"] if self.args.no_supervisor else []
 
     def load_state(self) -> dict | None:
         if not self.state_json.exists():

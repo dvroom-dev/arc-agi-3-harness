@@ -36,7 +36,7 @@ def test_harness_main_handles_game_over_then_reset(tmp_path: Path, monkeypatch) 
         scorecard_id=None,
         provider="mock",
         no_supervisor=True,
-        no_explore=True,
+        explore_inputs=False,
         max_game_over_resets=2,
         arc_backend="api",
         arc_base_url="http://example.test",

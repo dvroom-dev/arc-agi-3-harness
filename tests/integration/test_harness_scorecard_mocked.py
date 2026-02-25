@@ -30,7 +30,7 @@ def test_harness_open_and_close_scorecard_mocked(tmp_path: Path, monkeypatch) ->
         scorecard_id=None,
         provider="mock",
         no_supervisor=True,
-        no_explore=True,
+        explore_inputs=False,
         max_game_over_resets=1,
         arc_backend="api",
         arc_base_url="http://example.test",
