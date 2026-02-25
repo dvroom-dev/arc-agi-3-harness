@@ -81,6 +81,7 @@ base_system_message:
         - `arc_repl exec` script is stdin heredoc Python; env is current state.
         - `arc_repl status`/`reset_level` return JSON; `arc_repl exec` prints only what your script prints.
         - `get_state()` exposes the grid as `grid_hex_rows` (do not assume a `grid` key).
+        - Reading `env.action_space` / `get_state()["available_actions"]` is metadata inspection, not a game action.
         - Print `env.action_space` to see all legal actions for the current game.
         - Action reference (use `GameAction.<NAME>` names in scripts):
         - `GameAction.RESET` (0): DO NOT USE, and do not call env.reset(), use `arc_repl reset_level` instead for safety.
@@ -242,9 +243,10 @@ base_supervisor_instructions:
 modes:
   theory:
     description: "Identify game state features and hypothesize or refine theories about their purpose and mechanics and the game goals."
-    switch_when:
+    start_when:
       - "Each new level should start in theory mode to identify new features and challenges."
       - "If existing theories are not supported by the evidence gathered in game exploration or failed solutions, return to theory mode."
+    stop_when:
       - "Exit when every game state element has a feature category and a theory about its purpose, game goal theories have been recorded, and no theories are contradicted by evidence."
     user_message:
       operation: append
@@ -253,6 +255,7 @@ modes:
             You are assigned to "theory" mode for this entire conversation. Focus on these goals and yield control when complete. Do not act beyond the scope of this mode.
             Theory mode provides a basis for exploration and game play. Your inputs are the game state and history and all local files in the ./game_<id>/ directory. Your outputs are edits to theory.md and assistant messages.
             Do not run game actions or make changes to files other than theory.md.
+            You may inspect non-mutating metadata (e.g. `arc_repl status`, `available_actions`, `env.action_space`) to keep the Actions section accurate.
             Process:
             0. If the supervisor has directed you to focus on specific features / theories, do that.
             1. Review game state features. Features are logical units in the game state that you have to discover. They are often not a single contiguous color or shape, but they represent an element of game logic. Sometimes all instances of a feature will look and act the same, other times they may have unique configurations but belong to the same logical family. Diffs between game states as individual actions are taken are often the best way to distinguish game dynamic features. Features sometimes appear in the same position at every step on every level but often have different positions across levels, or move between actions in a level. Compare the feature list in theory.md to what you see in the game state and in the history of the current level.
@@ -260,7 +263,7 @@ modes:
               - Does your feature list map well to the game state? Is there evidence that different logical distinctions should be made, ungrouping or regrouping? Improve feature grouping / mapping if possible.
               - Are there features without theories for their purpose? Assume every feature has a purpose that must be understood before the game can be solved efficiently.
               - Is there evidence from previous actions that feature mechanics theories are wrong or need editing? Update them.
-            2. Populate game actions if empty from env.action_space in the REPL. Filter out the RESET action, it should not be used.
+            2. Populate game actions if empty by reading available actions from metadata (`get_state()["available_actions"]`, `arc_repl status`, or `env.action_space`). Do not execute game actions for this step.
             3. Review game goal theories, how are levels solved and how can game over be avoided?
               - Does theory.md have a level completion goal? Without one it's hard to plan actions, so look at the game state and guess if needed.
               - Do the confidence ratings of goal theories need to be updated based on evidence?
@@ -275,9 +278,10 @@ modes:
 
   explore_and_simulate:
     description: "Take a minimal set of actions in the real game (not the simulation) to discover game mechanics, identify features and validate theories. Translate those discoveries into a simulator that mimics the real game."
-    switch_when:
+    start_when:
       - "Features identified in theory.md need more exploration to gain confidence in our theories."
       - "Discrepancies between the simulator and the real game have been identified but need more exploration to fix."
+    stop_when:
       - "Exit when theories, features, and discrepancies have been explored to the best of our ability and the simulation matches the real game behavior."
     user_message:
       operation: append
@@ -313,8 +317,9 @@ modes:
 
   exploit_simulation:
     description: "Attempt to solve the level using only the simulator."
-    switch_when:
+    start_when:
       - "All known features of the current level have implementations in simulate.py with high confidence."
+    stop_when:
       - "Exit when the level is solved in the simulator and the solution is written to play.py, or when the simulator can't be solved or it's not behaving like the real game."
     user_message:
       operation: append
@@ -323,6 +328,7 @@ modes:
             You are assigned to "exploit simulation" mode for this entire conversation. Focus on these goals and yield control when complete. Do not act beyond the scope of this mode.
             Exploit Simulation mode finds efficient solutions to the current level and writes them in play.py and play_lib.py. Your inputs are the simulator state and all local files in the ./game_<id>/ directory. Your outputs are changes to play.py and play_lib.py and assistant messages.
             Do not execute real game actions or edit simulate.py.
+            Because this mode does not execute real-game actions, do not claim new real-game facts from simulator-only results. Treat simulator-only outcomes as hypotheses until validated against the real game.
             Process:
             0. Focus on any strategy the supervisor suggests, if any.
             1. Read theory.md and simulate.py in full. Identify the level goal and work backwards in a causal chain to the starting state of the simulation.
@@ -345,8 +351,9 @@ modes:
 
   solve:
     description: "Use play.py to solve the real game"
-    switch_when:
+    start_when:
       - "Confidence in the parity between simulator and real game is high and play.py solves the simulator level."
+    stop_when:
       - "Exit mode on level complete in the real game, or the simulator level cannot be solved or doesn't represent the real game sufficiently."
     user_message:
       operation: append
@@ -359,7 +366,7 @@ modes:
             1. Run a dry run first: `./game_<id>/simulate.py exec_file ./game_<id>/play.py` and inspect output.
             2. Run play.py in the real game.
             3. Evaluate results.
-            4. Update play.py, play_lib.py and / or simulate.py to align them with observed real game behavior.
+            4. If real results differ from the dry run, update play.py and/or play_lib.py, and update simulate.py to reflect the newly observed real-game behavior so future dry runs are trustworthy.
             5. Loop back to step 1 if it could solve the level now.
             6. If the level is complete or solving it is blocked in some way currently, write an assistant message with everything you've learned.
         - template: |
