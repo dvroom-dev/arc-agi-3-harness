@@ -24,10 +24,10 @@ supervisor:
         parts:
           - literal: |
               Review the agent's progress, choose an action (in decreasing precedence):
+              - If any Agent Rule violation is clearly matched with concrete evidence, enforce immediately: do not use `append_message_and_continue`. Use `fork_new_conversation` (or `rewrite_with_check_supervisor_and_continue` only for unmet requirement-type fixes that are still possible in-place).
+              - If the current mode's goals are satisfied or you determine switching modes is appropriate now without handoff from the agent, fork_new_conversation.
               - If the agent's session has gone for 20 minutes or more (4 cadence triggers) it has probably gone off the rails, gather all useful context from it, then fork_new_conversation for a fresh agent and steer the new conversation away from the same rathole.
               - If the agent's session has gone on for 15 minutes or more (3 cadence triggers), they need to wrap it up and handoff context to you. Use `append_message_and_continue` and the `handoff_command` message template will give them the handoff steps, add any addition instructions or questions in the message field.
-              - If the agent is violating the rules, fork_new_conversation, choose a mode (potentially the same mode) based on the mode switch criteria, and propagate all useful context into the new conversation, including guidance to avoid the same violation if repeating the same mode.
-              - If the current mode's goals are satisfied or you determine switching modes is appropriate now without handoff from the agent, fork_new_conversation.
               - If you have context that could help guide the agent, use `append_message_and_continue` to write a user message with the advice/instructions in 'supervisor-advice' xml tags.
               - Otherwise `continue` to pass.
       message_templates:
@@ -215,6 +215,9 @@ base_system_message:
           3) minimal recovery plan.
         - Detect level transitions by comparing `levels_completed` / `current_level` before vs after actions.
         - Never assume continuation state; verify via runtime state fields before planning next actions.
+        - Treat level completion as two distinct cases:
+          - Frontier completion (new): if the completed level was not already marked `SOLVED` in `theory.md` before this turn, stop actions immediately, update required files, and yield with an assistant message.
+          - Replay completion (regression recovery): if that level was already marked `SOLVED` in `theory.md` before this turn, do not treat completion as terminal; continue toward the frontier per mode goals.
     - builtin: tools
 
 base_user_message:
@@ -236,6 +239,9 @@ base_supervisor_instructions:
   values:
     - "Agent Rule requirements should describe things that must be done by the agent. These can be addressed with rewrite_with_check_supervisor_and_continue. If a requirement is written to enforce NOT doing something, it is not a valid requirement and you can't enforce it, once something is added to the agent conversation it won't be removed from it."
     - "Agent Rule violations describe things that should not be done by the agent. If the agent does them, use fork_new_conversation and carry over any useful information. Try to steer the new conversation away from violations."
+    - "For every enforcement decision, cite concrete evidence pointers (turn number, tool call, file path, or exact output fragment). Avoid unsupported claims."
+    - "If a violation is clearly matched, enforce it now. Do not downgrade a clear violation into advice-only."
+    - "If evidence is ambiguous, explicitly say it is ambiguous and request the minimum additional probe needed to disambiguate."
     - "Advise the agent to stick to the current mode guidance if they stray from it. If your advice is ignored, fork_new_conversation and carry over anything useful."
     - "Agent modes enable you to restrict and focus agent activity. Agents tend to expand on their directions and get into ratholes and tangents; mode selection and enforcement is your most powerful tool. Choose modes to promote well-reasoned, deliberate progress without jumping ahead or outside the prescribed process."
     - "On every new conversation, guide the agent with as much context and custom instructions as they can use productively in `mode_payload.user_message`."
@@ -289,8 +295,14 @@ modes:
         - literal: |
             You are assigned to "explore and simulate" mode for this entire conversation. Focus on these goals and yield control when complete. Do not act beyond the scope of this mode.
             Explore And Simulate mode finds evidence to validate or invalidate feature lists, theories, and simulation code, and then updates theory.md and simulate.py to match. Your inputs are the game state and history and all local files in the ./game_<id>/ directory. Your outputs are real game actions, edits to theory.md, simulate.py, and assistant messages.
-            Do not execute real game actions beyond the scope of discovering game mechanics.
-            Do not attempt to solve levels in the simulator, focus on aligning simulator and real game behavior.
+            Real-game actions in this mode are for hypothesis testing only, never for end-to-end level solving.
+            A probe is valid only if it names a concrete hypothesis and expected observable evidence before executing actions.
+            Any route/plan whose primary objective is to reach an exit, finish a level, or optimize completion is out of scope for this mode.
+            Do not attempt to solve levels in the simulator in this mode; focus on aligning simulator and real game behavior.
+            Per-turn contract (required):
+            - Before actions: list the hypotheses to test and what observation will confirm/refute each.
+            - After actions: update `theory.md` and `simulate.py` (or explicitly state why no `simulate.py` edit is needed).
+            - Then run the same probe logic in the simulator and report parity/mismatch.
             Process:
             0. If the supervisor has instructed you to focus on exploring specific features / mechanics, do that.
             1. Read theory.md in full and look for gaps in understanding, ambiguity to probe, theories to validate, low-confidence theories, and alternatives that need to be ruled out / in or expanded.
@@ -302,8 +314,11 @@ modes:
               - On another dimension, take care not to trigger game over with your actions, many games trigger game over after some number of actions without calling `arc_repl reset_level`. Game over will regress the state back to the first level so if the level is > 1, prefer reset_level over risking game over.
             4. Observe the resulting state and per-action diffs. Write your observations / conclusions in theory.md, provide multiple theories if results are ambiguous, and always provide appropriate confidence ratings. Update simulate.py if new evidence exposes gaps between the simulation and the real game.
             5. Update simulate.py until it behaves exactly like the real game.
-            6. If there are more questions that could be answered with simple exploration, loop back to step 2. If the remaining ambiguity can't be resolved at this time, note that and continue. If the supervisor instructions have been satisfied and/or all open questions about game mechanics are answered, continue.
-            7. Write an assistant message with everything you learned and yield control.
+            6. If a level completion happens in this mode:
+              - If it is a frontier completion (that level was not already marked `SOLVED` in `theory.md` before this turn), stop actions immediately, update files, write an assistant handoff message, and yield.
+              - If it is a replay completion (level already marked `SOLVED` before this turn), do not yield solely for that; continue only with mode-goal work.
+            7. If there are more questions that could be answered with simple exploration, loop back to step 2. If the remaining ambiguity can't be resolved at this time, note that and continue. If the supervisor instructions have been satisfied and/or all open questions about game mechanics are answered, continue.
+            8. Write an assistant message with everything you learned and yield control.
         - template: |
             {{supervisor.user_message}}
     agent_rules:
@@ -312,8 +327,8 @@ modes:
         - "Capture all new information gained, in theory.md, simulate.py, and in your assistant messages."
         - "Verify all changes made to the simulator result in the correct behavior by running actions in the simulator."
       violations:
-        - "Attempting to solve the real game with actions."
-        - "Attempting to solve the simulated game."
+        - "Executing real-game action sequences whose primary objective is level completion (path-to-exit/full-route attempts) instead of focused hypothesis probes."
+        - "Executing simulator action sequences whose primary objective is level completion instead of parity/probe validation."
 
   exploit_simulation:
     description: "Attempt to solve the level using only the simulator."
