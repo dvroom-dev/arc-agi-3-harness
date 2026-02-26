@@ -23,6 +23,11 @@ If leakage is found, fix the setup/root cause (what gets mounted/copied into run
 
 When diagnosing solver failures, find the first turn where a wrong belief appears and trace it to the exact evidence/tool output that triggered it. Prefer action-linked movement evidence over visual salience when identifying controllable actors.
 
+Hard rule:
+- Never stop at wrapper symptoms (for example, schema validation errors) when provider/runtime failures are possible.
+- Always trace to provider-level cause: inspect provider events, turn completion status, thread IDs, and stderr logs before concluding root cause.
+- If provider-level evidence is missing, call that out explicitly as an observability gap and propose/add instrumentation instead of guessing.
+
 ## Prompt source of truth
 
 Hard rule:
