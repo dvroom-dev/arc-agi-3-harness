@@ -104,8 +104,6 @@ def setup_run_dir_impl(
     supervisor_dir: Path,
     log,
     *,
-    game_knowledge_template: str,
-    level_knowledge_template: str,
     level_completions_template: str,
     play_lib_template: str,
     theory_template: str,
@@ -120,14 +118,6 @@ def setup_run_dir_impl(
 
     supervisor_arc = supervisor_dir / "arc"
     supervisor_arc.mkdir(parents=True, exist_ok=True)
-
-    gk = supervisor_arc / "game-knowledge.md"
-    if not gk.exists():
-        gk.write_text(game_knowledge_template)
-
-    lk = supervisor_arc / "level-knowledge.md"
-    if not lk.exists():
-        lk.write_text(level_knowledge_template)
 
     lc = supervisor_arc / "level_completions.md"
     if not lc.exists():
@@ -182,6 +172,7 @@ def setup_run_config_dir_impl(
         "arc_action_env.py",
         "arc_action_exec.py",
         "arc_action_state.py",
+        "arc_repl_diagnostics.py",
         "arc_repl_session_core.py",
         "arc_repl_session_exec.py",
         "arc_repl_session_grid.py",

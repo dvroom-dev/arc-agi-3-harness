@@ -51,53 +51,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 CTXS = PROJECT_ROOT / ".ctxs"
 PROJECT_VENV_PYTHON = PROJECT_ROOT / ".venv" / "bin" / "python"
 
-LEVEL_KNOWLEDGE_TEMPLATE = textwrap.dedent("""\
-    # Level Knowledge (Persistent Across Levels)
-
-    Keep this file cumulative for the whole game. Do not delete prior levels.
-    Add/update one section per level as understanding improves.
-
-    ## Level N Template
-    ### Goal
-    - [LOW/MED/HIGH] concise win condition
-
-    ### Carryover Mechanics
-    - [LOW/MED/HIGH] mechanic reused from previous levels
-
-    ### New/Changed Mechanics
-    - [LOW/MED/HIGH] mechanic introduced or modified in this level
-
-    ### Canonical Level Completion Theory
-    - [LOW/MED/HIGH][sat/unsat] backward completion statement
-
-    ### Backward Causal Steps
-    - [LOW/MED/HIGH][sat/unsat] 3) ...
-    - [LOW/MED/HIGH][sat/unsat] 2) ...
-    - [LOW/MED/HIGH][sat/unsat] 1) ...
-    - [LOW/MED/HIGH][sat/unsat] 0) ...
-
-    ### Evidence / Experiments
-    - action-linked evidence only (probe, result, conclusion)
-""")
-
-GAME_KNOWLEDGE_TEMPLATE = textwrap.dedent("""\
-    # Game Knowledge (Persistent)
-
-    Facts that should survive across levels.
-
-    ## Features
-
-    List every distinct visual/interactive element. For each, rate confidence:
-    - [HIGH] feature_name: confirmed mechanic description
-    - [MED] feature_name: likely mechanic, needs confirmation
-    - [LOW] feature_name: speculative, needs testing
-
-    (none identified yet)
-
-    ## Confirmed Rules
-    - (none)
-""")
-
 LEVEL_COMPLETIONS_TEMPLATE = textwrap.dedent("""\
     # Level Completions
 
@@ -363,8 +316,6 @@ def setup_run_dir(
         agent_dir,
         supervisor_dir,
         log,
-        game_knowledge_template=GAME_KNOWLEDGE_TEMPLATE,
-        level_knowledge_template=LEVEL_KNOWLEDGE_TEMPLATE,
         level_completions_template=LEVEL_COMPLETIONS_TEMPLATE,
         play_lib_template=PLAY_LIB_TEMPLATE,
         theory_template=THEORY_TEMPLATE,

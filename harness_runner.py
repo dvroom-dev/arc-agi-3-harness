@@ -9,6 +9,7 @@ from pathlib import Path
 
 from harness_explore import run_input_exploration_from_reset
 from harness_repl_health import format_repl_health_summary
+from harness_repl_health import collect_repl_health, format_repl_crash_diagnostics
 from harness_runtime import HarnessRuntime
 from harness_scorecard_helpers import (
     close_shared_scorecard,
@@ -55,27 +56,6 @@ def _session_name_for_game(session_base: str, game_id: str, index: int) -> str:
     if not safe_game:
         safe_game = f"game-{index:02d}"
     return f"{session_base}-{index:02d}-{safe_game}"
-
-
-def _delete_supervisor_knowledge_files(
-    *,
-    project_root: Path,
-    session_name: str,
-    log,
-) -> None:
-    arc_dir = project_root / "runs" / session_name / "supervisor" / "arc"
-    for filename in ("game-knowledge.md", "level-knowledge.md"):
-        path = arc_dir / filename
-        if not path.exists():
-            continue
-        try:
-            path.unlink()
-        except Exception as exc:
-            raise RuntimeError(
-                "Failed deleting supervisor knowledge file during game transition: "
-                f"{path}: {exc}"
-            ) from exc
-        log(f"[harness] removed supervisor knowledge file: {path}")
 
 
 def _run_single_game(
@@ -209,7 +189,12 @@ def _run_single_game(
             state = runtime.load_state()
             prev_completed = int(state.get("levels_completed", 0)) if state else 0
             runtime.log(f"[harness] turn {super_turn}: {runtime.format_state_summary(state)}")
+            repl_health = collect_repl_health(runtime)
             runtime.log(f"[harness] {format_repl_health_summary(runtime)}")
+            if bool(repl_health.get("is_crashed", False)):
+                runtime.log("[harness] REPL daemon crash detected; stopping run.")
+                runtime.log(f"[harness] {format_repl_crash_diagnostics(runtime, repl_health)}")
+                break
 
             if state and state.get("state") == "WIN":
                 runtime.log(f"[harness] GAME WON after {super_turn} turns")
@@ -375,12 +360,6 @@ def run_main(deps) -> None:
                 game_index=index,
                 total_games=len(game_ids),
             )
-            if len(game_ids) > 1 and index < len(game_ids):
-                _delete_supervisor_knowledge_files(
-                    project_root=deps.PROJECT_ROOT,
-                    session_name=str(game_args.session_name),
-                    log=lambda msg: print(msg, file=sys.stderr, flush=True),
-                )
     finally:
         if (
             len(game_ids) > 1
