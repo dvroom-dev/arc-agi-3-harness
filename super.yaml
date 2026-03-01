@@ -27,6 +27,10 @@ supervisor:
       - "Advise the agent to stick to the current mode guidance if they stray from it. If your advice is ignored, fork_new_conversation and carry over anything useful."
       - "Agent modes enable you to restrict and focus agent activity. Agents tend to expand on their directions and get into ratholes and tangents; mode selection and enforcement is your most powerful tool. Choose modes to promote well-reasoned, deliberate progress without jumping ahead or outside the prescribed process."
       - "On every new conversation, guide the agent with as much context and custom instructions as they can use productively in `mode_payload.user_message`."
+      - "In `solve_model`, enforce output completion, not analysis volume. Required completion evidence is: current-level solver branch in `play.py`, supporting helpers in `play_lib.py` as needed, `theory.md` updated for the level, and a simulator proof run result."
+      - "If required outputs are still missing and the agent is primarily running exploratory shell analysis, treat this as drift. After one cadence warning, fork_new_conversation with a narrow completion checklist."
+      - "If two consecutive cadence reviews show no net progress on required artifacts for the current mode, do not continue; fork_new_conversation with precise next steps."
+      - "When claiming incomplete outputs, cite concrete file evidence (for example: missing level solver branch, stale level status in theory.md, or absent proof command output)."
   supervisor_triggers:
     cadence:
       supervisor_prompt:
@@ -35,6 +39,7 @@ supervisor:
           - literal: |
               Review the agent's progress, choose an action (in decreasing precedence):
               - If any Agent Rule violation is clearly matched with concrete evidence, enforce immediately: do not use `append_message_and_continue`. Use `fork_new_conversation` (or `rewrite_with_check_supervisor_and_continue` only for unmet requirement-type fixes that are still possible in-place).
+              - If mode-required artifacts are missing and cadence evidence shows no net artifact progress since the prior review, do not continue; fork_new_conversation with a narrow artifact checklist.
               - If the current mode's goals are satisfied or you determine switching modes is appropriate now without handoff from the agent, fork_new_conversation.
               - If the agent's session has gone for 20 minutes or more (4 cadence triggers) it has probably gone off the rails, gather all useful context from it, then fork_new_conversation for a fresh agent and steer the new conversation away from the same rathole.
               - If the agent's session has gone on for 15 minutes or more (3 cadence triggers), they need to wrap it up and handoff context to you. Use `append_message_and_continue` and the `handoff_command` message template will give them the handoff steps, add any addition instructions or questions in the message field.
@@ -321,7 +326,7 @@ modes:
     start_when:
       - "All known game behavior is mirrored in the model."
     stop_when:
-      - "The level is solved in the simulator and the solution is written to play.py"
+      - "A simulator proof run succeeds for the current level (`simulate.py set_level <n>; simulate.py exec_file play.py`), the current-level solver branch exists in play.py, and theory.md marks the level SOLVED with concise evidence."
       - "The model has bugs."
       - "The model is not behaving like the observed game behavior."
     system_message:
@@ -340,6 +345,14 @@ modes:
             Because this mode does not execute real-game actions, do not claim new game theories from model results.
             Optimize the solution in play.py to minimize actions taken in the real game.
             Move complex logic to play_lib.py so play.py has clean high-level function calls.
+            In this mode, prioritize completion artifacts over additional analysis:
+            1) Ensure play.py has a solver branch for the current level.
+            2) Update play_lib.py with reusable helper logic needed by that branch.
+            3) Run a proof command: `simulate.py set_level <n>; simulate.py exec_file play.py`.
+            4) If proof succeeds, update theory.md Level status to SOLVED with concise causal evidence.
+            If proof fails, patch play.py/play_lib.py and rerun proof. Do not stay in analysis loops.
+            Do not run more than two exploratory shell commands in a row without either editing play.py/play_lib.py or executing the proof command.
+            If blocked by a model mismatch, stop and report exact mismatch evidence for a mode switch.
         - template: |
             <supervisor-context>
             {{supervisor.user_message}}
@@ -348,10 +361,13 @@ modes:
       operation: append
       requirements:
         - "Update play.py and play_lib.py with a full, optimized solution if the model level is solved."
+        - "Every solve_model turn must produce progress evidence in required artifacts (play.py / play_lib.py / theory.md) and/or a simulator proof-run result."
+        - "When simulator proof succeeds for the current level, mark that level SOLVED in theory.md with concise evidence before yielding."
       violations:
         - Any kind of brute force search across states using actions.
         - Editing simulate.py
         - Executing real game actions.
+        - "Repeated exploratory shell analysis in solve_model without producing required artifact updates."
 
   solve_game:
     description: "Use play.py to solve the benchmark test game"
