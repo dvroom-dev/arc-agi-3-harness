@@ -139,11 +139,7 @@ def setup_run_dir_impl(
     game_dir = agent_dir / f"game_{safe_game_id}"
     game_dir.mkdir(parents=True, exist_ok=True)
 
-    # Keep a root play_lib for REPL auto-loading, and a game-local copy for clarity.
-    play_lib_root = agent_dir / "play_lib.py"
-    if not play_lib_root.exists():
-        play_lib_root.write_text(play_lib_template)
-
+    # Keep a single canonical play_lib per game to avoid import/path collisions.
     play_lib_game = game_dir / "play_lib.py"
     if not play_lib_game.exists():
         play_lib_game.write_text(play_lib_template)

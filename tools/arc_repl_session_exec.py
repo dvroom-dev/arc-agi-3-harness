@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
 
@@ -46,9 +47,25 @@ def execute_exec_turn(session, requested_game_id: str, script: str, *, session_c
         action_enum, action_name = session._normalize_action(action)
         prev_state = str(session.frame.state.value)
         prev_levels = int(session.frame.levels_completed)
+        guid_before = getattr(session.frame, "guid", None)
+        available_before = [int(a) for a in getattr(session.frame, "available_actions", [])]
         frame = original_step(action_enum, data=data, reasoning=reasoning)
         if frame is None:
-            raise RuntimeError("env.step() returned None")
+            failure = session.deps._last_step_failure_details(session.env)
+            step_results.append(
+                {
+                    "step": len(step_results) + 1,
+                    "action": action_name,
+                    "state_before_step": prev_state,
+                    "levels_before_step": prev_levels,
+                    "guid_before_step": guid_before,
+                    "available_actions_before_step": available_before,
+                    "error": "env.step() returned None",
+                    "failure_details": failure,
+                }
+            )
+            detail_text = json.dumps(failure, ensure_ascii=True)
+            raise RuntimeError(f"env.step() returned None; diagnostics={detail_text}")
         session.frame = frame
         current_pixels = session.deps._get_pixels(session.env, frame)
         changes = session.deps._iter_cell_changes(session.pixels, current_pixels)
@@ -83,6 +100,9 @@ def execute_exec_turn(session, requested_game_id: str, script: str, *, session_c
             "levels_before_step": prev_levels,
             "levels_gained_in_step": levels_gained,
             "is_terminal": str(frame.state.value) in {"WIN", "GAME_OVER"},
+            "guid": getattr(frame, "guid", None),
+            "available_actions": [int(a) for a in getattr(frame, "available_actions", [])],
+            "full_reset": bool(getattr(frame, "full_reset", False)),
         }
         if levels_gained > 0:
             step_record["suppressed_cross_level_diff"] = True

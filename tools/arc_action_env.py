@@ -79,6 +79,100 @@ def _apply_scorecard_cookies_from_env(arcade) -> None:
     )
 
 
+def _safe_action_name(action: object) -> str:
+    try:
+        candidate = getattr(action, "name", None)
+        if candidate:
+            return str(candidate)
+    except Exception:
+        pass
+    try:
+        candidate = getattr(action, "value", None)
+        if candidate is not None:
+            return str(candidate)
+    except Exception:
+        pass
+    return str(action)
+
+
+def _capture_http_response_payload(resp) -> dict:
+    payload: dict[str, object] = {
+        "url": str(getattr(resp, "url", "") or ""),
+        "status_code": int(getattr(resp, "status_code", 0) or 0),
+        "reason": str(getattr(resp, "reason", "") or ""),
+    }
+    try:
+        body_json = resp.json()
+    except Exception:
+        body_json = None
+    if body_json is not None:
+        payload["body_json"] = body_json
+    else:
+        try:
+            text = str(getattr(resp, "text", "") or "")
+        except Exception:
+            text = ""
+        if len(text) > 4000:
+            text = text[:4000] + "...<truncated>"
+        payload["body_text"] = text
+    return payload
+
+
+def _install_http_diagnostics(env) -> None:
+    # Best-effort diagnostics for remote API failures.
+    session = getattr(env, "_session", None)
+    if session is not None and hasattr(session, "hooks"):
+        hooks = session.hooks.setdefault("response", [])
+
+        def _response_hook(resp, *args, **kwargs):
+            try:
+                env._arc_last_http_response = _capture_http_response_payload(resp)
+            except Exception as exc:
+                env._arc_last_http_response = {"capture_error": str(exc)}
+            return resp
+
+        hooks.append(_response_hook)
+
+    original_step = getattr(env, "step", None)
+    if callable(original_step):
+        def _step_with_diagnostics(action, data=None, reasoning=None):
+            env._arc_last_step_failure = None
+            frame = original_step(action, data=data, reasoning=reasoning)
+            if frame is None:
+                env._arc_last_step_failure = {
+                    "when": "step",
+                    "action": _safe_action_name(action),
+                    "data": data,
+                    "guid": getattr(env, "_guid", None),
+                    "http": getattr(env, "_arc_last_http_response", None),
+                }
+            return frame
+
+        env.step = _step_with_diagnostics
+
+    original_reset = getattr(env, "reset", None)
+    if callable(original_reset):
+        def _reset_with_diagnostics(*args, **kwargs):
+            env._arc_last_reset_failure = None
+            frame = original_reset(*args, **kwargs)
+            if frame is None:
+                env._arc_last_reset_failure = {
+                    "when": "reset",
+                    "guid": getattr(env, "_guid", None),
+                    "http": getattr(env, "_arc_last_http_response", None),
+                }
+            return frame
+
+        env.reset = _reset_with_diagnostics
+
+
+def _last_step_failure_details(env) -> dict:
+    details = getattr(env, "_arc_last_step_failure", None)
+    if isinstance(details, dict):
+        return dict(details)
+    return {}
+
+
 def _get_pixels(env, frame: FrameDataRaw | None = None) -> np.ndarray:
     if frame is not None:
         data = getattr(frame, "frame", None)
@@ -125,6 +219,7 @@ def _make_env(game_id: str):
         tried.append(candidate)
         env = arcade.make(candidate, render_mode=None, scorecard_id=scorecard_id)
         if env is not None:
+            _install_http_diagnostics(env)
             return env
     raise RuntimeError(f"failed to load game: {game_id} (tried: {', '.join(tried)})")
 

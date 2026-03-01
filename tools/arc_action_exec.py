@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 import multiprocessing
 import re
 import traceback
@@ -250,6 +251,9 @@ def _execute_script(
         action_enum, action_name = _normalize_action(action)
         prev_state = str(last_frame.state.value if last_frame is not None else initial_frame.state.value)
         prev_levels = int(last_frame.levels_completed if last_frame is not None else initial_frame.levels_completed)
+        prev_frame = last_frame if last_frame is not None else initial_frame
+        guid_before = getattr(prev_frame, "guid", None)
+        available_before = [int(a) for a in getattr(prev_frame, "available_actions", [])]
         frame = original_step(action_enum, data=data, reasoning=reasoning)
         if frame is not None:
             last_frame = frame
@@ -276,6 +280,9 @@ def _execute_script(
                 "levels_before_step": prev_levels,
                 "levels_gained_in_step": levels_gained,
                 "is_terminal": str(frame.state.value) in {"WIN", "GAME_OVER"},
+                "guid": getattr(frame, "guid", None),
+                "available_actions": [int(a) for a in getattr(frame, "available_actions", [])],
+                "full_reset": bool(getattr(frame, "full_reset", False)),
             }
             if levels_gained > 0:
                 step_record["suppressed_cross_level_diff"] = True
@@ -295,6 +302,21 @@ def _execute_script(
             if frame.state.value in {"WIN", "GAME_OVER"}:
                 terminal_halt = True
                 raise _TerminalStateReached()
+        else:
+            failure = getattr(env, "_arc_last_step_failure", None)
+            step_record = {
+                "step": len(step_results) + 1,
+                "action": action_name,
+                "state_before_step": prev_state,
+                "levels_before_step": prev_levels,
+                "guid_before_step": guid_before,
+                "available_actions_before_step": available_before,
+                "error": "env.step() returned None",
+                "failure_details": failure if isinstance(failure, dict) else {},
+            }
+            step_results.append(step_record)
+            detail_text = json.dumps(step_record.get("failure_details", {}), ensure_ascii=True)
+            raise RuntimeError(f"env.step() returned None; diagnostics={detail_text}")
         return frame, (step_results[-1] if step_results else None)
 
     ctx = multiprocessing.get_context("spawn")
@@ -386,6 +408,29 @@ def _write_turn_trace(
         parts.extend(["", "## Script Output", "```", script_output, "```"])
     if error:
         parts.extend(["", "## Script Error", "```", error, "```"])
+    if step_results:
+        parts.extend(["", "## Step Diagnostics", "```json"])
+        for rec in step_results:
+            compact = {
+                "step": rec.get("step"),
+                "action": rec.get("action"),
+                "state": rec.get("state"),
+                "state_before_step": rec.get("state_before_step"),
+                "levels_before_step": rec.get("levels_before_step"),
+                "levels_completed": rec.get("levels_completed"),
+                "levels_gained_in_step": rec.get("levels_gained_in_step"),
+                "changed_pixels": rec.get("changed_pixels"),
+                "guid": rec.get("guid", rec.get("guid_before_step")),
+                "available_actions": rec.get(
+                    "available_actions",
+                    rec.get("available_actions_before_step"),
+                ),
+                "full_reset": rec.get("full_reset"),
+                "error": rec.get("error"),
+                "failure_details": rec.get("failure_details"),
+            }
+            parts.append(json.dumps(compact, ensure_ascii=True))
+        parts.append("```")
     if pre_pixels is not None:
         parts.extend(["", "## Initial Grid", "```"])
         for row in pre_pixels:

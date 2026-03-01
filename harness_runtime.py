@@ -279,6 +279,7 @@ class HarnessRuntime:
         if self.arc_api_key:
             child_env["ARC_API_KEY"] = self.arc_api_key
         child_env["ARC_CONVERSATION_ID"] = self.active_conversation_id
+        child_env["ARC_ACTIVE_GAME_ID"] = self.active_game_id or str(self.args.game_id).strip()
         if self.active_scorecard_id:
             child_env["ARC_SCORECARD_ID"] = self.active_scorecard_id
         if self.scorecard_cookies_json:

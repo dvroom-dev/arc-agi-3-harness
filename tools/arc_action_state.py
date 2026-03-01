@@ -97,11 +97,26 @@ def _ensure_level_completions_file(cwd: Path) -> Path:
 
 
 def _play_lib_path(cwd: Path) -> Path:
+    active_game = str(os.getenv("ARC_ACTIVE_GAME_ID", "") or "").strip()
+    if active_game:
+        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", active_game).strip("._") or "game"
+        game_local = cwd / f"game_{safe}" / "play_lib.py"
+        if game_local.exists():
+            return game_local
+        return game_local
+
+    game_local_candidates = sorted(
+        p for p in cwd.glob("game_*/play_lib.py") if p.is_file()
+    )
+    if len(game_local_candidates) == 1:
+        return game_local_candidates[0]
+
     return cwd / "play_lib.py"
 
 
 def _ensure_play_lib_file(cwd: Path) -> Path:
     path = _play_lib_path(cwd)
+    path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
         path.write_text(PLAY_LIB_TEMPLATE)
     return path

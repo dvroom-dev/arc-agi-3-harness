@@ -28,6 +28,7 @@ from arc_action_diffs import (
 from arc_action_env import (
     _action_from_event_name,
     _get_pixels,
+    _last_step_failure_details,
     _make_env,
     _make_id_candidates,
     _replay_history,
