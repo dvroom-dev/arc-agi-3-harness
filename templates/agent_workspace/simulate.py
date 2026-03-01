@@ -4,6 +4,7 @@
 Supported commands:
   - status [--game-id GAME]
   - reset_level [--game-id GAME]
+  - set_level [--game-id GAME] LEVEL
   - exec [--game-id GAME]          (reads script from stdin)
   - exec_file [--game-id GAME] PATH
   - shutdown
@@ -91,7 +92,11 @@ class _StateValue:
 class _ActionId:
     def __init__(self, action):
         self.name = str(getattr(action, "name", action))
-        self.value = int(getattr(action, "value", action))
+        raw = getattr(action, "value", action)
+        try:
+            self.value = int(raw)
+        except (TypeError, ValueError):
+            self.value = 0
 
 
 class _ActionInput:
@@ -261,6 +266,22 @@ class Session:
         self.grid = np.array(self.frame.frame[-1], dtype=np.int8, copy=True)
         return {"ok": True, "action": "reset_level", **self.get_state()}
 
+    def set_level(self, level: int):
+        if level < 1 or level > int(self.env.win_levels):
+            return {
+                "ok": False,
+                "action": "set_level",
+                "error": {
+                    "type": "invalid_level",
+                    "message": f"level must be in [1, {int(self.env.win_levels)}], got {level}",
+                },
+            }
+        self.env.levels_completed = int(level) - 1
+        self.env._init_level(int(level))
+        self.frame = _Frame(self.env, action_name="set_level")
+        self.grid = np.array(self.frame.frame[-1], dtype=np.int8, copy=True)
+        return {"ok": True, "action": "set_level", **self.get_state()}
+
     def execute(self, script):
         if not str(script or "").strip():
             raise RuntimeError("exec requires non-empty script")
@@ -285,6 +306,9 @@ def _build_parser():
     for name in ("status", "reset_level", "exec"):
         command = sub.add_parser(name)
         command.add_argument("--game-id", default="game")
+    set_level_cmd = sub.add_parser("set_level")
+    set_level_cmd.add_argument("--game-id", default="game")
+    set_level_cmd.add_argument("level", type=int)
     file_cmd = sub.add_parser("exec_file")
     file_cmd.add_argument("--game-id", default="game")
     file_cmd.add_argument("script_path")
@@ -306,6 +330,10 @@ def main():
     if args.action == "reset_level":
         _print_json(session.reset_level())
         return 0
+    if args.action == "set_level":
+        payload = session.set_level(int(args.level))
+        _print_json(payload)
+        return 0 if payload.get("ok") else 1
     if args.action == "shutdown":
         _print_json(session.shutdown())
         return 0
