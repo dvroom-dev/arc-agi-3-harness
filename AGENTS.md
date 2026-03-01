@@ -28,6 +28,25 @@ Hard rule:
 - Always trace to provider-level cause: inspect provider events, turn completion status, thread IDs, and stderr logs before concluding root cause.
 - If provider-level evidence is missing, call that out explicitly as an observability gap and propose/add instrumentation instead of guessing.
 
+## Failure analysis requirements (mandatory)
+
+For any run failure/stall/regression/error, do not stop at symptoms.
+
+Required deliverables before reporting completion:
+- Symptom: what failed.
+- Proximal cause: immediate trigger.
+- Root cause: underlying design/logic flaw that enabled the failure.
+- Why safeguards failed.
+- Fix and verification evidence.
+
+Evidence standards:
+- Include concrete evidence with exact file paths and log lines for every causal claim.
+- Mark hypotheses explicitly; do not present hypotheses as facts.
+- If root cause is not proven, say `ROOT CAUSE NOT YET PROVEN`, list top hypotheses, and keep investigating with discriminating checks until proven or user stops work.
+
+Hard rule:
+- Do not return control with symptom-level analysis only.
+
 ## Prompt source of truth
 
 Hard rule:
