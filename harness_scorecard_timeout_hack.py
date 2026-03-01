@@ -95,13 +95,33 @@ def choose_keepalive_action(
     events: list[dict[str, Any]],
     grid_shape: tuple[int, int] | None,
     min_event_index: int,
+    available_actions: list[int] | None,
 ) -> tuple[int, dict[str, int] | None]:
-    """Pick one temporary keepalive action using agent-only history heuristics."""
+    """Pick one temporary keepalive action using agent-only history heuristics.
+
+    Important: The returned action must be valid for the current state's
+    available_actions. This avoids injecting unsupported actions.
+    """
+    available: set[int] = set()
+    for raw in available_actions or []:
+        try:
+            available.add(int(raw))
+        except Exception:
+            continue
+    if not available:
+        return 0, None
+
     agent_steps = _agent_step_events(events, min_event_index=min_event_index)
     recent = agent_steps[-100:]
     used_action5 = any(str(step.get("action")) == "ACTION5" for step in recent)
-    if not used_action5:
+    if 5 in available and not used_action5:
         return 5, None
+    if 6 not in available:
+        # Fall back to a currently supported action.
+        for candidate in (1, 2, 3, 4, 5):
+            if candidate in available:
+                return candidate, None
+        return min(available), None
 
     height, width = (0, 0)
     if grid_shape and len(grid_shape) == 2:
@@ -216,17 +236,30 @@ def maybe_inject_scorecard_keepalive_hack(
     events = rt.deps.load_history_events(rt.history_json)
     pixels = rt.load_current_pixels()
     grid_shape = None if pixels is None else tuple(pixels.shape[:2])
+    state = rt.load_state() or {}
+    available_actions = state.get("available_actions")
+    if not isinstance(available_actions, list):
+        available_actions = []
     action_id, data = choose_keepalive_action(
         events=events,
         grid_shape=grid_shape,
         min_event_index=agent_history_floor,
+        available_actions=available_actions,
     )
+    if action_id <= 0:
+        rt.log(
+            "[harness] HACK(scorecard-timeout-keepalive) skipped "
+            "(no available action from current state)"
+        )
+        return last_action_at_monotonic, False
 
     if action_id == 6 and isinstance(data, dict):
         script = f"env.step(6, data={{'x': {int(data['x'])}, 'y': {int(data['y'])}}})"
-    else:
+    elif action_id == 5:
         script = "env.step(5)"
-        action_id = 5
+        data = None
+    else:
+        script = f"env.step({int(action_id)})"
         data = None
 
     _, stdout, rc = rt.run_arc_repl(

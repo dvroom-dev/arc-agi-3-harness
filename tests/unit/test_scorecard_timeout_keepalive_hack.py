@@ -34,6 +34,7 @@ def test_timeout_hack_prefers_action5_when_recent_agent_history_has_no_action5()
         events=[_step("ACTION1"), _step("ACTION2"), _step("ACTION6", data={"x": 0, "y": 0})],
         grid_shape=(5, 5),
         min_event_index=0,
+        available_actions=[1, 2, 3, 4, 5, 6],
     )
     assert action_id == 5
     assert data is None
@@ -48,6 +49,7 @@ def test_timeout_hack_uses_unclicked_corner_for_action6_after_action5_seen() -> 
         events=events,
         grid_shape=(4, 4),
         min_event_index=0,
+        available_actions=[1, 2, 3, 4, 5, 6],
     )
     assert action_id == 6
     assert data == {"x": 3, "y": 0}
@@ -61,6 +63,7 @@ def test_timeout_hack_prefers_edge_when_all_corners_already_clicked() -> None:
         events=events,
         grid_shape=(5, 5),
         min_event_index=0,
+        available_actions=[1, 2, 3, 4, 5, 6],
     )
     assert action_id == 6
     assert data == {"x": 1, "y": 0}
@@ -76,6 +79,7 @@ def test_timeout_hack_prefers_near_edge_interior_after_edges_exhausted() -> None
         events=events,
         grid_shape=(5, 5),
         min_event_index=0,
+        available_actions=[1, 2, 3, 4, 5, 6],
     )
     assert action_id == 6
     assert data == {"x": 1, "y": 1}
@@ -90,6 +94,7 @@ def test_timeout_hack_falls_back_to_corner_if_all_cells_clicked() -> None:
         events=events,
         grid_shape=(3, 3),
         min_event_index=0,
+        available_actions=[1, 2, 3, 4, 5, 6],
     )
     assert action_id == 6
     assert data == {"x": 0, "y": 0}
@@ -102,6 +107,7 @@ def test_timeout_hack_only_looks_back_100_agent_actions() -> None:
         events=events,
         grid_shape=(6, 6),
         min_event_index=0,
+        available_actions=[1, 2, 3, 4, 5, 6],
     )
     assert action_id == 5
     assert data is None
@@ -118,6 +124,7 @@ def test_timeout_hack_ignores_harness_marked_events_and_pre_agent_floor() -> Non
         events=events,
         grid_shape=(5, 5),
         min_event_index=2,
+        available_actions=[1, 2, 3, 4, 5, 6],
     )
     assert action_id == 5
     assert data is None
@@ -131,6 +138,28 @@ def test_timeout_hack_detects_new_agent_steps_but_not_harness_steps() -> None:
     ]
     assert has_new_agent_steps(events=events, since_event_index=0, agent_history_floor=0) is True
     assert has_new_agent_steps(events=events, since_event_index=0, agent_history_floor=3) is False
+
+
+def test_timeout_hack_uses_supported_action_when_5_and_6_unavailable() -> None:
+    action_id, data = choose_keepalive_action(
+        events=[_step("ACTION1"), _step("ACTION2")],
+        grid_shape=(5, 5),
+        min_event_index=0,
+        available_actions=[1, 2, 3, 4],
+    )
+    assert action_id in {1, 2, 3, 4}
+    assert data is None
+
+
+def test_timeout_hack_returns_no_action_when_available_actions_empty() -> None:
+    action_id, data = choose_keepalive_action(
+        events=[_step("ACTION1")],
+        grid_shape=(5, 5),
+        min_event_index=0,
+        available_actions=[],
+    )
+    assert action_id == 0
+    assert data is None
 
 
 class _FakeDeps:
@@ -148,6 +177,7 @@ class _FakeRuntime:
         self.deps = _FakeDeps()
         self._pixels = np.zeros((4, 4), dtype=np.int8)
         self.logs: list[str] = []
+        self._state = {"available_actions": [1, 2, 3, 4, 5, 6]}
 
     def load_current_pixels(self):
         return self._pixels
@@ -155,17 +185,21 @@ class _FakeRuntime:
     def log(self, msg: str) -> None:
         self.logs.append(msg)
 
+    def load_state(self):
+        return dict(self._state)
+
     def run_arc_repl(self, payload: dict):
         script = str(payload.get("script", ""))
         history = json.loads(self.history_json.read_text())
         events = list(history.get("events", []))
-        if "env.step(5)" in script:
-            events.append(_step("ACTION5"))
-        elif "env.step(6" in script:
+        if "env.step(6" in script:
             # script format is fixed in maybe_inject_scorecard_keepalive_hack
             x_part = script.split("'x':", 1)[1].split(",", 1)[0].strip()
             y_part = script.split("'y':", 1)[1].split("}", 1)[0].strip()
             events.append(_step("ACTION6", data={"x": int(x_part), "y": int(y_part)}))
+        elif "env.step(" in script:
+            action_part = script.split("env.step(", 1)[1].split(")", 1)[0].strip()
+            events.append(_step(f"ACTION{int(action_part)}"))
         else:
             return None, "invalid script", 1
         history["events"] = events
@@ -205,3 +239,20 @@ def test_timeout_hack_does_not_inject_when_not_idle(tmp_path: Path) -> None:
     assert ts == 100.0
     payload = json.loads(history_json.read_text())
     assert len(payload["events"]) == 1
+
+
+def test_timeout_hack_injects_supported_action_when_5_6_not_available(tmp_path: Path) -> None:
+    history_json = tmp_path / "tool-engine-history.json"
+    history_json.write_text(json.dumps({"events": [_step("ACTION1")]}, indent=2) + "\n")
+    rt = _FakeRuntime(history_json)
+    rt._state = {"available_actions": [1, 2, 3, 4]}
+    _, injected = maybe_inject_scorecard_keepalive_hack(
+        rt,
+        last_action_at_monotonic=0.0,
+        agent_history_floor=0,
+        now_monotonic=KEEPALIVE_IDLE_SECONDS + 1.0,
+    )
+    assert injected is True
+    payload = json.loads(history_json.read_text())
+    assert payload["events"][-1]["action"] in {"ACTION1", "ACTION2", "ACTION3", "ACTION4"}
+    assert payload["events"][-1]["source"] == KEEPALIVE_SOURCE
