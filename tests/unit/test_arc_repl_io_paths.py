@@ -85,6 +85,41 @@ def test_send_request_spawns_when_first_send_fails(monkeypatch, tmp_path: Path) 
     assert created is True
 
 
+def test_send_request_refuses_recovery_after_prior_session(monkeypatch, tmp_path: Path) -> None:
+    arc_dir = tmp_path / "arc"
+    arc_dir.mkdir()
+    monkeypatch.setenv("ARC_STATE_DIR", str(arc_dir))
+    session_dir = arc_repl._session_dir(tmp_path, "c1")
+    session_dir.mkdir(parents=True, exist_ok=True)
+    (session_dir / "daemon.pid").write_text("12345\n")
+    (session_dir / "session.json").write_text('{"status":"running","game_id":"ls20"}\n')
+    (session_dir / "daemon.lifecycle.jsonl").write_text('{"event":"spawned"}\n')
+    (session_dir / "daemon.log").write_text("trace line\n")
+
+    monkeypatch.setattr(arc_repl, "_socket_path", lambda cwd, cid: tmp_path / "missing.sock")
+    monkeypatch.setattr(arc_repl, "_spawn_daemon", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not spawn")))
+    monkeypatch.setattr(arc_repl, "_default_game_id", lambda cwd: "ls20")
+
+    with pytest.raises(RuntimeError, match=r"automatic replay/recovery is disabled"):
+        arc_repl._send_request(tmp_path, "c1", {"action": "status", "game_id": "ls20"})
+
+
+def test_send_request_refuses_bootstrap_for_non_status(monkeypatch, tmp_path: Path) -> None:
+    arc_dir = tmp_path / "arc"
+    arc_dir.mkdir()
+    monkeypatch.setenv("ARC_STATE_DIR", str(arc_dir))
+    monkeypatch.setattr(arc_repl, "_socket_path", lambda cwd, cid: tmp_path / "missing.sock")
+    monkeypatch.setattr(
+        arc_repl,
+        "_spawn_daemon",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not spawn")),
+    )
+    monkeypatch.setattr(arc_repl, "_default_game_id", lambda cwd: "ls20")
+
+    with pytest.raises(RuntimeError, match=r"socket_missing_before_bootstrap_status"):
+        arc_repl._send_request(tmp_path, "c1", {"action": "exec", "game_id": "ls20"})
+
+
 def test_main_exec_prints_script_stdout(monkeypatch, capsys) -> None:
     monkeypatch.setattr(sys, "argv", ["arc_repl"])
     monkeypatch.setattr(

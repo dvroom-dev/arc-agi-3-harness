@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import sys
 import time
 import traceback
@@ -22,6 +23,17 @@ def run_daemon(
     schema_version: str,
     listener_factory,
 ) -> int:
+    # Detach daemon from terminal interrupt/hangup signals so agent/harness
+    # keyboard interrupts do not silently kill session state mid-run.
+    for sig_name in ("SIGINT", "SIGHUP"):
+        sig = getattr(signal, sig_name, None)
+        if sig is None:
+            continue
+        try:
+            signal.signal(sig, signal.SIG_IGN)
+        except Exception:
+            pass
+
     append_lifecycle_event(
         cwd,
         conversation_id,

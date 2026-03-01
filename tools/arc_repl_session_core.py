@@ -56,7 +56,15 @@ class BaseReplSession:
         self.events: list[dict] = list(self.history.get("events", []))
 
         self.env = deps._make_env(game_id)
-        self.frame = deps._replay_history(self.env, self.events)
+        if self.events:
+            raise RuntimeError(
+                "cannot restore REPL state: history replay is disabled and prior step/reset "
+                "events exist. Stop this run and inspect daemon diagnostics."
+            )
+        self.frame = deps._reset_env_with_retry(
+            self.env,
+            context="at session start",
+        )
         self.pixels = deps._get_pixels(self.env, self.frame)
         self.game_id = str(getattr(self.frame, "game_id", "")).strip() or game_id
         self.history["game_id"] = self.game_id

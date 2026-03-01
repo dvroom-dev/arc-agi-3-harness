@@ -102,8 +102,8 @@ def test_arc_action_main_run_script_branch(tmp_path: Path, monkeypatch) -> None:
     play_lib.write_text("def helper():\n    return 1\n")
     monkeypatch.setattr(arc_action, "_ensure_play_lib_file", lambda cwd_: play_lib)
     monkeypatch.setattr(arc_action, "_load_history", lambda cwd_, gid: {"game_id": gid, "events": [], "turn": 0})
-    monkeypatch.setattr(arc_action, "_make_env", lambda gid: object())
-    monkeypatch.setattr(arc_action, "_replay_history", lambda env, events: frame0)
+    monkeypatch.setattr(arc_action, "_make_env", lambda gid: SimpleNamespace(reset=lambda: frame0))
+    monkeypatch.setattr(arc_action, "_reset_env_with_retry", lambda env, **kwargs: frame0)
     monkeypatch.setattr(
         arc_action,
         "_execute_script",

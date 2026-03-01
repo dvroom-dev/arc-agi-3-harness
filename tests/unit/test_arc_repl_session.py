@@ -58,7 +58,9 @@ class FakeEnv:
 def _patch_session_dependencies(monkeypatch, tmp_path: Path):
     arc_dir = tmp_path / "arc"
     arc_dir.mkdir()
-    play_lib = tmp_path / "play_lib.py"
+    monkeypatch.setenv("ARC_ACTIVE_GAME_ID", "ls20")
+    play_lib = tmp_path / "game_ls20" / "play_lib.py"
+    play_lib.parent.mkdir(parents=True, exist_ok=True)
     play_lib.write_text("def helper():\n    return 1\n")
     completions = arc_dir / "level_completions.md"
     completions.write_text("# Level Completions\n")
@@ -71,7 +73,7 @@ def _patch_session_dependencies(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(arc_repl, "_load_history", lambda cwd, gid: dict(history))
     monkeypatch.setattr(arc_repl, "_save_history", lambda cwd, h: history.update(h))
     monkeypatch.setattr(arc_repl, "_make_env", lambda gid: FakeEnv())
-    monkeypatch.setattr(arc_repl, "_replay_history", lambda env, events: env.reset())
+    monkeypatch.setattr(arc_repl, "_reset_env_with_retry", lambda env, **kwargs: env.reset())
     monkeypatch.setattr(arc_repl, "_get_pixels", lambda env, frame=None: frame.frame[-1])
     monkeypatch.setattr(arc_repl, "write_game_state", lambda *a, **k: None)
     monkeypatch.setattr(arc_repl, "write_machine_state", lambda *a, **k: None)

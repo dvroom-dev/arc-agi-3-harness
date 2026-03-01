@@ -28,13 +28,16 @@ def _patch_common(monkeypatch, tmp_path: Path, args: dict):
     arc_dir = tmp_path / "arc"
     arc_dir.mkdir()
     monkeypatch.setenv("ARC_STATE_DIR", str(arc_dir))
+    monkeypatch.setenv("ARC_ACTIVE_GAME_ID", "ls20")
     monkeypatch.chdir(tmp_path)
-    (tmp_path / "play_lib.py").write_text("x=1\n")
+    game_dir = tmp_path / "game_ls20"
+    game_dir.mkdir()
+    (game_dir / "play_lib.py").write_text("x=1\n")
     monkeypatch.setattr(arc_action, "_read_args", lambda: args)
-    monkeypatch.setattr(arc_action, "_ensure_play_lib_file", lambda cwd: tmp_path / "play_lib.py")
+    monkeypatch.setattr(arc_action, "_ensure_play_lib_file", lambda cwd: game_dir / "play_lib.py")
     monkeypatch.setattr(arc_action, "_load_history", lambda cwd, gid: {"game_id": gid, "events": [], "turn": 0})
     monkeypatch.setattr(arc_action, "_make_env", lambda gid: SimpleNamespace(reset=lambda: _frame()))
-    monkeypatch.setattr(arc_action, "_replay_history", lambda env, events: _frame())
+    monkeypatch.setattr(arc_action, "_reset_env_with_retry", lambda env, **kwargs: _frame())
     monkeypatch.setattr(arc_action, "_get_pixels", lambda env, frame=None: np.zeros((64, 64), dtype=np.int8))
     monkeypatch.setattr(arc_action, "_save_history", lambda cwd, h: None)
     monkeypatch.setattr(arc_action, "write_game_state", lambda *a, **k: None)
@@ -91,4 +94,3 @@ def test_main_reset_level_branch(monkeypatch, tmp_path: Path) -> None:
     rc = arc_action.main()
     assert rc == 0
     assert out[-1]["action"] == "reset_level"
-

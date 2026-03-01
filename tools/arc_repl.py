@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import errno
 import json
 import multiprocessing.connection
 import os
@@ -31,7 +30,7 @@ from arc_action_env import (
     _last_step_failure_details,
     _make_env,
     _make_id_candidates,
-    _replay_history,
+    _reset_env_with_retry,
 )
 from arc_action_exec import _write_turn_trace
 from arc_action_state import (
@@ -47,6 +46,11 @@ from arc_action_state import (
 )
 from arc_action_state import _load_history as _load_history_impl
 from arc_repl_daemon import run_daemon
+from arc_repl_diagnostics import (
+    daemon_unavailable_diagnostics,
+    has_prior_session_artifacts,
+    is_socket_permission_error,
+)
 from arc_repl_session_core import (
     BaseReplSession,
     _StopScript,
@@ -124,25 +128,6 @@ def _session_key() -> str:
 def _session_dir(cwd: Path, conversation_id: str) -> Path:
     return _arc_dir(cwd) / "repl-sessions" / conversation_id
 
-def _is_socket_permission_error(exc: BaseException) -> bool:
-    """True when sandbox/policy blocks AF_UNIX connect/listen operations."""
-    seen: set[int] = set()
-    cur: BaseException | None = exc
-    while cur is not None and id(cur) not in seen:
-        seen.add(id(cur))
-        if isinstance(cur, PermissionError):
-            return True
-        if isinstance(cur, OSError) and getattr(cur, "errno", None) in {
-            errno.EPERM,
-            errno.EACCES,
-        }:
-            return True
-        msg = str(cur).lower()
-        if "operation not permitted" in msg or "permission denied" in msg:
-            return True
-        cur = cur.__cause__ or cur.__context__
-    return False
-
 def _socket_path(cwd: Path, conversation_id: str) -> Path:
     key = f"{_arc_dir(cwd)}::{conversation_id}"
     digest = sha1(key.encode("utf-8")).hexdigest()[:20]
@@ -199,6 +184,7 @@ def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
             stdin=subprocess.DEVNULL,
             stdout=logf,
             stderr=subprocess.STDOUT,
+            start_new_session=True,
         )
     _pid_path(cwd, conversation_id).write_text(str(proc.pid) + "\n")
     _append_lifecycle_event(
@@ -220,7 +206,7 @@ def _wait_for_daemon(cwd: Path, conversation_id: str, timeout_s: float = SOCKET_
             try:
                 conn = multiprocessing.connection.Client(str(socket_path), family="AF_UNIX")
             except Exception as exc:
-                if _is_socket_permission_error(exc):
+                if is_socket_permission_error(exc):
                     raise
                 time.sleep(0.05)
                 continue
@@ -249,6 +235,31 @@ def _wait_for_daemon(cwd: Path, conversation_id: str, timeout_s: float = SOCKET_
 def _send_request(cwd: Path, conversation_id: str, request: dict) -> tuple[dict, bool]:
     socket_path = _socket_path(cwd, conversation_id)
     session_created = False
+    request_action = str(request.get("action", "") or "").strip().lower()
+    paths_resolved = True
+    try:
+        session_dir = _session_dir(cwd, conversation_id)
+        pid_file = _pid_path(cwd, conversation_id)
+        meta_file = _meta_path(cwd, conversation_id)
+        lifecycle_file = _lifecycle_path(cwd, conversation_id)
+        log_file = _daemon_log_path(cwd, conversation_id)
+    except Exception:
+        paths_resolved = False
+        session_dir = None
+        pid_file = None
+        meta_file = None
+        lifecycle_file = None
+        log_file = None
+    prior_session_artifacts = bool(
+        paths_resolved
+        and has_prior_session_artifacts(
+            session_dir=session_dir,
+            pid_file=pid_file,
+            meta_file=meta_file,
+            lifecycle_file=lifecycle_file,
+            log_file=log_file,
+        )
+    )
 
     def _try_send() -> dict:
         conn = multiprocessing.connection.Client(str(socket_path), family="AF_UNIX")
@@ -260,6 +271,29 @@ def _send_request(cwd: Path, conversation_id: str, request: dict) -> tuple[dict,
             return resp
         finally:
             conn.close()
+
+    def _raise_daemon_unavailable(reason: str, exc: BaseException | None = None) -> None:
+        if paths_resolved:
+            diagnostics = daemon_unavailable_diagnostics(
+                session_dir=session_dir,
+                socket_path=socket_path,
+                pid_file=pid_file,
+                meta_file=meta_file,
+                lifecycle_file=lifecycle_file,
+                log_file=log_file,
+            )
+        else:
+            diagnostics = (
+                "arc_repl session diagnostics unavailable: failed resolving session paths. "
+                "Is ARC_STATE_DIR set?"
+            )
+        message = (
+            f"arc_repl daemon unavailable ({reason}); automatic replay/recovery is disabled.\n"
+            f"{diagnostics}"
+        )
+        if exc is None:
+            raise RuntimeError(message)
+        raise RuntimeError(message) from exc
 
     def _spawn_for_request(reason: str) -> None:
         nonlocal session_created
@@ -277,19 +311,28 @@ def _send_request(cwd: Path, conversation_id: str, request: dict) -> tuple[dict,
             request_action=str(request.get("action", "") or ""),
         )
         _spawn_daemon(cwd, conversation_id, requested_game_id)
-        _wait_for_daemon(cwd, conversation_id)
+        try:
+            _wait_for_daemon(cwd, conversation_id)
+        except Exception as exc:
+            _raise_daemon_unavailable(f"spawn_failed:{reason}", exc)
         session_created = True
 
     if not socket_path.exists():
-        _spawn_for_request("socket_missing")
+        if prior_session_artifacts:
+            _raise_daemon_unavailable("socket_missing_after_prior_session")
+        if request_action != "status":
+            _raise_daemon_unavailable("socket_missing_before_bootstrap_status")
+        _spawn_for_request("socket_missing_initial_status_bootstrap")
 
     try:
         return _try_send(), session_created
-    except (FileNotFoundError, ConnectionRefusedError):
+    except (FileNotFoundError, ConnectionRefusedError, BrokenPipeError, EOFError, OSError) as exc:
         if session_created:
-            return _try_send(), session_created
-        _spawn_for_request("connect_race")
-        return _try_send(), session_created
+            try:
+                return _try_send(), session_created
+            except Exception as retry_exc:
+                _raise_daemon_unavailable("post_spawn_connect_failure", retry_exc)
+        _raise_daemon_unavailable("connect_failure_no_respawn", exc)
 
 def _daemon_main(cwd: Path, conversation_id: str, requested_game_id: str) -> int:
     session_dir = _session_dir(cwd, conversation_id)

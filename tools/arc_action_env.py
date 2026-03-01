@@ -244,61 +244,25 @@ def _action_from_event_name(name: str) -> GameAction:
     raise RuntimeError(f"unknown action name in history: {name}")
 
 
-def _replay_history(env, events: list[dict]) -> FrameDataRaw:
-    def _reset_with_retry(context: str) -> FrameDataRaw:
-        last_none = False
-        for attempt in range(8):
-            frame_obj = env.reset()
-            if frame_obj is not None:
-                return frame_obj
-            last_none = True
-            time.sleep(min(8.0, 0.25 * (2**attempt)))
-        if last_none:
-            raise RuntimeError(f"env.reset() returned None {context}")
-        raise RuntimeError(f"env.reset() failed {context}")
-
-    frame = _reset_with_retry("at replay start")
-    terminal = str(getattr(frame, "state", "").value) in {"GAME_OVER", "WIN"}
-    current_levels = int(getattr(frame, "levels_completed", 0))
-    steps_in_level = 0
-    for idx, event in enumerate(events):
-        kind = str(event.get("kind", "")).strip()
-        if kind == "reset":
-            if steps_in_level == 0:
-                # Never replay reset-level calls at the first turn of a level.
-                # In ARC API sessions this can trigger a full campaign reset.
-                continue
-            try:
-                frame = _reset_with_retry("during replay")
-            except RuntimeError as exc:
-                raise RuntimeError(
-                    f"history replay reset failed at event[{idx}]"
-                ) from exc
-            terminal = str(getattr(frame, "state", "").value) in {"GAME_OVER", "WIN"}
-            current_levels = int(getattr(frame, "levels_completed", 0))
-            steps_in_level = 0
-            continue
-        if kind != "step":
-            continue
-        if terminal:
-            continue
-        action_name = str(event.get("action", "")).strip()
-        data = event.get("data")
-        try:
-            result = env.step(_action_from_event_name(action_name), data=data)
-        except Exception as exc:
-            raise RuntimeError(
-                f"history replay step failed at event[{idx}] action={action_name!r}"
-            ) from exc
-        if result is None:
-            terminal = True
-            continue
-        frame = result
-        levels_now = int(getattr(frame, "levels_completed", current_levels))
-        if levels_now != current_levels:
-            steps_in_level = 0
-        else:
-            steps_in_level += 1
-        current_levels = levels_now
-        terminal = str(getattr(frame, "state", "").value) in {"GAME_OVER", "WIN"}
-    return frame
+def _reset_env_with_retry(
+    env,
+    *,
+    context: str,
+    attempts: int = 8,
+) -> FrameDataRaw:
+    last_none = False
+    for attempt in range(max(1, int(attempts))):
+        frame = env.reset()
+        if frame is not None:
+            return frame
+        last_none = True
+        time.sleep(min(8.0, 0.25 * (2**attempt)))
+    failure = getattr(env, "_arc_last_reset_failure", None)
+    if isinstance(failure, dict):
+        failure_text = json.dumps(failure, ensure_ascii=True)
+        raise RuntimeError(
+            f"env.reset() returned None {context}; diagnostics={failure_text}"
+        )
+    if last_none:
+        raise RuntimeError(f"env.reset() returned None {context}")
+    raise RuntimeError(f"env.reset() failed {context}")

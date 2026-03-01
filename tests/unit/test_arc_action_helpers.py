@@ -92,6 +92,7 @@ def test_frame_action_metadata() -> None:
 
 def test_state_and_history_file_helpers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ARC_STATE_DIR", str(tmp_path / "arc"))
+    monkeypatch.setenv("ARC_ACTIVE_GAME_ID", "ls20")
     cwd = tmp_path / "wd"
     cwd.mkdir()
 
@@ -102,6 +103,7 @@ def test_state_and_history_file_helpers(tmp_path: Path, monkeypatch: pytest.Monk
     assert lc.exists()
     al = arc_action._ensure_play_lib_file(cwd)
     assert al.exists()
+    assert al == cwd / "game_ls20" / "play_lib.py"
 
     history = {"game_id": "ls20", "events": [], "turn": 3}
     arc_action._save_history(cwd, history)

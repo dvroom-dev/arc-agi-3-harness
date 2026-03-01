@@ -35,7 +35,7 @@ try:
         _get_pixels,
         _make_env,
         _make_id_candidates,
-        _replay_history,
+        _reset_env_with_retry,
         _resolve_environments_dir,
         _resolve_operation_mode,
     )
@@ -43,7 +43,6 @@ try:
     from arc_action_exec import _script_worker_main
     from arc_action_exec import _write_turn_trace
     from arc_action_state import (
-        _play_lib_path,
         _append_level_completion,
         _arc_dir,
         _completion_action_windows_by_level,
@@ -79,7 +78,7 @@ except Exception:
         _get_pixels,
         _make_env,
         _make_id_candidates,
-        _replay_history,
+        _reset_env_with_retry,
         _resolve_environments_dir,
         _resolve_operation_mode,
     )
@@ -87,7 +86,6 @@ except Exception:
     from tools.arc_action_exec import _script_worker_main
     from tools.arc_action_exec import _write_turn_trace
     from tools.arc_action_state import (
-        _play_lib_path,
         _append_level_completion,
         _arc_dir,
         _completion_action_windows_by_level,
@@ -193,8 +191,12 @@ def main() -> int:
         turn = int(history.get("turn", 0))
         arc_dir = _arc_dir(cwd)
 
+        if events:
+            raise RuntimeError(
+                "history replay is disabled; existing step/reset history cannot be restored"
+            )
         env = _call_quiet(_make_env, game_id)
-        frame = _call_quiet(_replay_history, env, events)
+        frame = _call_quiet(_reset_env_with_retry, env, context="at session start")
         pre_pixels = _get_pixels(env, frame)
         state_before_action = str(frame.state.value)
         levels_before_action = int(frame.levels_completed)

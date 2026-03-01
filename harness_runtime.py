@@ -172,6 +172,7 @@ class HarnessRuntime:
         if self.scorecard_cookies_json:
             self.super_env["ARC_SCORECARD_COOKIES"] = self.scorecard_cookies_json
         self.super_env["ARC_REPL_SESSION_KEY"] = self.active_repl_session_key
+        self.super_env["ARC_ACTIVE_GAME_ID"] = self.active_game_id
         self.super_env["PATH"] = f"{self.run_bin_dir}:{os.environ.get('PATH', '')}"
 
     def log(self, msg: str) -> None:
@@ -332,6 +333,7 @@ class HarnessRuntime:
                     resolved_game_id = str(parsed.get("game_id", "")).strip()
                     if resolved_game_id:
                         self.active_game_id = resolved_game_id
+                        self.super_env["ARC_ACTIVE_GAME_ID"] = self.active_game_id
                     repl_meta = parsed.get("repl")
                     if isinstance(repl_meta, dict):
                         daemon_pid_raw = repl_meta.get("daemon_pid")
@@ -466,6 +468,7 @@ class HarnessRuntime:
 
     def resume_super(self, prompt: str | None = None, *, image_paths: list[Path] | None = None) -> str:
         self.super_env["ARC_CONVERSATION_ID"] = self.active_conversation_id
+        self.super_env["ARC_ACTIVE_GAME_ID"] = self.active_game_id
         resume_args: list[str] = [
             "resume",
             str(self.session_file),
