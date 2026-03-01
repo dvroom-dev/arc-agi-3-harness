@@ -265,6 +265,7 @@ modes:
     stop_when:
       - "All known game behavior is mirrored in the model."
       - "Game level advances to a frontier UNSOLVED level. Fork a new conversation in the same mode."
+      - "Game over happens or the current level regresses to a previously SOLVED level; switch to recover mode."
     system_message:
       operation: append
       parts:
@@ -329,6 +330,7 @@ modes:
       - "A simulator proof run succeeds for the current level (`simulate.py set_level <n>; simulate.py exec_file play.py`), the current-level solver branch exists in play.py, and theory.md marks the level SOLVED with concise evidence."
       - "The model has bugs."
       - "The model is not behaving like the observed game behavior."
+      - "Game over happens or the current level regresses to a previously SOLVED level; switch to recover mode."
     system_message:
       operation: append
       parts:
@@ -375,7 +377,7 @@ modes:
       - "Confidence in the parity between the model and the game is high and play.py solves the model level."
     stop_when:
       - "Game level complete"
-      - "Game over"
+      - "Game over happens or the current level regresses to a previously SOLVED level; switch to recover mode."
       - "Discrepancies are identified between how the model reacts to running play.py vs the game."
     system_message:
       operation: append
@@ -403,12 +405,60 @@ modes:
       violations:
         - "Repeatedly failing to solve the level without real progress or evidence-backed theory updates"
 
+  recover:
+    description: "Replay previously SOLVED levels quickly and safely to return to the frontier UNSOLVED level."
+    start_when:
+      - "The game has regressed to a level already marked SOLVED in theory.md (for example after GAME_OVER or regression events)."
+      - "Current level is below the frontier UNSOLVED level and known solved level solutions exist in play.py."
+    stop_when:
+      - "The run reaches the frontier UNSOLVED level; switch to model mode for new discovery."
+      - "A previously SOLVED level no longer replays correctly with play.py; switch to model mode."
+      - "A model/game mismatch is identified while replaying solved levels; switch to model mode."
+    system_message:
+      operation: append
+      parts:
+        - literal: |
+            Your goal is recovery: regain progress efficiently after regression by replaying known SOLVED levels.
+            Prioritize fast, low-action replay with existing code in play.py/play_lib.py and avoid exploratory detours.
+            Treat this mode as operational recovery, not discovery.
+    user_message:
+      operation: append
+      parts:
+        - literal: |
+            Recover to the frontier level using existing known solutions.
+
+            Process:
+            1) Read `theory.md` and identify which levels are marked SOLVED and what the current frontier UNSOLVED level is.
+            2) Check real game status first (`arc_repl status`) and infer whether this level is likely mid-progress or at level start.
+            3) If the level may be mid-progress (actions already played), attempt a continuation script first (ad-hoc via `arc_repl exec`) using play.py/play_lib.py logic.
+            4) If continuation fails or is ambiguous, run one safe reset (`arc_repl reset_level`) and replay from level start with `arc_repl exec_file play.py`.
+            5) After each replay attempt, check status again and continue advancing levels until reaching the frontier UNSOLVED level.
+
+            Rules:
+            - Do not do broad exploration or theory churn in this mode.
+            - Prefer using existing solver code; only make minimal fixes needed for replay reliability.
+            - If a previously SOLVED level no longer works, capture exact failure evidence and request mode switch to model.
+            - If you reach the frontier UNSOLVED level, stop actions and yield with a concise handoff message.
+        - template: |
+            <supervisor-context>
+            {{supervisor.user_message}}
+            </supervisor-context>
+    agent_rules:
+      operation: append
+      requirements:
+        - "Use known solver logic in play.py/play_lib.py to replay solved levels before inventing new logic."
+        - "After each replay attempt, verify progression with `arc_repl status` before continuing."
+        - "When recovery reaches the frontier UNSOLVED level, stop and yield immediately with status and any replay fixes made."
+      violations:
+        - "Performing broad exploratory probing in recover mode instead of replaying known solved levels."
+
 mode_state_machine:
   initial_mode: model
   transitions:
-    model: [solve_model, model]
+    model: [solve_model, recover, model]
     solve_model: [solve_game, model, solve_model]
-    solve_game: [model, solve_game]
+    solve_game: [recover, model, solve_game]
+    recover: [model, solve_game, solve_model, recover]
 
 tools:
   allow_builtin:
