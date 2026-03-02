@@ -107,6 +107,7 @@ agent:
           # Tool policy
           - Both the `arc_repl` tool and simulate.py present the same interface to a test environment, but arc_repl addresses the game and simulate.py addresses the model.
           - They are both stateful Python REPLs attached to stateful, persistent test environments. Code run in a REPL will act on whatever the current game state is, which may have been mutated by an earlier agent.
+          - In this run, you are the only actor mutating the game state and local files. Do not assume hidden concurrent edits.
           - Use shell to run `arc_repl` or `simulate.py` (`status`, `exec`, `exec_file`, `reset_level`). simulate.py also has a set_level command.
           - `exec` script is stdin heredoc Python. `exec_file` loads code from a file but otherwise acts identically to `exec`.
           - `arc_repl status`/`reset_level` return JSON; `arc_repl exec` prints only what your script prints.
@@ -232,7 +233,8 @@ agent:
           Use numeric IDs first; names are aliases only.
       - literal: |
           ## Runtime Event Handling (required)
-          - Treat runtime state fields as source of truth: `state`, `current_level`, `levels_completed`, `full_reset`.
+          - Treat runtime game state and action history as source of truth: `state`, `current_level`, `levels_completed`, `full_reset`, and executed action records.
+          - If `theory.md` conflicts with runtime state or action history, runtime state/history wins. Update `theory.md` immediately.
           - Whenever you execute actions, immediately inspect resulting state (either print `get_state()` in script output or run `arc_repl status`).
           - If `state == "GAME_OVER"`, stop further actions in that turn and record:
             1) likely cause sequence,
@@ -304,6 +306,7 @@ modes:
 
             ### Details
             - The supervisor may direct you to focus on modeling specific features / theories, follow their instructions.
+            - For level-local static geometry (for example fixed regions, gates, exits, anchors), once confirmed from runtime state/history, treat it as fixed for that level. Do not keep re-deriving constants unless contradictory evidence appears.
             - The game cannot be efficiently solved without understanding all game state features and mechanics. If there is game state you don't understand or evidence that can't be explained with your current theories, prioritize testing causal relationships in the game to develop and high confidence theory. Write low confidence theories and alternatives for every game state feature you can see but have insufficient evidence to determine their purpose.
             - Give each identified game state feature a name in theory.md and regularly reevaluate whether features are grouped correctly - combine or divide feature definitions as you learn more.
             - Maintain game goal theories, how levels are solved and how game over can be avoided. theory.md needs at least one level completion goal, if there are none take an educated guess based on your knowledge of common puzzle games. Review and update game goal confidence ratings. Goal theories that are not high confidence should have at least one alternative theory.
