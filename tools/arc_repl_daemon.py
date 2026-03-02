@@ -90,11 +90,13 @@ def run_daemon(
                 elif action == "exec":
                     script = str(request.get("script", "") or "")
                     source = str(request.get("source", "") or "").strip() or None
+                    script_path = str(request.get("script_path", "") or "").strip() or None
                     result = session.do_exec(
                         req_game_id,
                         script,
                         session_created=False,
                         source=source,
+                        script_path=script_path,
                     )
                 elif action == "shutdown":
                     result = {

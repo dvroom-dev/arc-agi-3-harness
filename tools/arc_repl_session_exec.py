@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 
 import numpy as np
 
@@ -30,6 +32,7 @@ def execute_exec_turn(
     *,
     session_created: bool,
     source: str | None = None,
+    script_path: str | None = None,
 ) -> dict:
     if requested_game_id and not session._same_game_lineage(requested_game_id):
         raise RuntimeError(
@@ -165,6 +168,29 @@ def execute_exec_turn(
     session.globals["env"] = session.env
     session.globals["current"] = session.env
 
+    script_file_abs: str | None = None
+    script_dir: str | None = None
+    if script_path:
+        try:
+            script_file_abs = str(Path(script_path).expanduser().resolve())
+        except Exception:
+            script_file_abs = str(script_path)
+        try:
+            script_dir = str(Path(script_file_abs).parent)
+        except Exception:
+            script_dir = None
+    old_file = session.globals.get("__file__", None)
+    had_file = "__file__" in session.globals
+    old_name = session.globals.get("__name__", None)
+    had_name = "__name__" in session.globals
+    path_inserted = False
+    if script_dir and script_dir not in sys.path:
+        sys.path.insert(0, script_dir)
+        path_inserted = True
+    if script_file_abs:
+        session.globals["__file__"] = script_file_abs
+    session.globals["__name__"] = "__main__"
+
     try:
         with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
             exec(compile(script, script_label, "exec"), session.globals)
@@ -174,6 +200,19 @@ def execute_exec_turn(
         error = traceback.format_exc()
     finally:
         session.env.step = original_step
+        if path_inserted:
+            try:
+                sys.path.remove(script_dir)
+            except ValueError:
+                pass
+        if had_file:
+            session.globals["__file__"] = old_file
+        else:
+            session.globals.pop("__file__", None)
+        if had_name:
+            session.globals["__name__"] = old_name
+        else:
+            session.globals.pop("__name__", None)
 
     worker_stderr = stderr_capture.getvalue().strip()
     script_output = stdout_capture.getvalue()

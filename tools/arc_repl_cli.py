@@ -173,6 +173,7 @@ def main() -> int:
             return 2
         payload["action"] = "exec"
         payload["script"] = script
+        payload["script_path"] = str(script_path.resolve())
 
     return _run(payload)
 

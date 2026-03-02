@@ -434,6 +434,9 @@ def main() -> int:
     }
     if action == "exec":
         request["script"] = str(args.get("script", ""))
+        script_path = str(args.get("script_path", "") or "").strip()
+        if script_path:
+            request["script_path"] = script_path
         source = str(args.get("source", "") or "").strip()
         if source:
             request["source"] = source
@@ -493,6 +496,5 @@ def main() -> int:
             )
         )
         return 1
-
 if __name__ == "__main__":
     raise SystemExit(main())
