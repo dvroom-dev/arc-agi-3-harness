@@ -28,8 +28,9 @@ supervisor:
       - "Agent modes enable you to restrict and focus agent activity. Agents tend to expand on their directions and get into ratholes and tangents; mode selection and enforcement is your most powerful tool. Choose modes to promote well-reasoned, deliberate progress without jumping ahead or outside the prescribed process."
       - "On every new conversation, guide the agent with as much context and custom instructions as they can use productively in `mode_payload.user_message`."
       - "In `solve_model`, enforce output completion, not analysis volume. Required completion evidence is: current-level solver branch in `play.py`, supporting helpers in `play_lib.py` as needed, `theory.md` updated for the level, and a simulator proof run result."
-      - "If required outputs are still missing and the agent is primarily running exploratory shell analysis, treat this as drift. After one cadence warning, fork_new_conversation with a narrow completion checklist."
-      - "If two consecutive cadence reviews show no net progress on required artifacts for the current mode, do not continue; fork_new_conversation with precise next steps."
+      - "If required outputs are still missing and the agent is primarily running exploratory shell analysis, treat this as drift and first use append_message_and_continue with a narrow completion checklist."
+      - "Do not fork solely because required files are still incomplete at a cadence review. Missing artifacts alone should trigger guidance first, not immediate fork."
+      - "Only fork for missing-artifact drift after at least two explicit cadence guidance messages were issued in this same conversation and ignored, with concrete evidence of no net artifact progress between reviews."
       - "When claiming incomplete outputs, cite concrete file evidence (for example: missing level solver branch, stale level status in theory.md, or absent proof command output)."
   supervisor_triggers:
     cadence:
@@ -39,7 +40,8 @@ supervisor:
           - literal: |
               Review the agent's progress, choose an action (in decreasing precedence):
               - If any Agent Rule violation is clearly matched with concrete evidence, enforce immediately: do not use `append_message_and_continue`. Use `fork_new_conversation` (or `rewrite_with_check_supervisor_and_continue` only for unmet requirement-type fixes that are still possible in-place).
-              - If mode-required artifacts are missing and cadence evidence shows no net artifact progress since the prior review, do not continue; fork_new_conversation with a narrow artifact checklist.
+              - If mode-required artifacts are missing, first use `append_message_and_continue` with a narrow artifact checklist and concrete evidence pointers. Do not fork on first missing-artifact cadence hit.
+              - Only if missing-artifact drift persists after at least two explicit cadence guidance messages in this same conversation (and no net artifact progress) should you fork_new_conversation with a narrow artifact checklist.
               - If the current mode's goals are satisfied or you determine switching modes is appropriate now without handoff from the agent, fork_new_conversation.
               - If the agent's session has gone for 20 minutes or more (4 cadence triggers) it has probably gone off the rails, gather all useful context from it, then fork_new_conversation for a fresh agent and steer the new conversation away from the same rathole.
               - If the agent's session has gone on for 15 minutes or more (3 cadence triggers), they need to wrap it up and handoff context to you. Use `append_message_and_continue` and the `handoff_command` message template will give them the handoff steps, add any addition instructions or questions in the message field.
