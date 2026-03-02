@@ -22,6 +22,7 @@ from harness_runtime_cleanup import (
     cleanup_repl_daemons_impl,
     close_scorecard_if_needed_impl,
 )
+from harness_runtime_scorecard import open_scorecard_now_impl
 from harness_scorecard_helpers import (
     build_scorecard_client,
     export_scorecard_cookies_json,
@@ -182,6 +183,9 @@ class HarnessRuntime:
         self.super_env["ARC_REPL_SESSION_KEY"] = self.active_repl_session_key
         self.super_env["ARC_ACTIVE_GAME_ID"] = self.active_game_id
         self.super_env["PATH"] = f"{self.run_bin_dir}:{os.environ.get('PATH', '')}"
+
+    def open_scorecard_now(self) -> str:
+        return open_scorecard_now_impl(self)
 
     def log(self, msg: str) -> None:
         print(msg, file=self.deps.sys.stderr, flush=True)

@@ -10,6 +10,10 @@ from pathlib import Path
 from harness_explore import run_input_exploration_from_reset
 from harness_repl_health import format_repl_health_summary
 from harness_repl_health import collect_repl_health, format_repl_crash_diagnostics
+from harness_runner_regression import (
+    _classify_level_drop,
+    _find_step_level_regression,
+)
 from harness_runtime import HarnessRuntime
 from harness_scorecard_helpers import (
     close_shared_scorecard,
@@ -20,73 +24,6 @@ from harness_scorecard_helpers import (
 from harness_scorecard_timeout_hack import (
     maybe_inject_scorecard_keepalive_hack,
 )
-
-
-def _as_int(value, default: int = 0) -> int:
-    try:
-        return int(value)
-    except Exception:
-        return int(default)
-
-
-def _find_step_level_regression(
-    *,
-    levels_before_resume: int,
-    new_events: list[dict],
-) -> dict | None:
-    """Find the first step event that regresses levels_completed within new events."""
-    last_levels = int(levels_before_resume)
-    for idx, event in enumerate(new_events):
-        if str(event.get("kind", "")).strip() != "step":
-            continue
-        levels_now = _as_int(event.get("levels_completed", last_levels), last_levels)
-        if levels_now < last_levels:
-            return {
-                "event_offset": idx,
-                "action": str(event.get("action", "")).strip() or "?",
-                "from_levels_completed": int(last_levels),
-                "to_levels_completed": int(levels_now),
-            }
-        last_levels = levels_now
-    return None
-
-
-def _classify_level_drop(
-    *,
-    prev_state: dict | None,
-    post_state: dict | None,
-    new_events: list[dict],
-) -> dict | None:
-    """Classify a level drop; returns None when no hard-stop is needed."""
-    prev_levels = _as_int((prev_state or {}).get("levels_completed", 0), 0)
-    post_levels = _as_int((post_state or {}).get("levels_completed", prev_levels), prev_levels)
-    if post_levels >= prev_levels:
-        return None
-
-    post_state_name = str((post_state or {}).get("state", "")).strip().upper()
-    if post_state_name == "GAME_OVER":
-        return {
-            "kind": "drop_after_game_over",
-            "from_levels_completed": prev_levels,
-            "to_levels_completed": post_levels,
-        }
-
-    confirmed = _find_step_level_regression(
-        levels_before_resume=prev_levels,
-        new_events=new_events,
-    )
-    if confirmed:
-        return {
-            "kind": "confirmed_step_regression_without_game_over",
-            **confirmed,
-        }
-
-    return {
-        "kind": "unconfirmed_level_drop_without_game_over",
-        "from_levels_completed": prev_levels,
-        "to_levels_completed": post_levels,
-    }
-
 
 def _resolve_arc_base_url(args) -> str:
     if args.arc_base_url and str(args.arc_base_url).strip():
@@ -208,10 +145,14 @@ def _run_single_game(
             else:
                 runtime.log("[harness] skipping auto input exploration (already ran once).")
 
-        runtime.log("[harness] starting super new...")
-        runtime.super_env["ARC_CONVERSATION_ID"] = runtime.active_conversation_id
-        deps.run_super(
-            [
+        super_turn = 1
+        game_over_resets = 0
+        last_recorded_completed_level = deps.read_max_recorded_completion_level(runtime.completions_md)
+
+        def _start_super_new(*, phase_label: str, start_mode: str | None = None) -> None:
+            runtime.log(f"[harness] starting super new ({phase_label})...")
+            runtime.super_env["ARC_CONVERSATION_ID"] = runtime.active_conversation_id
+            cmd = [
                 "new",
                 "--config", str(runtime.super_config),
                 "--workspace", str(runtime.run_dir),
@@ -222,172 +163,217 @@ def _run_single_game(
                 *runtime.supervisor_args(),
                 "--cycle-limit", str(runtime.cycle_limit),
                 "--output", str(runtime.session_file),
-            ],
-            stream=True,
-            cwd=runtime.run_dir,
-            env=runtime.super_env,
-        )
-        runtime.sync_active_conversation_id_from_session()
-        monitor = runtime.monitor_snapshot()
-        runtime.log(
-            "[harness] monitor sources: "
-            f"state={monitor['state_path']} "
-            f"history={monitor['history_path']} "
-            f"session={monitor['session_path']} "
-            f"raw_events={monitor.get('raw_events_path') or '(not-found-yet)'}"
-        )
-        history_events_after_new = runtime.load_history_events()
-        agent_history_floor = len(history_events_after_new)
-        processed_history_len = len(history_events_after_new)
-        processed_engine_turn = runtime.load_engine_turn()
-        last_scorecard_action_at = time.monotonic()
-
-        super_turn = 1
-        game_over_resets = 0
-        last_recorded_completed_level = deps.read_max_recorded_completion_level(runtime.completions_md)
-
-        while True:
-            if args.max_turns is not None and super_turn > args.max_turns:
-                runtime.log(f"[harness] max turns ({args.max_turns}) reached")
-                break
-
-            last_scorecard_action_at, injected_keepalive = maybe_inject_scorecard_keepalive_hack(
-                runtime,
-                last_action_at_monotonic=last_scorecard_action_at,
-                agent_history_floor=agent_history_floor,
+            ]
+            if start_mode:
+                cmd.extend(["--start-mode", str(start_mode)])
+            deps.run_super(
+                cmd,
+                stream=True,
+                cwd=runtime.run_dir,
+                env=runtime.super_env,
             )
-            if injected_keepalive:
-                history_after_keepalive = runtime.load_history_events()
-                processed_history_len = len(history_after_keepalive)
-                processed_engine_turn = runtime.load_engine_turn()
-
-            monitor = runtime.monitor_snapshot()
-            state = monitor.get("state")
-            prev_completed = int(state.get("levels_completed", 0)) if state else 0
-            runtime.log(
-                f"[harness] turn {super_turn}: "
-                f"{runtime.format_state_summary(state, history_turn=int(monitor['history_turn']))}"
-            )
-            runtime.log(
-                "[harness] monitor: "
-                f"history_events={monitor['history_events_len']} "
-                f"raw_events_exists={monitor['raw_events_exists']} "
-                f"raw_events_size={monitor['raw_events_size_bytes']}B"
-            )
-            repl_health = collect_repl_health(runtime)
-            runtime.log(f"[harness] {format_repl_health_summary(runtime)}")
-            if bool(repl_health.get("is_crashed", False)):
-                runtime.log("[harness] REPL daemon crash detected; stopping run.")
-                runtime.log(f"[harness] {format_repl_crash_diagnostics(runtime, repl_health)}")
-                break
-
-            if state and state.get("state") == "WIN":
-                runtime.log(f"[harness] GAME WON after {super_turn} turns")
-                break
-
-            if state and state.get("state") == "GAME_OVER":
-                game_over_resets += 1
-                runtime.log(
-                    f"[harness] GAME_OVER detected "
-                    f"(auto-reset {game_over_resets}/{args.max_game_over_resets})"
-                )
-                if game_over_resets > args.max_game_over_resets:
-                    runtime.log("[harness] max GAME_OVER auto-resets reached, stopping")
-                    break
-                _, reset_stdout, reset_rc = runtime.run_arc_repl(
-                    {"action": "reset_level", "game_id": args.game_id}
-                )
-                if reset_rc != 0:
-                    runtime.log("[harness] auto-reset failed")
-                    if reset_stdout:
-                        runtime.log(f"[harness] reset output: {reset_stdout}")
-                    break
-                state = runtime.load_state()
-            history_len_before_resume = processed_history_len
-            stdout = runtime.resume_super()
             runtime.sync_active_conversation_id_from_session()
-            if not stdout.strip():
-                runtime.log(
-                    "[harness] super returned empty assistant response; "
-                    "continuing (likely supervisor fork/transition without assistant text)."
-                )
-            history_after_resume = runtime.load_history_events()
-            new_events = (
-                history_after_resume[history_len_before_resume:]
-                if history_len_before_resume <= len(history_after_resume)
-                else history_after_resume
+            monitor = runtime.monitor_snapshot()
+            runtime.log(
+                "[harness] monitor sources: "
+                f"state={monitor['state_path']} "
+                f"history={monitor['history_path']} "
+                f"session={monitor['session_path']} "
+                f"raw_events={monitor.get('raw_events_path') or '(not-found-yet)'}"
             )
-            current_engine_turn = runtime.load_engine_turn()
-            if current_engine_turn > processed_engine_turn:
-                last_scorecard_action_at = time.monotonic()
-            processed_history_len = len(history_after_resume)
-            processed_engine_turn = current_engine_turn
 
-            post_state = runtime.load_state()
-            post_completed = int(post_state.get("levels_completed", 0)) if post_state else 0
-            drop = _classify_level_drop(
-                prev_state=state,
-                post_state=post_state,
-                new_events=new_events,
+        def _run_super_loop(*, keepalive_enabled: bool) -> bool:
+            nonlocal super_turn
+            nonlocal game_over_resets
+            nonlocal last_recorded_completed_level
+
+            history_events_after_new = runtime.load_history_events()
+            agent_history_floor = len(history_events_after_new)
+            processed_history_len = len(history_events_after_new)
+            processed_engine_turn = runtime.load_engine_turn()
+            last_scorecard_action_at = time.monotonic()
+
+            while True:
+                if args.max_turns is not None and super_turn > args.max_turns:
+                    runtime.log(f"[harness] max turns ({args.max_turns}) reached")
+                    return False
+
+                if keepalive_enabled and runtime.active_scorecard_id:
+                    last_scorecard_action_at, injected_keepalive = maybe_inject_scorecard_keepalive_hack(
+                        runtime,
+                        last_action_at_monotonic=last_scorecard_action_at,
+                        agent_history_floor=agent_history_floor,
+                    )
+                    if injected_keepalive:
+                        history_after_keepalive = runtime.load_history_events()
+                        processed_history_len = len(history_after_keepalive)
+                        processed_engine_turn = runtime.load_engine_turn()
+
+                monitor = runtime.monitor_snapshot()
+                state = monitor.get("state")
+                prev_completed = int(state.get("levels_completed", 0)) if state else 0
+                runtime.log(
+                    f"[harness] turn {super_turn}: "
+                    f"{runtime.format_state_summary(state, history_turn=int(monitor['history_turn']))}"
+                )
+                runtime.log(
+                    "[harness] monitor: "
+                    f"history_events={monitor['history_events_len']} "
+                    f"raw_events_exists={monitor['raw_events_exists']} "
+                    f"raw_events_size={monitor['raw_events_size_bytes']}B"
+                )
+                repl_health = collect_repl_health(runtime)
+                runtime.log(f"[harness] {format_repl_health_summary(runtime)}")
+                if bool(repl_health.get("is_crashed", False)):
+                    runtime.log("[harness] REPL daemon crash detected; stopping run.")
+                    runtime.log(f"[harness] {format_repl_crash_diagnostics(runtime, repl_health)}")
+                    return False
+
+                if state and state.get("state") == "WIN":
+                    runtime.log(f"[harness] GAME WON after {super_turn} turns")
+                    return True
+
+                if state and state.get("state") == "GAME_OVER":
+                    game_over_resets += 1
+                    runtime.log(
+                        f"[harness] GAME_OVER detected "
+                        f"(auto-reset {game_over_resets}/{args.max_game_over_resets})"
+                    )
+                    if game_over_resets > args.max_game_over_resets:
+                        runtime.log("[harness] max GAME_OVER auto-resets reached, stopping")
+                        return False
+                    _, reset_stdout, reset_rc = runtime.run_arc_repl(
+                        {"action": "reset_level", "game_id": args.game_id}
+                    )
+                    if reset_rc != 0:
+                        runtime.log("[harness] auto-reset failed")
+                        if reset_stdout:
+                            runtime.log(f"[harness] reset output: {reset_stdout}")
+                        return False
+                    state = runtime.load_state()
+                history_len_before_resume = processed_history_len
+                stdout = runtime.resume_super()
+                runtime.sync_active_conversation_id_from_session()
+                if not stdout.strip():
+                    runtime.log(
+                        "[harness] super returned empty assistant response; "
+                        "continuing (likely supervisor fork/transition without assistant text)."
+                    )
+                history_after_resume = runtime.load_history_events()
+                new_events = (
+                    history_after_resume[history_len_before_resume:]
+                    if history_len_before_resume <= len(history_after_resume)
+                    else history_after_resume
+                )
+                current_engine_turn = runtime.load_engine_turn()
+                if current_engine_turn > processed_engine_turn:
+                    last_scorecard_action_at = time.monotonic()
+                processed_history_len = len(history_after_resume)
+                processed_engine_turn = current_engine_turn
+
+                post_state = runtime.load_state()
+                post_completed = int(post_state.get("levels_completed", 0)) if post_state else 0
+                drop = _classify_level_drop(
+                    prev_state=state,
+                    post_state=post_state,
+                    new_events=new_events,
+                )
+                if drop and drop.get("kind") != "drop_after_game_over":
+                    runtime.log(
+                        "[harness] ERROR: level regression without GAME_OVER detected; "
+                        "stopping run for diagnostics."
+                    )
+                    runtime.log(
+                        "[harness] regression details: "
+                        + ", ".join(
+                            [
+                                f"kind={drop.get('kind')}",
+                                f"from={drop.get('from_levels_completed')}",
+                                f"to={drop.get('to_levels_completed')}",
+                                f"action={drop.get('action', '?')}",
+                                f"event_offset={drop.get('event_offset', '?')}",
+                            ]
+                        )
+                    )
+                    return False
+                if post_completed > prev_completed:
+                    last_recorded_completed_level = max(
+                        last_recorded_completed_level,
+                        deps.read_max_recorded_completion_level(runtime.completions_md),
+                    )
+                    events = runtime.load_history_events()
+                    completion_windows = deps.completion_action_windows_by_level(events)
+                    tool_turn = runtime.load_engine_turn()
+                    win_script = runtime.arc_state_dir / "script-history" / f"turn_{tool_turn:03d}_script.py"
+                    win_script_rel = None
+                    if win_script.exists():
+                        try:
+                            win_script_rel = str(win_script.relative_to(runtime.run_dir))
+                        except Exception:
+                            win_script_rel = str(win_script)
+
+                    for completed_level in range(prev_completed + 1, post_completed + 1):
+                        if completed_level <= last_recorded_completed_level:
+                            continue
+                        level_actions = completion_windows.get(completed_level, [])
+                        deps.append_level_completion_record(
+                            completions_file=runtime.completions_md,
+                            completed_level=completed_level,
+                            actions=level_actions,
+                            harness_turn=super_turn,
+                            tool_turn=tool_turn,
+                            winning_script_relpath=win_script_rel,
+                        )
+                        last_recorded_completed_level = completed_level
+                        runtime.log(
+                            "[harness] level completion recorded: "
+                            f"level={completed_level} actions_in_level_window={len(level_actions)}"
+                        )
+                    if explore_inputs and (post_state and post_state.get("state") != "WIN"):
+                        runtime.log(
+                            "[harness] skipping post-completion auto exploration "
+                            "(reset_level would reset campaign progress)"
+                        )
+
+                super_turn += 1
+
+        score_after_solve = bool(getattr(args, "score_after_solve", False))
+        replay_start_mode = str(
+            getattr(args, "score_after_solve_start_mode", "recover") or "recover"
+        ).strip() or "recover"
+
+        _start_super_new(phase_label="discovery")
+        discovery_won = _run_super_loop(keepalive_enabled=not score_after_solve)
+
+        if score_after_solve and discovery_won and not runtime.active_scorecard_id:
+            scorecard_id = runtime.open_scorecard_now()
+            runtime.log(f"[harness] score-after-solve: opened scorecard id={scorecard_id}")
+            if runtime.scorecard_web_url:
+                runtime.log(f"[harness] scorecard web url: {runtime.scorecard_web_url}")
+            if runtime.scorecard_api_url:
+                runtime.log(f"[harness] scorecard api url: {runtime.scorecard_api_url}")
+
+            runtime.active_conversation_id = "harness_bootstrap_scored"
+            runtime.active_actual_conversation_id = None
+            runtime.conversation_aliases = {}
+            runtime.active_repl_session_key = f"{runtime.repl_session_key}__scored"
+            runtime.super_env["ARC_REPL_SESSION_KEY"] = runtime.active_repl_session_key
+            runtime.last_repl_daemon_pid = None
+
+            _, reset_stdout, reset_rc = runtime.run_arc_repl(
+                {"action": "reset_level", "game_id": args.game_id}
             )
-            if drop and drop.get("kind") != "drop_after_game_over":
+            if reset_rc != 0:
+                runtime.log("[harness] score-after-solve: failed to initialize scored replay state")
+                if reset_stdout:
+                    runtime.log(f"[harness] score-after-solve reset output: {reset_stdout}")
+            else:
                 runtime.log(
-                    "[harness] ERROR: level regression without GAME_OVER detected; "
-                    "stopping run for diagnostics."
+                    "[harness] score-after-solve: initialized scored replay at "
+                    f"{runtime.format_state_summary(runtime.load_state())}"
                 )
-                runtime.log(
-                    "[harness] regression details: "
-                    + ", ".join(
-                        [
-                            f"kind={drop.get('kind')}",
-                            f"from={drop.get('from_levels_completed')}",
-                            f"to={drop.get('to_levels_completed')}",
-                            f"action={drop.get('action', '?')}",
-                            f"event_offset={drop.get('event_offset', '?')}",
-                        ]
-                    )
-                )
-                break
-            if post_completed > prev_completed:
-                last_recorded_completed_level = max(
-                    last_recorded_completed_level,
-                    deps.read_max_recorded_completion_level(runtime.completions_md),
-                )
-                events = runtime.load_history_events()
-                completion_windows = deps.completion_action_windows_by_level(events)
-                tool_turn = runtime.load_engine_turn()
-                win_script = runtime.arc_state_dir / "script-history" / f"turn_{tool_turn:03d}_script.py"
-                win_script_rel = None
-                if win_script.exists():
-                    try:
-                        win_script_rel = str(win_script.relative_to(runtime.run_dir))
-                    except Exception:
-                        win_script_rel = str(win_script)
-
-                for completed_level in range(prev_completed + 1, post_completed + 1):
-                    if completed_level <= last_recorded_completed_level:
-                        continue
-                    level_actions = completion_windows.get(completed_level, [])
-                    deps.append_level_completion_record(
-                        completions_file=runtime.completions_md,
-                        completed_level=completed_level,
-                        actions=level_actions,
-                        harness_turn=super_turn,
-                        tool_turn=tool_turn,
-                        winning_script_relpath=win_script_rel,
-                    )
-                    last_recorded_completed_level = completed_level
-                    runtime.log(
-                        "[harness] level completion recorded: "
-                        f"level={completed_level} actions_in_level_window={len(level_actions)}"
-                    )
-                if explore_inputs and (post_state and post_state.get("state") != "WIN"):
-                    runtime.log(
-                        "[harness] skipping post-completion auto exploration "
-                        "(reset_level would reset campaign progress)"
-                    )
-
-            super_turn += 1
+                _start_super_new(phase_label="scored-replay", start_mode=replay_start_mode)
+                _run_super_loop(keepalive_enabled=False)
 
         runtime.log(f"[harness] session files: {runtime.session_dir}")
     finally:
@@ -398,11 +384,19 @@ def _run_single_game(
 def run_main(deps) -> None:
     args = deps.parse_args()
     operation_mode_name = str(args.operation_mode).strip().upper()
+    score_after_solve = bool(getattr(args, "score_after_solve", False))
     if args.open_scorecard and args.scorecard_id:
         raise RuntimeError(
             "Use either --open-scorecard (create new) or --scorecard-id (reuse existing), not both."
         )
+    if score_after_solve and (args.open_scorecard or args.scorecard_id):
+        raise RuntimeError(
+            "--score-after-solve cannot be combined with --open-scorecard/--scorecard-id. "
+            "The harness will open a fresh scorecard only after unscored solve completes."
+        )
     game_ids = _resolve_game_ids(args)
+    if score_after_solve and len(game_ids) != 1:
+        raise RuntimeError("--score-after-solve currently supports exactly one game ID.")
     arc_base_url = _resolve_arc_base_url(args)
 
     session_base = args.session_name or datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -413,7 +407,7 @@ def run_main(deps) -> None:
         str(getattr(args, "scorecard_cookies_json", "") or "").strip() or None
     )
 
-    if args.open_scorecard or shared_scorecard_id:
+    if args.open_scorecard or shared_scorecard_id or score_after_solve:
         validate_scorecard_owner_check(
             args=args,
             operation_mode_name=operation_mode_name,
