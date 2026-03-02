@@ -9,6 +9,15 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from harness_runtime_monitor import (
+    format_state_summary as format_state_summary_impl,
+    load_engine_turn as load_engine_turn_impl,
+    load_history_events as load_history_events_impl,
+    load_history_payload as load_history_payload_impl,
+    load_state_json as load_state_json_impl,
+    monitor_snapshot as monitor_snapshot_impl,
+    resolve_raw_events_path as resolve_raw_events_path_impl,
+)
 from harness_runtime_cleanup import (
     cleanup_repl_daemons_impl,
     close_scorecard_if_needed_impl,
@@ -193,31 +202,36 @@ class HarnessRuntime:
         return ["--no-supervisor"] if self.args.no_supervisor else []
 
     def load_state(self) -> dict | None:
-        if not self.state_json.exists():
-            return None
-        try:
-            data = json.loads(self.state_json.read_text())
-            if not isinstance(data, dict):
-                raise RuntimeError("state.json must contain a JSON object")
-            return data
-        except Exception as exc:
-            raise RuntimeError(f"Failed to parse state JSON: {self.state_json}: {exc}") from exc
+        return load_state_json_impl(self.state_json)
+
+    def _load_history_payload(self) -> dict[str, Any]:
+        return load_history_payload_impl(self.history_json)
 
     def load_engine_turn(self) -> int:
-        if not self.history_json.exists():
-            return 0
-        try:
-            data = json.loads(self.history_json.read_text())
-            if not isinstance(data, dict):
-                raise RuntimeError("tool-engine-history.json must contain a JSON object")
-            turn = data.get("turn", 0)
-            if not isinstance(turn, int):
-                raise RuntimeError("tool-engine-history.json turn must be an integer")
-            return int(turn)
-        except Exception as exc:
-            raise RuntimeError(
-                f"Failed to parse engine history JSON: {self.history_json}: {exc}"
-            ) from exc
+        return load_engine_turn_impl(self.history_json)
+
+    def load_history_events(self) -> list[dict[str, Any]]:
+        return load_history_events_impl(self.history_json)
+
+    def resolve_raw_events_path(self) -> Path | None:
+        return resolve_raw_events_path_impl(
+            run_dir=self.run_dir,
+            session_file=self.session_file,
+            active_actual_conversation_id=self.active_actual_conversation_id,
+            active_conversation_id=self.active_conversation_id,
+            load_conversation_id=self.load_conversation_id,
+        )
+
+    def monitor_snapshot(self) -> dict[str, Any]:
+        return monitor_snapshot_impl(
+            state_path=self.state_json,
+            history_path=self.history_json,
+            run_dir=self.run_dir,
+            session_file=self.session_file,
+            active_actual_conversation_id=self.active_actual_conversation_id,
+            active_conversation_id=self.active_conversation_id,
+            load_conversation_id=self.load_conversation_id,
+        )
 
     def load_conversation_id(self, doc_path: Path) -> str | None:
         if not doc_path.exists():
@@ -237,20 +251,9 @@ class HarnessRuntime:
                 return m.group(1).strip()
         return None
 
-    def format_state_summary(self, state: dict | None) -> str:
-        if not state:
-            return "State unavailable."
-        telemetry = state.get("telemetry") if isinstance(state.get("telemetry"), dict) else {}
-        steps_since_reset = telemetry.get("steps_since_last_reset", "n/a")
-        action_input = state.get("action_input_name", "?")
-        full_reset = state.get("full_reset", False)
-        return (
-            f"state={state.get('state','?')} level={state.get('current_level','?')} "
-            f"levels={state.get('levels_completed','?')}/{state.get('win_levels','?')} "
-            f"last_action={state.get('last_action','?')} "
-            f"action_input={action_input} full_reset={full_reset} "
-            f"tool_turn={self.load_engine_turn()} steps_since_last_reset={steps_since_reset}"
-        )
+    def format_state_summary(self, state: dict | None, *, history_turn: int | None = None) -> str:
+        turn = self.load_engine_turn() if history_turn is None else int(history_turn)
+        return format_state_summary_impl(state, history_turn=turn)
 
     def run_arc_repl(self, payload: dict) -> tuple[dict | None, str, int]:
         request = dict(payload)

@@ -228,7 +228,15 @@ def _run_single_game(
             env=runtime.super_env,
         )
         runtime.sync_active_conversation_id_from_session()
-        history_events_after_new = deps.load_history_events(runtime.history_json)
+        monitor = runtime.monitor_snapshot()
+        runtime.log(
+            "[harness] monitor sources: "
+            f"state={monitor['state_path']} "
+            f"history={monitor['history_path']} "
+            f"session={monitor['session_path']} "
+            f"raw_events={monitor.get('raw_events_path') or '(not-found-yet)'}"
+        )
+        history_events_after_new = runtime.load_history_events()
         agent_history_floor = len(history_events_after_new)
         processed_history_len = len(history_events_after_new)
         processed_engine_turn = runtime.load_engine_turn()
@@ -249,13 +257,23 @@ def _run_single_game(
                 agent_history_floor=agent_history_floor,
             )
             if injected_keepalive:
-                history_after_keepalive = deps.load_history_events(runtime.history_json)
+                history_after_keepalive = runtime.load_history_events()
                 processed_history_len = len(history_after_keepalive)
                 processed_engine_turn = runtime.load_engine_turn()
 
-            state = runtime.load_state()
+            monitor = runtime.monitor_snapshot()
+            state = monitor.get("state")
             prev_completed = int(state.get("levels_completed", 0)) if state else 0
-            runtime.log(f"[harness] turn {super_turn}: {runtime.format_state_summary(state)}")
+            runtime.log(
+                f"[harness] turn {super_turn}: "
+                f"{runtime.format_state_summary(state, history_turn=int(monitor['history_turn']))}"
+            )
+            runtime.log(
+                "[harness] monitor: "
+                f"history_events={monitor['history_events_len']} "
+                f"raw_events_exists={monitor['raw_events_exists']} "
+                f"raw_events_size={monitor['raw_events_size_bytes']}B"
+            )
             repl_health = collect_repl_health(runtime)
             runtime.log(f"[harness] {format_repl_health_summary(runtime)}")
             if bool(repl_health.get("is_crashed", False)):
@@ -293,7 +311,7 @@ def _run_single_game(
                     "[harness] super returned empty assistant response; "
                     "continuing (likely supervisor fork/transition without assistant text)."
                 )
-            history_after_resume = deps.load_history_events(runtime.history_json)
+            history_after_resume = runtime.load_history_events()
             new_events = (
                 history_after_resume[history_len_before_resume:]
                 if history_len_before_resume <= len(history_after_resume)
@@ -335,7 +353,7 @@ def _run_single_game(
                     last_recorded_completed_level,
                     deps.read_max_recorded_completion_level(runtime.completions_md),
                 )
-                events = deps.load_history_events(runtime.history_json)
+                events = runtime.load_history_events()
                 completion_windows = deps.completion_action_windows_by_level(events)
                 tool_turn = runtime.load_engine_turn()
                 win_script = runtime.arc_state_dir / "script-history" / f"turn_{tool_turn:03d}_script.py"
