@@ -89,7 +89,13 @@ def run_daemon(
                     result = session.do_reset_level(req_game_id, session_created=False)
                 elif action == "exec":
                     script = str(request.get("script", "") or "")
-                    result = session.do_exec(req_game_id, script, session_created=False)
+                    source = str(request.get("source", "") or "").strip() or None
+                    result = session.do_exec(
+                        req_game_id,
+                        script,
+                        session_created=False,
+                        source=source,
+                    )
                 elif action == "shutdown":
                     result = {
                         "schema_version": schema_version,

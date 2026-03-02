@@ -12,7 +12,14 @@ class _StopScript(Exception):
     pass
 
 
-def execute_exec_turn(session, requested_game_id: str, script: str, *, session_created: bool) -> dict:
+def execute_exec_turn(
+    session,
+    requested_game_id: str,
+    script: str,
+    *,
+    session_created: bool,
+    source: str | None = None,
+) -> dict:
     if requested_game_id and not session._same_game_lineage(requested_game_id):
         raise RuntimeError(
             f"active REPL game_id={session.game_id!r} does not match requested_game_id={requested_game_id!r}"
@@ -49,7 +56,8 @@ def execute_exec_turn(session, requested_game_id: str, script: str, *, session_c
         prev_levels = int(session.frame.levels_completed)
         guid_before = getattr(session.frame, "guid", None)
         available_before = [int(a) for a in getattr(session.frame, "available_actions", [])]
-        frame = original_step(action_enum, data=data, reasoning=reasoning)
+        effective_reasoning = reasoning if reasoning is not None else source
+        frame = original_step(action_enum, data=data, reasoning=effective_reasoning)
         if frame is None:
             failure = session.deps._last_step_failure_details(session.env)
             step_results.append(
@@ -108,14 +116,15 @@ def execute_exec_turn(session, requested_game_id: str, script: str, *, session_c
             step_record["suppressed_cross_level_diff"] = True
         step_results.append(step_record)
         session.pixels = current_pixels
-        executed_events.append(
-            {
-                "kind": "step",
-                "action": action_name,
-                "data": data,
-                "levels_completed": int(frame.levels_completed),
-            }
-        )
+        event_record = {
+            "kind": "step",
+            "action": action_name,
+            "data": data,
+            "levels_completed": int(frame.levels_completed),
+        }
+        if source:
+            event_record["source"] = source
+        executed_events.append(event_record)
         desc = (
             f"{action_name}{' data=' + str(data) if data else ''} -> "
             f"state={frame.state.value} levels={frame.levels_completed}/{frame.win_levels}"

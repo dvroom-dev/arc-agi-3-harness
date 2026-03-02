@@ -434,6 +434,9 @@ def main() -> int:
     }
     if action == "exec":
         request["script"] = str(args.get("script", ""))
+        source = str(args.get("source", "") or "").strip()
+        if source:
+            request["source"] = source
 
     try:
         result, session_created = _send_request(cwd, conversation_id, request)

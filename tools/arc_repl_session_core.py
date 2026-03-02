@@ -458,10 +458,18 @@ class BaseReplSession:
         result["reset_noop"] = False
         return result
 
-    def do_exec(self, requested_game_id: str, script: str, *, session_created: bool) -> dict:
+    def do_exec(
+        self,
+        requested_game_id: str,
+        script: str,
+        *,
+        session_created: bool,
+        source: str | None = None,
+    ) -> dict:
         return execute_exec_turn(
             self,
             requested_game_id,
             script,
             session_created=session_created,
+            source=source,
         )
