@@ -64,6 +64,24 @@ Hard rule:
 - Always run `super new` and `super resume` in streaming mode; do not use batch-capture mode for live runs.
 - If harness logs appear stalled, inspect raw provider event streams (`raw_events/events.ndjson`) before concluding there is no progress.
 
+## Canonical monitoring files (do not guess)
+
+For each run, use only these artifacts as source of truth:
+- `<run>/supervisor/arc/state.json` for current game state.
+- `<run>/supervisor/arc/tool-engine-history.json` for executed tool events and engine turn.
+- `<ctx>/session.md` for super transcript and active conversation id.
+- `<run>/.ai-supervisor/conversations/<conversation>/raw_events/events.ndjson` for provider-stream progress when transcript appears stalled.
+
+Monitoring order (always in this order):
+1. Check `state.json` and `tool-engine-history.json` together.
+2. Check `session.md` for conversation changes.
+3. If progress is unclear/stalled, check `raw_events/events.ndjson`.
+4. Only then conclude stall/failure and classify root cause.
+
+Hard rule:
+- Never report “still finding where events are recorded” or equivalent uncertainty.
+- If a canonical file is missing, report the missing path explicitly and treat it as a harness observability bug to fix.
+
 ## Long-run process control (Codex tool environment)
 
 Durable monitoring must use a persistent tool session, not shell backgrounding.
