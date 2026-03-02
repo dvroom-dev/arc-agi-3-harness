@@ -7,6 +7,17 @@ from contextlib import redirect_stderr, redirect_stdout
 
 import numpy as np
 
+try:
+    from arc_repl_session_artifacts import (
+        save_level_completion_records,
+        write_state_artifacts,
+    )
+except Exception:
+    from tools.arc_repl_session_artifacts import (
+        save_level_completion_records,
+        write_state_artifacts,
+    )
+
 
 class _StopScript(Exception):
     pass
@@ -52,6 +63,8 @@ def execute_exec_turn(
         if terminal_halt:
             raise _StopScript()
         action_enum, action_name = session._normalize_action(action)
+        prev_frame = session.frame
+        before_pixels = np.array(session.pixels, copy=True)
         prev_state = str(session.frame.state.value)
         prev_levels = int(session.frame.levels_completed)
         guid_before = getattr(session.frame, "guid", None)
@@ -116,6 +129,18 @@ def execute_exec_turn(
             step_record["suppressed_cross_level_diff"] = True
         step_results.append(step_record)
         session.pixels = current_pixels
+        session._append_action_history_record(
+            call_action="exec",
+            action_name=action_name,
+            action_data=data or {},
+            source=source,
+            tool_turn=session.turn + 1,
+            step_in_call=step_index,
+            before_frame=prev_frame,
+            before_pixels=before_pixels,
+            after_frame=frame,
+            after_pixels=np.array(current_pixels, copy=True),
+        )
         event_record = {
             "kind": "step",
             "action": action_name,
@@ -163,12 +188,14 @@ def execute_exec_turn(
     session.events.extend(executed_events)
     session.turn += 1
     session._sync_history_file()
-    session._save_level_completion_records(
+    save_level_completion_records(
+        session,
         levels_before_exec=levels_before,
         script_source=script,
     )
 
-    trace_path = session._write_state_artifacts(
+    trace_path = write_state_artifacts(
+        session,
         action_label=f"exec({script_label})",
         script_output=script_output,
         error=error,

@@ -10,6 +10,8 @@ import numpy as np
 from arcengine import GameAction
 
 try:
+    from arc_repl_action_history import ActionHistoryStore
+    from arc_repl_session_artifacts import steps_since_level_start, write_state_artifacts
     from arc_repl_session_exec import _StopScript, execute_exec_turn
     from arc_repl_session_grid import (
         _chunk_for_bbox,
@@ -18,6 +20,8 @@ try:
         _same_game_lineage,
     )
 except Exception:
+    from tools.arc_repl_action_history import ActionHistoryStore
+    from tools.arc_repl_session_artifacts import steps_since_level_start, write_state_artifacts
     from tools.arc_repl_session_exec import _StopScript, execute_exec_turn
     from tools.arc_repl_session_grid import (
         _chunk_for_bbox,
@@ -68,6 +72,12 @@ class BaseReplSession:
         self.pixels = deps._get_pixels(self.env, self.frame)
         self.game_id = str(getattr(self.frame, "game_id", "")).strip() or game_id
         self.history["game_id"] = self.game_id
+        self.action_history = ActionHistoryStore(
+            path=self.arc_dir / "action-history.json",
+            game_id=self.game_id,
+            make_id_candidates=self.deps._make_id_candidates,
+        )
+        self.action_history_path = self.action_history.path
 
         self.script_counter = 0
         self.last_play_lib_mtime_ns: int | None = None
@@ -80,6 +90,8 @@ class BaseReplSession:
             "GA": GameAction,
             "get_state": self._state_payload,
             "diff": self.diff,
+            "get_action_history": self.get_action_history,
+            "get_action_record": self.get_action_record,
         }
         self._refresh_play_lib(force=True)
 
@@ -102,8 +114,7 @@ class BaseReplSession:
         exec(compile(source, str(self.play_lib_file), "exec"), self.globals)
         self.last_play_lib_mtime_ns = mtime_ns
 
-    def _state_payload(self) -> dict:
-        frame = self.frame
+    def _state_payload_for(self, frame, pixels: np.ndarray) -> dict:
         scorecard_id = str(os.getenv("ARC_SCORECARD_ID", "") or "").strip() or None
         return {
             "state": str(frame.state.value),
@@ -115,115 +126,68 @@ class BaseReplSession:
             "available_actions": [int(a) for a in getattr(frame, "available_actions", [])],
             "full_reset": bool(getattr(frame, "full_reset", False)),
             **self.deps.frame_action_metadata(frame),
-            "grid_hex_rows": ["".join(f"{int(v):X}" for v in row) for row in self.pixels],
+            "grid_hex_rows": ["".join(f"{int(v):X}" for v in row) for row in pixels],
+            "action_history_count": len(self.action_history.records),
+            "action_history_file": str(self.action_history_path),
         }
+
+    def _state_payload(self) -> dict:
+        return self._state_payload_for(self.frame, self.pixels)
+
+    def _append_action_history_record(
+        self,
+        *,
+        call_action: str,
+        action_name: str,
+        action_data: Any,
+        source: str | None,
+        tool_turn: int,
+        step_in_call: int,
+        before_frame,
+        before_pixels: np.ndarray,
+        after_frame,
+        after_pixels: np.ndarray,
+    ) -> None:
+        before_state = self._state_payload_for(before_frame, before_pixels)
+        after_state = self._state_payload_for(after_frame, after_pixels)
+        diff_payload = self.diff(before_state, after_state, output="json")
+        self.action_history.append(
+            call_action=call_action,
+            action_name=action_name,
+            action_data=action_data,
+            source=source,
+            tool_turn=tool_turn,
+            step_in_call=step_in_call,
+            state_before=before_state,
+            state_after=after_state,
+            diff_payload=diff_payload,
+        )
+
+    def get_action_record(self, action_index: int) -> dict | None:
+        return self.action_history.get_record(action_index)
+
+    def get_action_history(
+        self,
+        *,
+        level: int | None = None,
+        action_name: str | None = None,
+        since: int | None = None,
+        until: int | None = None,
+        last: int | None = None,
+    ) -> list[dict]:
+        return self.action_history.get_history(
+            level=level,
+            action_name=action_name,
+            since=since,
+            until=until,
+            last=last,
+        )
 
     def _sync_history_file(self) -> None:
         self.history["game_id"] = self.game_id
         self.history["events"] = self.events
         self.history["turn"] = self.turn
         self.deps._save_history(self.cwd, self.history)
-
-    def _steps_since_level_start(self) -> int:
-        steps_in_level = 0
-        current_levels = 0
-        for event in self.events:
-            kind = str(event.get("kind", "")).strip()
-            if kind == "reset":
-                steps_in_level = 0
-                continue
-            if kind != "step":
-                continue
-            try:
-                levels_now = int(event.get("levels_completed", current_levels))
-            except Exception:
-                levels_now = current_levels
-            if levels_now != current_levels:
-                steps_in_level = 0
-            else:
-                steps_in_level += 1
-            current_levels = levels_now
-        return steps_in_level
-
-    def _write_state_artifacts(
-        self,
-        *,
-        action_label: str,
-        script_output: str,
-        error: str,
-        pre_pixels: np.ndarray | None,
-        step_snapshots: list[tuple[str, np.ndarray]],
-        step_results: list[dict] | None,
-    ) -> Path:
-        final_pixels = self.pixels
-        self.deps.write_game_state(
-            self.arc_dir / "game-state.md",
-            self.frame,
-            final_pixels,
-            game_id=self.game_id,
-            last_action=action_label,
-            script_output=script_output,
-            error=error,
-            step_snapshots=step_snapshots,
-            pre_turn_pixels=pre_pixels,
-            step_results=step_results,
-        )
-        self.deps.write_machine_state(
-            self.arc_dir,
-            self.frame,
-            final_pixels,
-            game_id=self.game_id,
-            last_action=action_label,
-            step_snapshots=step_snapshots,
-        )
-        return self.deps._write_turn_trace(
-            arc_dir=self.arc_dir,
-            turn=self.turn,
-            action_name=action_label,
-            pre_pixels=pre_pixels,
-            step_snapshots=step_snapshots,
-            step_results=step_results,
-            final_pixels=final_pixels,
-            script_output=script_output,
-            error=error,
-        )
-
-    def _save_level_completion_records(
-        self,
-        *,
-        levels_before_exec: int,
-        script_source: str,
-    ) -> str | None:
-        levels_after_exec = int(self.frame.levels_completed)
-        if levels_after_exec <= levels_before_exec:
-            return None
-
-        scripts_dir = self.arc_dir / "script-history"
-        scripts_dir.mkdir(parents=True, exist_ok=True)
-        script_file = scripts_dir / f"turn_{self.turn:03d}_script.py"
-        script_file.write_text(script_source)
-
-        max_recorded = self.deps._read_max_recorded_completion_level(self.completions_path)
-        completion_windows = self.deps._completion_action_windows_by_level(self.events)
-
-        try:
-            script_rel = str(script_file.relative_to(self.cwd))
-        except Exception:
-            script_rel = str(script_file)
-
-        for completed_level in range(levels_before_exec + 1, levels_after_exec + 1):
-            if completed_level <= max_recorded:
-                continue
-            actions = completion_windows.get(completed_level, [])
-            self.deps._append_level_completion(
-                path=self.completions_path,
-                completed_level=completed_level,
-                actions=actions,
-                tool_turn=self.turn,
-                winning_script_relpath=script_rel,
-            )
-            max_recorded = completed_level
-        return script_rel
 
     def _normalize_action(self, action: Any) -> tuple[GameAction, str]:
         if isinstance(action, GameAction):
@@ -344,6 +308,8 @@ class BaseReplSession:
             "aggregate_diff": aggregate_diff,
             "trace_file": trace_rel,
             "state_file": str((self.arc_dir / "state.json")),
+            "action_history_count": len(self.action_history.records),
+            "action_history_file": str(self.action_history_path),
             "transitions": transitions,
             "script_stdout": script_output,
             "script_error": script_error or None,
@@ -365,7 +331,8 @@ class BaseReplSession:
         levels_before = int(self.frame.levels_completed)
         self.turn += 1
         self._sync_history_file()
-        trace_path = self._write_state_artifacts(
+        trace_path = write_state_artifacts(
+            self,
             action_label="status",
             script_output="",
             error="",
@@ -396,10 +363,26 @@ class BaseReplSession:
 
         state_before = str(self.frame.state.value)
         levels_before = int(self.frame.levels_completed)
-        if self._steps_since_level_start() == 0:
+        before_frame = self.frame
+        before_pixels = np.array(self.pixels, copy=True)
+        call_turn = self.turn + 1
+        if steps_since_level_start(self.events) == 0:
             self.turn += 1
             self._sync_history_file()
-            trace_path = self._write_state_artifacts(
+            self._append_action_history_record(
+                call_action="reset_level",
+                action_name="RESET_LEVEL",
+                action_data={},
+                source="reset_level(noop)",
+                tool_turn=call_turn,
+                step_in_call=1,
+                before_frame=before_frame,
+                before_pixels=before_pixels,
+                after_frame=self.frame,
+                after_pixels=np.array(self.pixels, copy=True),
+            )
+            trace_path = write_state_artifacts(
+                self,
                 action_label="reset_level(noop)",
                 script_output="",
                 error="",
@@ -432,8 +415,21 @@ class BaseReplSession:
         self.events.append({"kind": "reset"})
         self.turn += 1
         self._sync_history_file()
+        self._append_action_history_record(
+            call_action="reset_level",
+            action_name="RESET_LEVEL",
+            action_data={},
+            source="reset_level",
+            tool_turn=call_turn,
+            step_in_call=1,
+            before_frame=before_frame,
+            before_pixels=before_pixels,
+            after_frame=self.frame,
+            after_pixels=np.array(self.pixels, copy=True),
+        )
 
-        trace_path = self._write_state_artifacts(
+        trace_path = write_state_artifacts(
+            self,
             action_label="reset_level",
             script_output="",
             error="",

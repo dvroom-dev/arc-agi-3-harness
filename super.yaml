@@ -27,7 +27,7 @@ supervisor:
       - "Advise the agent to stick to the current mode guidance if they stray from it. If your advice is ignored, fork_new_conversation and carry over anything useful."
       - "Agent modes enable you to restrict and focus agent activity. Agents tend to expand on their directions and get into ratholes and tangents; mode selection and enforcement is your most powerful tool. Choose modes to promote well-reasoned, deliberate progress without jumping ahead or outside the prescribed process."
       - "On every new conversation, guide the agent with as much context and custom instructions as they can use productively in `mode_payload.user_message`."
-      - "In `solve_model`, enforce output completion, not analysis volume. Required completion evidence is: current-level solver branch in `play.py`, supporting helpers in `play_lib.py` as needed, `theory.md` updated for the level, and a simulator proof run result."
+      - "In `solve_model`, enforce output completion, not analysis volume. Required completion evidence is: current-level solver branch in `play.py`, supporting helpers in `play_lib.py` as needed, `theory.md` updated for the level, and a model proof run result."
       - "If required outputs are still missing and the agent is primarily running exploratory shell analysis, treat this as drift and first use append_message_and_continue with a narrow completion checklist."
       - "Do not fork solely because required files are still incomplete at a cadence review. Missing artifacts alone should trigger guidance first, not immediate fork."
       - "Only fork for missing-artifact drift after at least two explicit cadence guidance messages were issued in this same conversation and ignored, with concrete evidence of no net artifact progress between reviews."
@@ -100,22 +100,23 @@ agent:
           Maintain a local filesystem for a game with this structure:
           - ./game_<id>/
             - theory.md
-            - simulate.py
+            - model.py
+            - model_lib.py
             - play.py
             - play_lib.py
 
           # Tool policy
-          - Both the `arc_repl` tool and simulate.py present the same interface to a test environment, but arc_repl addresses the game and simulate.py addresses the model.
+          - Both the `arc_repl` tool and model.py present the same interface to a test environment, but arc_repl addresses the game and model.py addresses the model.
           - They are both stateful Python REPLs attached to stateful, persistent test environments. Code run in a REPL will act on whatever the current game state is, which may have been mutated by an earlier agent.
           - In this run, you are the only actor mutating the game state and local files. Do not assume hidden concurrent edits.
-          - Use shell to run `arc_repl` or `simulate.py` (`status`, `exec`, `exec_file`, `reset_level`). simulate.py also has a set_level command.
+          - Use shell to run `arc_repl` or `model.py` (`status`, `exec`, `exec_file`, `reset_level`). model.py also has a set_level command.
           - `exec` script is stdin heredoc Python. `exec_file` loads code from a file but otherwise acts identically to `exec`.
           - `arc_repl status`/`reset_level` return JSON; `arc_repl exec` prints only what your script prints.
           - `env` in the REPL contains the current environment state.
           - `get_state()` exposes the grid as `grid_hex_rows` (do not assume a `grid` key).
           - Print `env.action_space` to see all legal actions for the current game. Reading `env.action_space` is metadata inspection, not a game action.
           - Action reference (use `GameAction.<NAME>` names in scripts):
-          - `GameAction.RESET` (0): DO NOT USE, and do not call env.reset(), use `( arc_repl | simulate.py ) reset_level` instead for safety.
+          - `GameAction.RESET` (0): DO NOT USE, and do not call env.reset(), use `( arc_repl | model.py ) reset_level` instead for safety.
           - `GameAction.ACTION1` (1): simple action, semantically mapped to up.
           - `GameAction.ACTION2` (2): simple action, semantically mapped to down.
           - `GameAction.ACTION3` (3): simple action, semantically mapped to left.
@@ -124,9 +125,15 @@ agent:
           - `GameAction.ACTION6` (6): complex coordinate action; call as `env.step(GameAction.ACTION6, data={"x": X, "y": Y})` with `x,y` in `0..63`.
           - `GameAction.ACTION7` (7): simple action mapped to undo/backtrack.
           - Available actions are game-specific; always consult `get_state()["available_actions"]`.
-          - REPL globals include `env`, `current`, `GameAction`/`GA`, `diff(...)`, `get_state()`, and helpers from `play_lib.py`.
-          - Do not import `play_lib` inside REPL scripts (`from play_lib import ...`); helpers from `play_lib.py` are already injected into REPL globals.
-          - Example (direct helper use in `( arc_repl | simulate.py ) exec`):
+          - `arc_repl` exec globals include `env`, `current`, `GameAction`/`GA`, `diff(...)`, `get_state()`, and helpers from `play_lib.py`.
+          - `model.py` exec globals include the same plus helpers from `model_lib.py`.
+          - `arc_repl` exec globals also include persistent action-history helpers:
+            - `get_action_history(...)` returns game action records across all levels in this game for this run.
+            - `get_action_record(action_index)` returns one action record by index.
+            - Use `get_action_history(last=...)`, `get_action_history(level=...)`, or `get_action_history(action_name="ACTION6")` to filter.
+            - Each action record includes full `state_before`, full `state_after`, and `diff` for that action. For level transitions, `diff.suppressed_cross_level_diff=true` and you should inspect `state_before`/`state_after` directly.
+          - Do not import `play_lib` or `model_lib` inside REPL scripts; helper symbols are injected into exec globals.
+          - Example (direct helper use in `( arc_repl | model.py ) exec`):
             <example>
             arc_repl exec <<'PY'
             s = get_state()
@@ -139,9 +146,32 @@ agent:
                 for i, a in enumerate(actions[:10], 1):
                     r = env.step(a)
                     print({"step": i, "action": int(a), "state": r.state.name, "level": r.current_level})
+
+            # Inspect action history and per-action before/after/diff:
+            recent = get_action_history(last=3)
+            for rec in recent:
+                print({
+                    "action_index": rec["action_index"],
+                    "action_name": rec["action_name"],
+                    "level_before": rec["level_before"],
+                    "level_after": rec["level_after"],
+                    "changed_pixels": rec["diff"].get("changed_pixels"),
+                    "suppressed_cross_level_diff": rec["diff"].get("suppressed_cross_level_diff", False),
+                })
+
+            # Look up one action in detail:
+            first = get_action_record(1)
+            if first:
+                print({
+                    "before_state": first["state_before"]["state"],
+                    "after_state": first["state_after"]["state"],
+                    "before_grid_top_row": first["state_before"]["grid_hex_rows"][0],
+                    "after_grid_top_row": first["state_after"]["grid_hex_rows"][0],
+                })
             PY
             </example>
-          - Continuously build and refactor repeated logic and reusable abstractions in `play_lib.py` at every reasonable opportunity so your scripts stay short, composable, and easy to adapt.
+          - Model code organization: Write common model abstractions in `model_lib.py` and use them from model.py to keep model.py small and clean.
+          - Play code organization: Write common play abstractions in `play_lib.py` at every opportunity so play.py and your ad-hoc scripts stay short, composable, and easy to adapt.
           - Do not use brute force algorithms for game actions in either the simulated or real environment. The benchmark measures your reasoning ability in novel environments; brute force is cheating.
 
           ## theory.md
@@ -214,9 +244,10 @@ agent:
             - Reference pattern changed.
           </example>
 
-          ## simulate.py
-          Contains the code for the model, which simulates the game. simulate.py should always have the same interfaces or a superset as the arc_repl tool, both for invocation and for code submitted to it. At the start of a game the file will exist with a template that gives `simulate.py` the same interface as `arc_repl` (plus set_level), do not break these interfaces with changes to simulate.py.
-          One additional interface - `simulate.py` supports a level jump command: `set_level <n>` (or `set_level --game-id <id> <n>`). Use it to move the model directly to level `n` and reset to that level’s initial state. Get the current benchmark test level from `arc_repl status`. `set_level` is simulator-only (do not use it on the real game).
+          ## model.py and model_lib.py
+          model.py contains the executable model scaffold and command interface. model_lib.py is the model-side equivalent of play_lib.py: put reusable model abstractions and mechanics helpers there so model.py stays focused on orchestration.
+          model.py should always have the same interfaces or a superset as the arc_repl tool, both for invocation and for code submitted to it. At the start of a game the file will exist with a template that gives `model.py` the same interface as `arc_repl` (plus set_level), do not break these interfaces with changes to model.py.
+          One additional interface - `model.py` supports a level jump command: `set_level <n>` (or `set_level --game-id <id> <n>`). Use it to move the model directly to level `n` and reset to that level’s initial state. Get the current benchmark test level from `arc_repl status`. `set_level` is simulator-only (do not use it on the real game).
           It returns JSON:
           - success: `{ "ok": true, "action": "set_level", "current_level": n, ... }`
           - invalid level: `{ "ok": false, "action": "set_level", "error": { "type":
@@ -261,7 +292,7 @@ agent:
 
 modes:
   model:
-    description: "Build an accurate simulator model of the current benchmark level using minimal exploration in the real game."
+    description: "Build an accurate model of the current benchmark level using minimal exploration in the real game."
     start_when:
       - "A new level has been reached that wasn't previously solved."
       - "The model behavior doesn't match the game behavior."
@@ -280,7 +311,7 @@ modes:
       operation: append
       parts:
         - literal: |
-            Write an accurate simulation / model of the current game level in simulate.py while minimizing the number of actions you take to explore the real game. Your inputs are the game state and metadata and history and all local files in the ./game_<id>/ directory. Your outputs are limited / exploratory real game actions, edits to theory.md, simulate.py, play_lib.py, and assistant messages.
+            Write an accurate simulation / model of the current game level in model.py while minimizing the number of actions you take to explore the real game. Your inputs are the game state and metadata and history and all local files in the ./game_<id>/ directory. Your outputs are limited / exploratory real game actions, edits to theory.md, model.py, model_lib.py, and assistant messages.
 
             # Game state features
             Features are logical units in the game state you have to discover so you can replicate them in the model. Sometimes a feature is a contiguous block of a single color but often it has multiple colors and / or discontinuities. Features represent an element of game logic. Sometimes all instances of a feature will look and act the same, other times they may have unique configurations but belong to the same logical family. Features sometimes appear in the same position at every step on every level, but often have different positions across levels, or move in response to actions in a level.
@@ -288,9 +319,9 @@ modes:
             # Modeling process
            
             ## Main Loop
-            - Read the game state, history and metadata to learn game features and mechanics.
-            - Codify these learnings into the model code in simulate.py to replicate them. Describe them in theory.md.
-            - Take actions in the model and compare results to your expectations and observed game state artifacts, iterate on simulate.py to align the model with the game.
+            - Read the game state, action history (`get_action_history`), and metadata to learn game features and mechanics.
+            - Codify these learnings into model code in model.py and reusable helpers in model_lib.py. Describe them in theory.md.
+            - Take actions in the model and compare results to your expectations and observed game state artifacts, iterate on model.py/model_lib.py to align the model with the game.
             - Think about game theories and identify important unknowns to explore and questions to answer.
             - Run a minimal set of actions in the game to gather new evidence.
 
@@ -324,15 +355,15 @@ modes:
       operation: append
       requirements:
         - "When theory evidence is missing or incomplete / ambiguous, consider a wide variety of possibilities and write them all down."
-        - "Capture all new information gained, in theory.md, simulate.py, and in your assistant messages."
-        - "Verify all changes made to the simulator by running actions in the simulator."
+        - "Capture all new information gained, in theory.md, model.py/model_lib.py, and in your assistant messages."
+        - "Verify all changes made to the model by running actions in the model."
 
   solve_model:
-    description: "Attempt to solve the level using only the model / simulator."
+    description: "Attempt to solve the level using only the model."
     start_when:
       - "All known game behavior is mirrored in the model."
     stop_when:
-      - "A simulator proof run succeeds for the current level (`simulate.py set_level <n>; simulate.py exec_file play.py`), the current-level solver branch exists in play.py, and theory.md marks the level SOLVED with concise evidence."
+      - "A model proof run succeeds for the current level (`model.py set_level <n>; model.py exec_file play.py`), the current-level solver branch exists in play.py, and theory.md marks the level SOLVED with concise evidence."
       - "The model has bugs."
       - "The model is not behaving like the observed game behavior."
       - "Game over happens or the current level regresses to a previously SOLVED level; switch to recover mode."
@@ -340,22 +371,22 @@ modes:
       operation: append
       parts:
         - literal: |
-            Your goal is to solve the current benchmark test level in the model using simulate.py. Do not take any actions in the game, do not make any mutations in arc_repl. Do not use brute force algorithms to find solutions, you must reason through the solution.
+            Your goal is to solve the current benchmark test level in the model using model.py. Do not take any actions in the game, do not make any mutations in arc_repl. Do not use brute force algorithms to find solutions, you must reason through the solution.
     user_message:
       operation: append
       parts:
         - literal: |
-            Solve the current benchmark test level in the model. When you are finished, this command should solve the current benchmark test level in the model: `simulate.py set_level <n>; simulate.py exec_file play.py`. There is no cost to taking actions in the model but you must use causal reasoning based on the known game rules to solve the model, never use brute force state / action searches like BFS.
+            Solve the current benchmark test level in the model. When you are finished, this command should solve the current benchmark test level in the model: `model.py set_level <n>; model.py exec_file play.py`. There is no cost to taking actions in the model but you must use causal reasoning based on the known game rules to solve the model, never use brute force state / action searches like BFS.
             Use play.py and play_lib.py to iterate on a full solution from the start to the end of the level. play.py should have high level code that leverages custom abstractions you maintain in play_lib.py to address lower level details like identification of features and action planning.
-            Developing this model solution should be easy since you can read simulate.py. Your inputs are the model state and all local files in the ./game_<id>/ directory. Your outputs are changes to play.py and play_lib.py and assistant messages.
-            Do not execute real game actions or edit simulate.py.
+            Developing this model solution should be easy since you can read model.py. Your inputs are the model state and all local files in the ./game_<id>/ directory. Your outputs are changes to play.py and play_lib.py and assistant messages.
+            Do not execute real game actions or edit model.py.
             Because this mode does not execute real-game actions, do not claim new game theories from model results.
             Optimize the solution in play.py to minimize actions taken in the real game.
             Move complex logic to play_lib.py so play.py has clean high-level function calls.
             In this mode, prioritize completion artifacts over additional analysis:
             1) Ensure play.py has a solver branch for the current level.
             2) Update play_lib.py with reusable helper logic needed by that branch.
-            3) Run a proof command: `simulate.py set_level <n>; simulate.py exec_file play.py`.
+            3) Run a proof command: `model.py set_level <n>; model.py exec_file play.py`.
             4) If proof succeeds, update theory.md Level status to SOLVED with concise causal evidence.
             If proof fails, patch play.py/play_lib.py and rerun proof. Do not stay in analysis loops.
             Do not run more than two exploratory shell commands in a row without either editing play.py/play_lib.py or executing the proof command.
@@ -368,11 +399,11 @@ modes:
       operation: append
       requirements:
         - "Update play.py and play_lib.py with a full, optimized solution if the model level is solved."
-        - "Every solve_model turn must produce progress evidence in required artifacts (play.py / play_lib.py / theory.md) and/or a simulator proof-run result."
-        - "When simulator proof succeeds for the current level, mark that level SOLVED in theory.md with concise evidence before yielding."
+        - "Every solve_model turn must produce progress evidence in required artifacts (play.py / play_lib.py / theory.md) and/or a model proof-run result."
+        - "When model proof succeeds for the current level, mark that level SOLVED in theory.md with concise evidence before yielding."
       violations:
         - Any kind of brute force search across states using actions.
-        - Editing simulate.py
+        - Editing model.py
         - Executing real game actions.
         - "Repeated exploratory shell analysis in solve_model without producing required artifact updates."
 

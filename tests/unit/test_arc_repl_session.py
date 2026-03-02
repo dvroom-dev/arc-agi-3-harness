@@ -172,3 +172,39 @@ def test_repl_main_status_via_send_request(monkeypatch, capsys) -> None:
     payload = json.loads(out)
     assert payload["ok"] is True
     assert payload["repl"]["session_created"] is True
+
+
+def test_repl_action_history_contains_before_after_and_diff(monkeypatch, tmp_path: Path) -> None:
+    _patch_session_dependencies(monkeypatch, tmp_path)
+    session = arc_repl.ReplSession(
+        cwd=tmp_path,
+        conversation_id="conv-1",
+        requested_game_id="ls20",
+    )
+
+    _ = session.do_exec(
+        "ls20",
+        "env.step(GameAction.ACTION1)\nenv.step(GameAction.ACTION2)\n",
+        session_created=False,
+    )
+
+    history_records = session.get_action_history()
+    assert len(history_records) >= 1
+    first = history_records[0]
+    assert first["action_index"] == 1
+    assert first["action_name"].startswith("ACTION")
+    assert "state_before" in first
+    assert "state_after" in first
+    assert "diff" in first
+    assert isinstance(first["state_before"]["grid_hex_rows"], list)
+    assert isinstance(first["state_after"]["grid_hex_rows"], list)
+
+    from_lookup = session.get_action_record(1)
+    assert from_lookup is not None
+    assert from_lookup["action_index"] == 1
+
+    history_file = tmp_path / "arc" / "action-history.json"
+    assert history_file.exists()
+    payload = json.loads(history_file.read_text())
+    assert isinstance(payload.get("records"), list)
+    assert len(payload["records"]) >= 1
