@@ -16,14 +16,11 @@ def run_daemon(
     conversation_id: str,
     requested_game_id: str,
     socket_path: Path,
-    socket_endpoint: tuple[str, int],
-    socket_family: str,
     meta_path: Path,
     make_session: Callable[[], object],
     append_lifecycle_event: Callable[..., None],
     error_payload: Callable[..., dict],
     schema_version: str,
-    listener_factory,
 ) -> int:
     # Detach daemon from terminal interrupt/hangup signals so agent/harness
     # keyboard interrupts do not silently kill session state mid-run.
@@ -50,7 +47,7 @@ def run_daemon(
             {
                 "conversation_id": conversation_id,
                 "game_id": session.game_id,
-                "socket": f"tcp://{socket_endpoint[0]}:{socket_endpoint[1]}",
+                "transport": "file",
                 "socket_path": str(socket_path),
                 "pid": os.getpid(),
                 "started_at_unix": started_at_unix,
@@ -66,60 +63,87 @@ def run_daemon(
         "daemon_ready",
         daemon_pid=int(os.getpid()),
         game_id=str(session.game_id),
-        socket=f"tcp://{socket_endpoint[0]}:{socket_endpoint[1]}",
+        transport="file",
         socket_path=str(socket_path),
     )
 
-    listener = listener_factory(socket_endpoint, family=socket_family)
-    socket_path.write_text(f"{socket_endpoint[0]}:{socket_endpoint[1]}\n")
+    ipc_dir = meta_path.parent / "ipc"
+    requests_dir = ipc_dir / "requests"
+    responses_dir = ipc_dir / "responses"
+    requests_dir.mkdir(parents=True, exist_ok=True)
+    responses_dir.mkdir(parents=True, exist_ok=True)
+    socket_path.write_text("file-ipc\n", encoding="utf-8")
+
+    def _send_response(request_file: Path, response_payload: dict) -> None:
+        response_file = responses_dir / request_file.name
+        tmp_file = response_file.with_suffix(response_file.suffix + ".tmp")
+        tmp_file.write_text(json.dumps(response_payload), encoding="utf-8")
+        tmp_file.replace(response_file)
+
+    def _handle_request(request: dict) -> tuple[dict, bool]:
+        action = str(request.get("action", "")).strip()
+        req_game_id = str(request.get("game_id", "") or "").strip()
+
+        if action == "ping":
+            return {"ok": True, "action": "ping"}, False
+        if action == "status":
+            return session.do_status(req_game_id, session_created=False), False
+        if action == "reset_level":
+            return session.do_reset_level(req_game_id, session_created=False), False
+        if action == "exec":
+            script = str(request.get("script", "") or "")
+            source = str(request.get("source", "") or "").strip() or None
+            script_path = str(request.get("script_path", "") or "").strip() or None
+            return (
+                session.do_exec(
+                    req_game_id,
+                    script,
+                    session_created=False,
+                    source=source,
+                    script_path=script_path,
+                ),
+                False,
+            )
+        if action == "shutdown":
+            return (
+                {
+                    "schema_version": schema_version,
+                    "ok": True,
+                    "action": "shutdown",
+                    "conversation_id": conversation_id,
+                    "game_id": session.game_id,
+                },
+                True,
+            )
+        return (
+            error_payload(
+                action=action,
+                requested_game_id=req_game_id,
+                message="unknown action. expected: status|exec|reset_level|shutdown",
+                error_type="unknown_action",
+            ),
+            False,
+        )
+
     should_stop = False
     try:
         while not should_stop:
-            conn = listener.accept()
-            request: dict | None = None
+            request_file: Path | None = None
             try:
-                request = conn.recv()
+                request_candidates = sorted(requests_dir.glob("*.json"))
+                if not request_candidates:
+                    time.sleep(0.05)
+                    continue
+                request_file = request_candidates[0]
+                request = json.loads(request_file.read_text(encoding="utf-8"))
                 if not isinstance(request, dict):
-                    conn.send({"ok": False, "error": "request must be an object"})
-                    continue
-                action = str(request.get("action", "")).strip()
-                req_game_id = str(request.get("game_id", "") or "").strip()
-
-                if action == "ping":
-                    conn.send({"ok": True, "action": "ping"})
-                    continue
-                if action == "status":
-                    result = session.do_status(req_game_id, session_created=False)
-                elif action == "reset_level":
-                    result = session.do_reset_level(req_game_id, session_created=False)
-                elif action == "exec":
-                    script = str(request.get("script", "") or "")
-                    source = str(request.get("source", "") or "").strip() or None
-                    script_path = str(request.get("script_path", "") or "").strip() or None
-                    result = session.do_exec(
-                        req_game_id,
-                        script,
-                        session_created=False,
-                        source=source,
-                        script_path=script_path,
+                    _send_response(
+                        request_file,
+                        {"schema_version": schema_version, "ok": False, "error": "request must be an object"},
                     )
-                elif action == "shutdown":
-                    result = {
-                        "schema_version": schema_version,
-                        "ok": True,
-                        "action": "shutdown",
-                        "conversation_id": conversation_id,
-                        "game_id": session.game_id,
-                    }
-                    should_stop = True
-                else:
-                    result = error_payload(
-                        action=action,
-                        requested_game_id=req_game_id,
-                        message="unknown action. expected: status|exec|reset_level|shutdown",
-                        error_type="unknown_action",
-                    )
-                conn.send(result)
+                    continue
+                result, should_stop = _handle_request(request)
+                _send_response(request_file, result)
             except Exception as exc:
                 traceback_text = traceback.format_exc()
                 append_lifecycle_event(
@@ -127,24 +151,27 @@ def run_daemon(
                     conversation_id,
                     "request_exception",
                     daemon_pid=int(os.getpid()),
-                    request_action=str(request.get("action", "") if isinstance(request, dict) else ""),
+                    request_action="",
                     error=str(exc),
                 )
                 print(traceback_text, file=sys.stderr, flush=True)
-                conn.send(
-                    {
-                        "schema_version": schema_version,
-                        "ok": False,
-                        "error": {
-                            "type": "daemon_exception",
-                            "message": str(exc),
-                            "details": traceback_text,
+                if request_file is not None and request_file.exists():
+                    _send_response(
+                        request_file,
+                        {
+                            "schema_version": schema_version,
+                            "ok": False,
+                            "error": {
+                                "type": "daemon_exception",
+                                "message": str(exc),
+                                "details": traceback_text,
+                            },
                         },
-                    }
-                )
+                    )
             finally:
                 try:
-                    conn.close()
+                    if request_file is not None and request_file.exists():
+                        request_file.unlink()
                 except Exception:
                     pass
     finally:
@@ -154,7 +181,7 @@ def run_daemon(
                     {
                         "conversation_id": conversation_id,
                         "game_id": session.game_id,
-                        "socket": f"tcp://{socket_endpoint[0]}:{socket_endpoint[1]}",
+                        "transport": "file",
                         "socket_path": str(socket_path),
                         "pid": os.getpid(),
                         "started_at_unix": started_at_unix,
@@ -174,10 +201,6 @@ def run_daemon(
             daemon_pid=int(os.getpid()),
             graceful=bool(should_stop),
         )
-        try:
-            listener.close()
-        except Exception:
-            pass
         try:
             if socket_path.exists():
                 socket_path.unlink()

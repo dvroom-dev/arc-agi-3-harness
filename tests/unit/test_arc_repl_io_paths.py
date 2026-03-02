@@ -16,39 +16,28 @@ def test_wait_for_daemon_success(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(arc_repl, "_socket_path", lambda cwd, cid: sock)
     monkeypatch.setattr(arc_repl.time, "sleep", lambda _t: None)
 
-    class Conn:
-        def send(self, msg):
-            return None
-
-        def recv(self):
-            return {"ok": True}
-
-        def close(self):
-            return None
-
     calls = {"n": 0}
-
-    def fake_client(path, family=None):
+    def fake_send(*_a, **_k):
         calls["n"] += 1
         if calls["n"] == 1:
             raise RuntimeError("not ready")
-        return Conn()
+        return {"ok": True, "action": "ping"}
 
     sock.write_text("x")
-    monkeypatch.setattr(arc_repl.multiprocessing.connection, "Client", fake_client)
+    monkeypatch.setattr(arc_repl, "_send_ipc_request", fake_send)
     arc_repl._wait_for_daemon(tmp_path, "c1", timeout_s=0.2)
 
 
-def test_wait_for_daemon_permission_error_raises(monkeypatch, tmp_path: Path) -> None:
+def test_wait_for_daemon_permission_error_times_out(monkeypatch, tmp_path: Path) -> None:
     sock = tmp_path / "sock"
     sock.write_text("x")
     monkeypatch.setattr(arc_repl, "_socket_path", lambda cwd, cid: sock)
     monkeypatch.setattr(
-        arc_repl.multiprocessing.connection,
-        "Client",
+        arc_repl,
+        "_send_ipc_request",
         lambda *a, **k: (_ for _ in ()).throw(PermissionError(1, "Operation not permitted")),
     )
-    with pytest.raises(PermissionError):
+    with pytest.raises(RuntimeError):
         arc_repl._wait_for_daemon(tmp_path, "c1", timeout_s=0.2)
 
 
@@ -58,28 +47,14 @@ def test_send_request_spawns_when_first_send_fails(monkeypatch, tmp_path: Path) 
     monkeypatch.setattr(arc_repl, "_wait_for_daemon", lambda *a, **k: None)
     monkeypatch.setattr(arc_repl, "_socket_path", lambda cwd, cid: tmp_path / "sock")
 
-    class Conn:
-        def __init__(self):
-            self.calls = 0
-
-        def send(self, request):
-            self.calls += 1
-
-        def recv(self):
-            return {"ok": True, "action": "status"}
-
-        def close(self):
-            return None
-
     state = {"n": 0}
-
-    def fake_client(path, family=None):
+    def fake_send(*_a, **_k):
         state["n"] += 1
         if state["n"] == 1:
             raise FileNotFoundError("no socket yet")
-        return Conn()
+        return {"ok": True, "action": "status"}
 
-    monkeypatch.setattr(arc_repl.multiprocessing.connection, "Client", fake_client)
+    monkeypatch.setattr(arc_repl, "_send_ipc_request", fake_send)
     result, created = arc_repl._send_request(tmp_path, "c1", {"action": "status"})
     assert result["ok"] is True
     assert created is True

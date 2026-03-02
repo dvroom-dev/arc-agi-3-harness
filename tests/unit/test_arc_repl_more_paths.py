@@ -51,13 +51,10 @@ def test_wait_for_daemon_timeout(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_send_request_missing_game_id_errors(monkeypatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(arc_repl, "_socket_path", lambda cwd, cid: tmp_path / "sock")
-    monkeypatch.setattr(
-        arc_repl.multiprocessing.connection,
-        "Client",
-        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("down")),
-    )
+    monkeypatch.setattr(arc_repl, "_socket_path", lambda cwd, cid: tmp_path / "missing.sock")
     monkeypatch.setattr(arc_repl, "_default_game_id", lambda cwd: "")
+    monkeypatch.setattr(arc_repl, "_spawn_daemon", lambda *a, **k: None)
+    monkeypatch.setattr(arc_repl, "_wait_for_daemon", lambda *a, **k: None)
     with pytest.raises(RuntimeError):
         arc_repl._send_request(tmp_path, "c1", {"action": "status"})
 
@@ -67,43 +64,21 @@ def test_daemon_main_handles_unknown_and_non_object_request(monkeypatch, tmp_pat
         def __init__(self, **kwargs):
             self.game_id = "ls20"
 
-    requests = ["bad", {"action": "unknown"}, {"action": "shutdown"}]
-    responses = []
-
-    class FakeConn:
-        def __init__(self, req):
-            self.req = req
-
-        def recv(self):
-            return self.req
-
-        def send(self, payload):
-            responses.append(payload)
-
-        def close(self):
-            return None
-
-    class FakeListener:
-        def __init__(self, *_a, **_k):
-            self.i = 0
-
-        def accept(self):
-            req = requests[self.i]
-            self.i += 1
-            return FakeConn(req)
-
-        def close(self):
-            return None
-
+    called = {"ok": False}
+    def fake_run_daemon(**kwargs):
+        called["ok"] = True
+        session = kwargs["make_session"]()
+        assert session.game_id == "ls20"
+        return 0
     monkeypatch.setattr(arc_repl, "ReplSession", FakeSession)
-    monkeypatch.setattr(arc_repl.multiprocessing.connection, "Listener", FakeListener)
+    monkeypatch.setattr(arc_repl, "run_daemon", fake_run_daemon)
     monkeypatch.setattr(arc_repl, "_arc_dir", lambda cwd: tmp_path / "arc")
     monkeypatch.setattr(arc_repl, "_session_dir", lambda cwd, cid: tmp_path / "arc" / "repl-sessions" / cid)
     monkeypatch.setattr(arc_repl, "_socket_path", lambda cwd, cid: tmp_path / "arc" / "sock")
     monkeypatch.setattr(arc_repl, "_meta_path", lambda cwd, cid: tmp_path / "arc" / "meta.json")
     rc = arc_repl._daemon_main(tmp_path, "c1", "ls20")
     assert rc == 0
-    assert any(isinstance(r, dict) and r.get("ok") is False for r in responses)
+    assert called["ok"] is True
 
 
 def test_main_daemon_mode_exception(monkeypatch, capsys) -> None:

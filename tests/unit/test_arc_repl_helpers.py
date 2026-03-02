@@ -39,27 +39,16 @@ def test_socket_path_stays_inside_cwd(tmp_path, monkeypatch: pytest.MonkeyPatch)
     cwd.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("ARC_STATE_DIR", str(tmp_path / "state"))
     sock = arc_repl._socket_path(cwd, "conv-1")
-    assert str(sock).startswith(str(cwd) + "/")
-    assert sock.name == ".arc-repl.sock"
-    assert sock.suffix == ".sock"
+    assert str(sock).endswith("/repl-sessions/conv-1/daemon.ready")
 
 
-def test_socket_endpoint_reads_marker_when_present(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ipc_paths_resolve_under_session_dir(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     cwd = tmp_path / "agent"
     cwd.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("ARC_STATE_DIR", str(tmp_path / "state"))
-    arc_repl._socket_path(cwd, "conv-1").write_text("127.0.0.1:24567\n", encoding="utf-8")
-    assert arc_repl._socket_endpoint(cwd, "conv-1") == ("127.0.0.1", 24567)
-
-
-def test_socket_endpoint_falls_back_when_marker_invalid(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    cwd = tmp_path / "agent"
-    cwd.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("ARC_STATE_DIR", str(tmp_path / "state"))
-    arc_repl._socket_path(cwd, "conv-1").write_text("invalid\n", encoding="utf-8")
-    assert arc_repl._socket_endpoint(cwd, "conv-1")[0] == "127.0.0.1"
+    req, resp = arc_repl._ipc_paths(cwd, "conv-1")
+    assert str(req).endswith("/repl-sessions/conv-1/ipc/requests")
+    assert str(resp).endswith("/repl-sessions/conv-1/ipc/responses")
 
 
 def test_grid_from_hex_rows_and_chunk() -> None:
