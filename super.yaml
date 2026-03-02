@@ -12,7 +12,6 @@ supervisor:
     Stop only when one of these is true:
     1) All levels of the game are complete
     2) The run is irrecoverably blocked by errors.
-  cadence_time_ms: 0
   review_timeout_ms: 300000
   disable_synthetic_check_supervisor_on_rule_failure: false
   context_carryover_limit_bytes: 98304
