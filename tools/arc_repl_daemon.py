@@ -16,6 +16,8 @@ def run_daemon(
     conversation_id: str,
     requested_game_id: str,
     socket_path: Path,
+    socket_endpoint: tuple[str, int],
+    socket_family: str,
     meta_path: Path,
     make_session: Callable[[], object],
     append_lifecycle_event: Callable[..., None],
@@ -48,7 +50,8 @@ def run_daemon(
             {
                 "conversation_id": conversation_id,
                 "game_id": session.game_id,
-                "socket": str(socket_path),
+                "socket": f"tcp://{socket_endpoint[0]}:{socket_endpoint[1]}",
+                "socket_path": str(socket_path),
                 "pid": os.getpid(),
                 "started_at_unix": started_at_unix,
                 "status": "running",
@@ -63,10 +66,12 @@ def run_daemon(
         "daemon_ready",
         daemon_pid=int(os.getpid()),
         game_id=str(session.game_id),
-        socket=str(socket_path),
+        socket=f"tcp://{socket_endpoint[0]}:{socket_endpoint[1]}",
+        socket_path=str(socket_path),
     )
 
-    listener = listener_factory(str(socket_path), family="AF_UNIX")
+    listener = listener_factory(socket_endpoint, family=socket_family)
+    socket_path.write_text(f"{socket_endpoint[0]}:{socket_endpoint[1]}\n")
     should_stop = False
     try:
         while not should_stop:
@@ -149,7 +154,8 @@ def run_daemon(
                     {
                         "conversation_id": conversation_id,
                         "game_id": session.game_id,
-                        "socket": str(socket_path),
+                        "socket": f"tcp://{socket_endpoint[0]}:{socket_endpoint[1]}",
+                        "socket_path": str(socket_path),
                         "pid": os.getpid(),
                         "started_at_unix": started_at_unix,
                         "stopped_at_unix": time.time(),

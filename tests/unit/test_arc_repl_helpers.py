@@ -34,6 +34,34 @@ def test_same_game_lineage() -> None:
     assert not arc_repl._same_game_lineage("ls20", "ft09")
 
 
+def test_socket_path_stays_inside_cwd(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cwd = tmp_path / "agent"
+    cwd.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("ARC_STATE_DIR", str(tmp_path / "state"))
+    sock = arc_repl._socket_path(cwd, "conv-1")
+    assert str(sock).startswith(str(cwd) + "/")
+    assert sock.name == ".arc-repl.sock"
+    assert sock.suffix == ".sock"
+
+
+def test_socket_endpoint_reads_marker_when_present(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cwd = tmp_path / "agent"
+    cwd.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("ARC_STATE_DIR", str(tmp_path / "state"))
+    arc_repl._socket_path(cwd, "conv-1").write_text("127.0.0.1:24567\n", encoding="utf-8")
+    assert arc_repl._socket_endpoint(cwd, "conv-1") == ("127.0.0.1", 24567)
+
+
+def test_socket_endpoint_falls_back_when_marker_invalid(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cwd = tmp_path / "agent"
+    cwd.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("ARC_STATE_DIR", str(tmp_path / "state"))
+    arc_repl._socket_path(cwd, "conv-1").write_text("invalid\n", encoding="utf-8")
+    assert arc_repl._socket_endpoint(cwd, "conv-1")[0] == "127.0.0.1"
+
+
 def test_grid_from_hex_rows_and_chunk() -> None:
     grid = arc_repl._grid_from_hex_rows(["0A", "F1"])
     assert grid.shape == (2, 2)

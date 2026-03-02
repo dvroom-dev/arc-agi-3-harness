@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Stateful ARC Python REPL tool for super shell usage."""
 from __future__ import annotations
-
 import argparse
 import json
 import multiprocessing.connection
@@ -13,7 +12,6 @@ import time
 import traceback
 from hashlib import sha1
 from pathlib import Path
-
 from arc_action_diffs import (
     _change_bbox,
     _iter_cell_changes,
@@ -65,10 +63,8 @@ SOCKET_WAIT_TIMEOUT_S = 90.0
 
 def _load_history(cwd: Path, game_id: str) -> dict:
     return _load_history_impl(cwd, game_id, _make_id_candidates)
-
 def _lifecycle_path(cwd: Path, conversation_id: str) -> Path:
     return _session_dir(cwd, conversation_id) / "daemon.lifecycle.jsonl"
-
 def _append_lifecycle_event(cwd: Path, conversation_id: str, event: str, **fields: object) -> None:
     try:
         session_dir = _session_dir(cwd, conversation_id)
@@ -82,7 +78,6 @@ def _append_lifecycle_event(cwd: Path, conversation_id: str, event: str, **field
             f.write(json.dumps(payload, ensure_ascii=True) + "\n")
     except Exception:
         pass
-
 def _error(*, action: str, requested_game_id: str, message: str, error_type: str, details: str = "") -> dict:
     payload = _error_payload(
         action=action,
@@ -93,7 +88,6 @@ def _error(*, action: str, requested_game_id: str, message: str, error_type: str
     )
     payload["schema_version"] = SCHEMA_VERSION
     return payload
-
 def _read_args() -> dict:
     raw = sys.stdin.read().strip()
     if not raw:
@@ -105,19 +99,16 @@ def _read_args() -> dict:
     if not isinstance(parsed, dict):
         return {"_error": "JSON args must be an object"}
     return parsed
-
 def _emit_json(payload: dict) -> None:
     sys.stdout.write(json.dumps(payload, indent=2))
     if not sys.stdout.isatty():
         sys.stdout.write("\n")
-
 def _conversation_id() -> str:
     raw = str(os.getenv("ARC_CONVERSATION_ID", "") or "").strip()
     if not raw:
         raw = "default"
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._")
     return safe[:120] or "default"
-
 def _session_key() -> str:
     raw = str(os.getenv("ARC_REPL_SESSION_KEY", "") or "").strip()
     if raw:
@@ -127,24 +118,32 @@ def _session_key() -> str:
 
 def _session_dir(cwd: Path, conversation_id: str) -> Path:
     return _arc_dir(cwd) / "repl-sessions" / conversation_id
-
 def _socket_path(cwd: Path, conversation_id: str) -> Path:
-    key = f"{_arc_dir(cwd)}::{conversation_id}"
-    digest = sha1(key.encode("utf-8")).hexdigest()[:20]
-    return Path("/tmp") / f"arc-repl-{digest}.sock"
+    # Keep daemon IPC inside cwd so sandboxed command tools can access it.
+    _ = conversation_id
+    return cwd / ".arc-repl.sock"
+def _socket_endpoint(cwd: Path, conversation_id: str) -> tuple[str, int]:
+    socket_path = _socket_path(cwd, conversation_id)
+    try:
+        raw = socket_path.read_text(encoding="utf-8").strip()
+        host, port_raw = raw.rsplit(":", 1)
+        port = int(port_raw)
+        if host and 0 < port < 65536:
+            return (host, port)
+    except Exception:
+        pass
+    key = f"{cwd.resolve()}::{conversation_id}"
+    digest = int(sha1(key.encode("utf-8")).hexdigest()[:8], 16)
+    return ("127.0.0.1", 20000 + (digest % 20000))
 
 def _pid_path(cwd: Path, conversation_id: str) -> Path:
     return _session_dir(cwd, conversation_id) / "daemon.pid"
-
 def _meta_path(cwd: Path, conversation_id: str) -> Path:
     return _session_dir(cwd, conversation_id) / "session.json"
-
 def _daemon_log_path(cwd: Path, conversation_id: str) -> Path:
     return _session_dir(cwd, conversation_id) / "daemon.log"
-
 def _same_game_lineage(existing_game_id: str, requested_game_id: str) -> bool:
     return _same_game_lineage_impl(existing_game_id, requested_game_id, _make_id_candidates)
-
 class ReplSession(BaseReplSession):
     def __init__(self, *, cwd: Path, conversation_id: str, requested_game_id: str) -> None:
         super().__init__(
@@ -153,7 +152,6 @@ class ReplSession(BaseReplSession):
             requested_game_id=requested_game_id,
             deps=sys.modules[__name__],
         )
-
 def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
     session_dir = _session_dir(cwd, conversation_id)
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -164,7 +162,7 @@ def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
             socket_path.unlink()
         except Exception:
             pass
-
+    socket_endpoint = _socket_endpoint(cwd, conversation_id)
     log_path = _daemon_log_path(cwd, conversation_id)
     with log_path.open("a", encoding="utf-8") as logf:
         proc = subprocess.Popen(
@@ -194,17 +192,18 @@ def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
         daemon_pid=int(proc.pid),
         game_id=str(game_id),
         parent_pid=int(os.getpid()),
-        socket=str(socket_path),
+        socket=f"tcp://{socket_endpoint[0]}:{socket_endpoint[1]}",
+        socket_path=str(socket_path),
         log_file=str(log_path),
     )
-
 def _wait_for_daemon(cwd: Path, conversation_id: str, timeout_s: float = SOCKET_WAIT_TIMEOUT_S) -> None:
     socket_path = _socket_path(cwd, conversation_id)
+    socket_endpoint = _socket_endpoint(cwd, conversation_id)
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         if socket_path.exists():
             try:
-                conn = multiprocessing.connection.Client(str(socket_path), family="AF_UNIX")
+                conn = multiprocessing.connection.Client(socket_endpoint, family="AF_INET")
             except Exception as exc:
                 if is_socket_permission_error(exc):
                     raise
@@ -228,12 +227,13 @@ def _wait_for_daemon(cwd: Path, conversation_id: str, timeout_s: float = SOCKET_
         conversation_id,
         "wait_timeout",
         timeout_s=float(timeout_s),
-        socket=str(socket_path),
+        socket=f"tcp://{socket_endpoint[0]}:{socket_endpoint[1]}",
+        socket_path=str(socket_path),
     )
     raise RuntimeError(f"arc_repl daemon did not start within {timeout_s}s")
-
 def _send_request(cwd: Path, conversation_id: str, request: dict) -> tuple[dict, bool]:
     socket_path = _socket_path(cwd, conversation_id)
+    socket_endpoint = _socket_endpoint(cwd, conversation_id)
     session_created = False
     request_action = str(request.get("action", "") or "").strip().lower()
     paths_resolved = True
@@ -260,9 +260,8 @@ def _send_request(cwd: Path, conversation_id: str, request: dict) -> tuple[dict,
             log_file=log_file,
         )
     )
-
     def _try_send() -> dict:
-        conn = multiprocessing.connection.Client(str(socket_path), family="AF_UNIX")
+        conn = multiprocessing.connection.Client(socket_endpoint, family="AF_INET")
         try:
             conn.send(request)
             resp = conn.recv()
@@ -294,7 +293,6 @@ def _send_request(cwd: Path, conversation_id: str, request: dict) -> tuple[dict,
         if exc is None:
             raise RuntimeError(message)
         raise RuntimeError(message) from exc
-
     def _spawn_for_request(reason: str) -> None:
         nonlocal session_created
         requested_game_id = str(request.get("game_id", "") or "").strip() or _default_game_id(cwd)
@@ -349,6 +347,8 @@ def _daemon_main(cwd: Path, conversation_id: str, requested_game_id: str) -> int
         conversation_id=conversation_id,
         requested_game_id=requested_game_id,
         socket_path=socket_path,
+        socket_endpoint=_socket_endpoint(cwd, conversation_id),
+        socket_family="AF_INET",
         meta_path=_meta_path(cwd, conversation_id),
         make_session=lambda: ReplSession(
             cwd=cwd,
