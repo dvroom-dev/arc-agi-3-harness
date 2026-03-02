@@ -1,8 +1,8 @@
-"""Level solver entrypoint shared by simulator and real game.
+"""Level solver entrypoint shared by model and real game.
 
 Run order for solve mode:
-1) Dry-run in simulator:
-   ./game_<id>/simulate.py exec_file ./game_<id>/play.py
+1) Dry-run in model:
+   ./game_<id>/model.py exec_file ./game_<id>/play.py
 2) Real execution:
    arc_repl exec_file ./game_<id>/play.py
 
@@ -12,9 +12,9 @@ This file should stay thin: dispatch by level and call helpers from play_lib.py.
 import json
 
 
-def _is_simulator(state: dict) -> bool:
+def _is_model(state: dict) -> bool:
     guid = str(state.get("guid", "") or "")
-    return guid.startswith("sim-") or guid == "sim-guid"
+    return guid.startswith("model-") or guid == "model-guid"
 
 
 def _run_actions(actions):
@@ -54,7 +54,7 @@ SOLVERS = {
 def main():
     state = get_state()
     level = int(state.get("current_level", 1))
-    mode = "simulate-dry-run" if _is_simulator(state) else "real"
+    mode = "model-dry-run" if _is_model(state) else "real"
     print(json.dumps({"mode": mode, "level": level, "state": state.get("state")}))
 
     solver = SOLVERS.get(level, solve_level_default)

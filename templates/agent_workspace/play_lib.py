@@ -1,8 +1,8 @@
 """Reusable helpers for play.py.
 
-This file is auto-loaded into arc_repl/simulate.py exec globals as `play_lib` helpers.
+This file is auto-loaded into arc_repl/model.py exec globals as `play_lib` helpers.
 Keep this focused on game-play abstractions (feature detection, planning, action builders),
-not simulator internals.
+not model internals.
 """
 
 

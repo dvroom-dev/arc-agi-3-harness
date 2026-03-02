@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local simulator scaffold with an arc_repl-compatible command surface.
+"""Local model scaffold with an arc_repl-compatible command surface.
 
 Supported commands:
   - status [--game-id GAME]
@@ -10,8 +10,8 @@ Supported commands:
   - shutdown
 
 Dry-run workflow:
-  - Run `./simulate.py exec_file ./play.py` before `arc_repl exec_file ./play.py`.
-  - Compare simulator output and real-game output to maintain parity.
+  - Run `./model.py exec_file ./play.py` before `arc_repl exec_file ./play.py`.
+  - Compare model output and real-game output to maintain parity.
 """
 
 from __future__ import annotations
@@ -27,6 +27,7 @@ from pathlib import Path
 
 import numpy as np
 from arcengine import GameAction
+import model_lib
 
 
 def _coerce_grid(value, fallback):
@@ -131,8 +132,19 @@ LEVEL_REGISTRY = {
 }
 
 
-class SimulatorEnv:
-    """Incremental simulator scaffold.
+def _load_helper_file(path: Path, globals_dict: dict, *, required: bool) -> None:
+    if not path.exists():
+        if required:
+            raise RuntimeError(f"required helper file missing: {path}")
+        return
+    source = path.read_text()
+    if not source.strip():
+        return
+    exec(compile(source, str(path), "exec"), globals_dict)
+
+
+class ModelEnv:
+    """Incremental model scaffold.
 
     Organize mechanics as:
     1) always-on base mechanics in `_apply_base_mechanics`
@@ -141,7 +153,7 @@ class SimulatorEnv:
 
     def __init__(self, game_id):
         self.game_id = str(game_id or "game")
-        self.guid = "sim-guid"
+        self.guid = "model-guid"
         self.state = "NOT_FINISHED"
         self.levels_completed = 0
         self.win_levels = 7
@@ -170,6 +182,11 @@ class SimulatorEnv:
         _ = action, data, reasoning
         self.turn += 1
         self.turn_budget -= 1
+        # model_lib.py is the reusable model abstraction layer.
+        if hasattr(model_lib, "apply_shared_model_mechanics"):
+            model_lib.apply_shared_model_mechanics(
+                self, action, data=data, reasoning=reasoning
+            )
 
     def _apply_level_1(self, action, data=None, reasoning=None):
         """Level 1-only mechanics.
@@ -207,7 +224,8 @@ class SimulatorEnv:
 
 class Session:
     def __init__(self, game_id):
-        self.env = SimulatorEnv(game_id)
+        self.game_dir = Path(__file__).resolve().parent
+        self.env = ModelEnv(game_id)
         self.current = self.env
         self.frame = self.env.reset()
         self.grid = np.array(self.frame.frame[-1], dtype=np.int8, copy=True)
@@ -221,6 +239,8 @@ class Session:
             "get_state": self.get_state,
             "diff": self.diff,
         }
+        _load_helper_file(self.game_dir / "play_lib.py", self.globals, required=False)
+        _load_helper_file(self.game_dir / "model_lib.py", self.globals, required=True)
 
     def get_state(self):
         frame = self.frame
@@ -288,7 +308,7 @@ class Session:
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
         with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-            exec(compile(script, "<simulator_exec>", "exec"), self.globals)
+            exec(compile(script, "<model_exec>", "exec"), self.globals)
         stdout = stdout_capture.getvalue()
         stderr = stderr_capture.getvalue()
         if stdout:
@@ -301,7 +321,7 @@ class Session:
 
 
 def _build_parser():
-    parser = argparse.ArgumentParser(description="Local ARC simulator scaffold")
+    parser = argparse.ArgumentParser(description="Local ARC model scaffold")
     sub = parser.add_subparsers(dest="action", required=True)
     for name in ("status", "reset_level", "exec"):
         command = sub.add_parser(name)

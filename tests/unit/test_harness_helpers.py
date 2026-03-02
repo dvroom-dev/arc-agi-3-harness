@@ -148,8 +148,9 @@ def test_setup_run_dir_seeds_expected_files(tmp_path: Path) -> None:
     assert not (agent_dir / "play_lib.py").exists()
     assert (supervisor_dir / "arc" / "level_completions.md").exists()
     assert (agent_dir / "game_ls20" / "play_lib.py").exists()
+    assert (agent_dir / "game_ls20" / "model_lib.py").exists()
     assert (agent_dir / "game_ls20" / "theory.md").exists()
-    assert (agent_dir / "game_ls20" / "simulate.py").exists()
+    assert (agent_dir / "game_ls20" / "model.py").exists()
     assert (agent_dir / "game_ls20" / "play.py").exists()
 
 

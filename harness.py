@@ -67,7 +67,8 @@ def _load_agent_workspace_template(name: str) -> str:
 
 THEORY_TEMPLATE = _load_agent_workspace_template("theory.md")
 PLAY_TEMPLATE = _load_agent_workspace_template("play.py")
-SIMULATE_TEMPLATE = _load_agent_workspace_template("simulate.py")
+MODEL_TEMPLATE = _load_agent_workspace_template("model.py")
+MODEL_LIB_TEMPLATE = _load_agent_workspace_template("model_lib.py")
 PLAY_LIB_TEMPLATE = _load_agent_workspace_template("play_lib.py")
 
 
@@ -318,8 +319,9 @@ def setup_run_dir(
         log,
         level_completions_template=LEVEL_COMPLETIONS_TEMPLATE,
         play_lib_template=PLAY_LIB_TEMPLATE,
+        model_lib_template=MODEL_LIB_TEMPLATE,
         theory_template=THEORY_TEMPLATE,
-        simulate_template=SIMULATE_TEMPLATE,
+        model_template=MODEL_TEMPLATE,
         play_template=PLAY_TEMPLATE,
         game_id=game_id,
     )

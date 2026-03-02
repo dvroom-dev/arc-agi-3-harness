@@ -95,6 +95,22 @@ def parse_args_impl() -> argparse.Namespace:
             "This exercises both positive and historical failure paths for scorecard/session binding."
         ),
     )
+    parser.add_argument(
+        "--score-after-solve",
+        action="store_true",
+        help=(
+            "Two-phase run: solve unscored first, then open a fresh scorecard and replay "
+            "from level 1 in the same run filesystem."
+        ),
+    )
+    parser.add_argument(
+        "--score-after-solve-start-mode",
+        default="recover",
+        help=(
+            "Starting mode for the scored replay phase when --score-after-solve is enabled "
+            "(passed to `super new --start-mode`)."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -106,8 +122,9 @@ def setup_run_dir_impl(
     *,
     level_completions_template: str,
     play_lib_template: str,
+    model_lib_template: str,
     theory_template: str,
-    simulate_template: str,
+    model_template: str,
     play_template: str,
     game_id: str,
 ) -> None:
@@ -134,13 +151,17 @@ def setup_run_dir_impl(
     if not play_lib_game.exists():
         play_lib_game.write_text(play_lib_template)
 
+    model_lib_file = game_dir / "model_lib.py"
+    if not model_lib_file.exists():
+        model_lib_file.write_text(model_lib_template)
+
     theory_file = game_dir / "theory.md"
     if not theory_file.exists():
         theory_file.write_text(theory_template)
 
-    simulate_file = game_dir / "simulate.py"
-    if not simulate_file.exists():
-        simulate_file.write_text(simulate_template)
+    model_file = game_dir / "model.py"
+    if not model_file.exists():
+        model_file.write_text(model_template)
 
     play_file = game_dir / "play.py"
     if not play_file.exists():
@@ -172,7 +193,9 @@ def setup_run_config_dir_impl(
         "arc_action_env.py",
         "arc_action_exec.py",
         "arc_action_state.py",
+        "arc_repl_action_history.py",
         "arc_repl_diagnostics.py",
+        "arc_repl_session_artifacts.py",
         "arc_repl_session_core.py",
         "arc_repl_session_exec.py",
         "arc_repl_session_grid.py",
