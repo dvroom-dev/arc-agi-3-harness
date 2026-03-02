@@ -12,7 +12,7 @@ supervisor:
     Stop only when one of these is true:
     1) All levels of the game are complete
     2) The run is irrecoverably blocked by errors.
-  cadence_time_ms: 300000
+  cadence_time_ms: 600000
   review_timeout_ms: 300000
   disable_synthetic_check_supervisor_on_rule_failure: false
   context_carryover_limit_bytes: 98304
@@ -24,7 +24,7 @@ supervisor:
       - "For every enforcement decision, cite concrete evidence pointers (turn number, tool call, file path, or exact output fragment). Avoid unsupported claims."
       - "If a violation is clearly matched, enforce it now. Do not downgrade a clear violation into advice-only."
       - "If evidence is ambiguous, explicitly say it is ambiguous and request the minimum additional probe needed to disambiguate."
-      - "Advise the agent to stick to the current mode guidance if they stray from it. If your advice is ignored, fork_new_conversation and carry over anything useful."
+      - "Advise the agent to stick to the current mode guidance if they stray from it. Prefer `append_message_and_continue` first; fork only with hard evidence that guidance has been ignored across at least two cadence reviews with no net artifact progress."
       - "Agent modes enable you to restrict and focus agent activity. Agents tend to expand on their directions and get into ratholes and tangents; mode selection and enforcement is your most powerful tool. Choose modes to promote well-reasoned, deliberate progress without jumping ahead or outside the prescribed process."
       - "On every new conversation, guide the agent with as much context and custom instructions as they can use productively in `mode_payload.user_message`."
       - "In `solve_model`, enforce output completion, not analysis volume. Required completion evidence is: current-level solver branch in `play.py`, supporting helpers in `play_lib.py` as needed, `theory.md` updated for the level, and a model proof run result."
@@ -32,6 +32,8 @@ supervisor:
       - "Do not fork solely because required files are still incomplete at a cadence review. Missing artifacts alone should trigger guidance first, not immediate fork."
       - "Only fork for missing-artifact drift after at least two explicit cadence guidance messages were issued in this same conversation and ignored, with concrete evidence of no net artifact progress between reviews."
       - "When claiming incomplete outputs, cite concrete file evidence (for example: missing level solver branch, stale level status in theory.md, or absent proof command output)."
+      - "At cadence, default to `continue` when there is no clear problem or high-value guidance opportunity. Do not interfere with the agent turn for elapsed-time reasons alone."
+      - "Do not force handoff/fork based on elapsed time alone. Time can be a hint, never a sufficient condition."
   supervisor_triggers:
     cadence:
       supervisor_prompt:
@@ -43,8 +45,6 @@ supervisor:
               - If mode-required artifacts are missing, first use `append_message_and_continue` with a narrow artifact checklist and concrete evidence pointers. Do not fork on first missing-artifact cadence hit.
               - Only if missing-artifact drift persists after at least two explicit cadence guidance messages in this same conversation (and no net artifact progress) should you fork_new_conversation with a narrow artifact checklist.
               - If the current mode's goals are satisfied or you determine switching modes is appropriate now without handoff from the agent, fork_new_conversation.
-              - If the agent's session has gone for 20 minutes or more (4 cadence triggers) it has probably gone off the rails, gather all useful context from it, then fork_new_conversation for a fresh agent and steer the new conversation away from the same rathole.
-              - If the agent's session has gone on for 15 minutes or more (3 cadence triggers), they need to wrap it up and handoff context to you. Use `append_message_and_continue` and the `handoff_command` message template will give them the handoff steps, add any addition instructions or questions in the message field.
               - If you have context that could help guide the agent, use `append_message_and_continue` to write a user message with the advice/instructions in 'supervisor-advice' xml tags.
               - Otherwise `continue` to pass.
       message_templates:
@@ -110,7 +110,8 @@ agent:
           - They are both stateful Python REPLs attached to stateful, persistent test environments. Code run in a REPL will act on whatever the current game state is, which may have been mutated by an earlier agent.
           - In this run, you are the only actor mutating the game state and local files. Do not assume hidden concurrent edits.
           - Use shell to run `arc_repl` or `model.py` (`status`, `exec`, `exec_file`, `reset_level`). model.py also has a set_level command.
-          - `exec` script is stdin heredoc Python. `exec_file` loads code from a file but otherwise acts identically to `exec`.
+          - `exec` script is stdin heredoc Python.
+          - `exec_file` executes code loaded from a file path and sets `__file__` to that path; the file's parent directory is added to `sys.path` during execution so local imports from that directory work.
           - `arc_repl status`/`reset_level` return JSON; `arc_repl exec` prints only what your script prints.
           - `env` in the REPL contains the current environment state.
           - `get_state()` exposes the grid as `grid_hex_rows` (do not assume a `grid` key).
@@ -127,6 +128,8 @@ agent:
           - Available actions are game-specific; always consult `get_state()["available_actions"]`.
           - `arc_repl` exec globals include `env`, `current`, `GameAction`/`GA`, `diff(...)`, `get_state()`, and helpers from `play_lib.py`.
           - `model.py` exec globals include the same plus helpers from `model_lib.py`.
+          - Use only public interfaces in scripts: `env.step(...)`, `get_state()`, `diff(...)`, `get_action_history(...)`, `get_action_record(...)`, and injected helpers from `play_lib.py`/`model_lib.py`.
+          - Do not use private or undocumented internals (anything starting with `_`), for example `env._init_level`, `env._level_state`, or private frame/env fields. They are unstable and not part of the supported interface.
           - `arc_repl` exec globals also include persistent action-history helpers:
             - `get_action_history(...)` returns game action records across all levels in this game for this run.
             - `get_action_record(action_index)` returns one action record by index.
@@ -172,7 +175,7 @@ agent:
             </example>
           - Model code organization: Write common model abstractions in `model_lib.py` and use them from model.py to keep model.py small and clean.
           - Play code organization: Write common play abstractions in `play_lib.py` at every opportunity so play.py and your ad-hoc scripts stay short, composable, and easy to adapt.
-          - Do not use brute force algorithms for game actions in either the simulated or real environment. The benchmark measures your reasoning ability in novel environments; brute force is cheating.
+          - Do not use exploratory or exhaustive state/action search to discover solutions (for example broad BFS/DFS over unknown solution space). Deterministic route construction on already-known fixed geometry to execute a theory-backed plan is allowed.
 
           ## theory.md
           theory.md will have these sections:
@@ -288,7 +291,7 @@ agent:
       - "Any new information about game state features, mechanics, goals or level details must be recorded in theory.md."
       - "When game over is triggered, update the Goals section in theory.md with your theory about the cause so game over can be avoided in the future."
     violations:
-      - "Using a brute force algorithm like BFS to generate game actions, either in simulation or the real game."
+      - "Using exploratory/exhaustive search over unknown state/action space (for example broad BFS/DFS) to discover solutions in simulation or real game."
 
 modes:
   model:
@@ -298,7 +301,7 @@ modes:
       - "The model behavior doesn't match the game behavior."
       - "The model has bugs."
     stop_when:
-      - "All known game behavior is mirrored in the model."
+      - "Model completion checklist is satisfied for the current level: (1) game state features/mechanics have been reasonably explored in the real game with evidence in theory.md, and (2) model behavior matches game behavior when the same game actions are executed in both environments."
       - "Game level advances to a frontier UNSOLVED level. Fork a new conversation in the same mode."
       - "Game over happens or the current level regresses to a previously SOLVED level; switch to recover mode."
     system_message:
@@ -322,8 +325,10 @@ modes:
             - Read the game state, action history (`get_action_history`), and metadata to learn game features and mechanics.
             - Codify these learnings into model code in model.py and reusable helpers in model_lib.py. Describe them in theory.md.
             - Take actions in the model and compare results to your expectations and observed game state artifacts, iterate on model.py/model_lib.py to align the model with the game.
+            - Use only public interfaces while probing (`env.step`, `get_state`, `get_action_history`, `get_action_record`, `diff`, and injected helpers). Do not use private internals (anything with a leading `_`).
             - Think about game theories and identify important unknowns to explore and questions to answer.
             - Run a minimal set of actions in the game to gather new evidence.
+            - Use this completion checklist to decide when to stop this mode and switch: (1) have game-state features/mechanics been reasonably explored in the real game, and (2) does model behavior match the game when the same actions are executed in both.
 
             ## Detailed Process
 
@@ -354,14 +359,14 @@ modes:
     agent_rules:
       operation: append
       requirements:
-        - "When theory evidence is missing or incomplete / ambiguous, consider a wide variety of possibilities and write them all down."
+        - "When evidence is contradictory or unexplained after reasonable probing, enumerate plausible alternatives and the minimum probes needed to disambiguate. Do not expand theory lists without new contradictory evidence."
         - "Capture all new information gained, in theory.md, model.py/model_lib.py, and in your assistant messages."
         - "Verify all changes made to the model by running actions in the model."
 
   solve_model:
     description: "Attempt to solve the level using only the model."
     start_when:
-      - "All known game behavior is mirrored in the model."
+      - "Model completion checklist is satisfied for the current level: (1) game state features/mechanics have been reasonably explored in the real game with evidence in theory.md, and (2) model behavior matches game behavior when the same game actions are executed in both environments."
     stop_when:
       - "A model proof run succeeds for the current level (`model.py set_level <n>; model.py exec_file play.py`), the current-level solver branch exists in play.py, and theory.md marks the level SOLVED with concise evidence."
       - "The model has bugs."
@@ -376,7 +381,7 @@ modes:
       operation: append
       parts:
         - literal: |
-            Solve the current benchmark test level in the model. When you are finished, this command should solve the current benchmark test level in the model: `model.py set_level <n>; model.py exec_file play.py`. There is no cost to taking actions in the model but you must use causal reasoning based on the known game rules to solve the model, never use brute force state / action searches like BFS.
+            Solve the current benchmark test level in the model. When you are finished, this command should solve the current benchmark test level in the model: `model.py set_level <n>; model.py exec_file play.py`. There is no cost to taking actions in the model but you must use causal reasoning based on the known game rules to solve the model; do not use exploratory/exhaustive search over unknown action/state space.
             Use play.py and play_lib.py to iterate on a full solution from the start to the end of the level. play.py should have high level code that leverages custom abstractions you maintain in play_lib.py to address lower level details like identification of features and action planning.
             Developing this model solution should be easy since you can read model.py. Your inputs are the model state and all local files in the ./game_<id>/ directory. Your outputs are changes to play.py and play_lib.py and assistant messages.
             Do not execute real game actions or edit model.py.
@@ -391,6 +396,7 @@ modes:
             If proof fails, patch play.py/play_lib.py and rerun proof. Do not stay in analysis loops.
             Do not run more than two exploratory shell commands in a row without either editing play.py/play_lib.py or executing the proof command.
             If blocked by a model mismatch, stop and report exact mismatch evidence for a mode switch.
+            Deterministic route construction on already-known fixed geometry to execute a theory-backed plan is allowed; exploratory state-space search to discover solutions is not.
         - template: |
             <supervisor-context>
             {{supervisor.user_message}}
@@ -402,7 +408,7 @@ modes:
         - "Every solve_model turn must produce progress evidence in required artifacts (play.py / play_lib.py / theory.md) and/or a model proof-run result."
         - "When model proof succeeds for the current level, mark that level SOLVED in theory.md with concise evidence before yielding."
       violations:
-        - Any kind of brute force search across states using actions.
+        - "Exploratory or exhaustive search over unknown state/action space to discover solutions (for example broad BFS/DFS)."
         - Editing model.py
         - Executing real game actions.
         - "Repeated exploratory shell analysis in solve_model without producing required artifact updates."
