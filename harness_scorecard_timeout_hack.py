@@ -8,18 +8,20 @@ import time
 # Remove this module once we have a first-class heartbeat/keepalive in the toolkit flow.
 KEEPALIVE_IDLE_SECONDS = 14 * 60
 
-def _post_scorecard_keepalive_reset(rt, *, guid: str | None = None) -> str:
+def _post_scorecard_keepalive_reset(rt) -> None:
     """Touch scorecard activity without mutating the active play guid.
 
-    We intentionally POST /api/cmd/RESET without a guid. Server behavior creates
-    a new play/guid under the same scorecard and updates scorecard last_update,
-    while leaving the current active guid state untouched.
+    IMPORTANT:
+    - Send a raw REST request directly.
+    - Do not route through SDK wrapper state.
+    - Do not send guid.
+    - Ignore response body content.
     """
-    if not rt.scorecard_client:
-        raise RuntimeError("missing scorecard client for keepalive")
-    session = getattr(rt.scorecard_client, "_session", None)
-    if session is None:
-        raise RuntimeError("scorecard client has no HTTP session")
+    try:
+        import requests
+    except Exception as exc:
+        raise RuntimeError(f"requests unavailable for keepalive REST call: {exc}") from exc
+
     game_id = str(getattr(rt, "active_game_id", "") or getattr(rt.args, "game_id", "")).strip()
     if not game_id:
         raise RuntimeError("missing game_id for keepalive")
@@ -43,15 +45,8 @@ def _post_scorecard_keepalive_reset(rt, *, guid: str | None = None) -> str:
         "card_id": card_id,
         "game_id": game_id,
     }
-    if guid:
-        payload["guid"] = guid
-    response = session.post(url, json=payload, headers=headers, timeout=15)
+    response = requests.post(url, json=payload, headers=headers, timeout=15)
     response.raise_for_status()
-    body = response.json()
-    guid = str(body.get("guid", "") or "").strip()
-    if not guid:
-        raise RuntimeError(f"keepalive RESET response missing guid: {body!r}")
-    return guid
 
 
 def maybe_inject_scorecard_keepalive_hack(
@@ -74,20 +69,16 @@ def maybe_inject_scorecard_keepalive_hack(
     if now - float(last_action_at_monotonic) < KEEPALIVE_IDLE_SECONDS:
         return last_action_at_monotonic, False
 
-    keepalive_guid = str(getattr(rt, "scorecard_keepalive_guid", "") or "").strip() or None
     try:
-        guid = _post_scorecard_keepalive_reset(rt, guid=keepalive_guid)
+        _post_scorecard_keepalive_reset(rt)
     except Exception as exc:
         rt.log(
             "[harness] HACK(scorecard-timeout-keepalive) failed "
             f"(scorecard heartbeat RESET): {exc}"
         )
         return last_action_at_monotonic, False
-    if guid and keepalive_guid != guid:
-        setattr(rt, "scorecard_keepalive_guid", guid)
-
     rt.log(
         "[harness] HACK(scorecard-timeout-keepalive) injected "
-        f"RESET(heartbeat-guid) guid={guid} game_id={rt.args.game_id}"
+        f"RESET(no-guid) game_id={rt.args.game_id}"
     )
     return now, True
