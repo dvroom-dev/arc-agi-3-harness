@@ -46,6 +46,7 @@ Evidence standards:
 
 Hard rule:
 - Do not return control with symptom-level analysis only.
+- For regressions (level drop), identify the exact triggering action(s) and classify cause as one of: `GAME_OVER`, reset semantics, tool/harness bug, or unknown with discriminating next checks.
 
 ## Prompt source of truth
 
@@ -60,6 +61,8 @@ Hard rule:
 - Always capture both `stdout` and `stderr` for harness runs and monitoring commands.
 - For background runs, use shell redirection that preserves both streams in one log file (for example: `> <logfile> 2>&1`).
 - Do not declare a run diagnosis complete unless both streams were checked for failures.
+- Always run `super new` and `super resume` in streaming mode; do not use batch-capture mode for live runs.
+- If harness logs appear stalled, inspect raw provider event streams (`raw_events/events.ndjson`) before concluding there is no progress.
 
 ## Long-run process control (Codex tool environment)
 
