@@ -39,7 +39,6 @@ class HarnessRuntime:
         self.session_dir = deps.CTXS / self.session_name
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.session_file = self.session_dir / "session.md"
-        self.tmp_session = self.session_dir / "session.next.md"
 
         self.run_dir = deps.PROJECT_ROOT / "runs" / self.session_name
         cleanup_stats = deps.cleanup_orphan_repl_daemons(
@@ -483,14 +482,8 @@ class HarnessRuntime:
         ]
         if prompt:
             resume_args += self.prompt_args(prompt, prompt_kind="resume", image_paths=image_paths)
-        if self.args.verbose:
-            resume_args += ["--output", str(self.session_file)]
-            return self.deps.run_super(resume_args, stream=True, cwd=self.run_dir, env=self.super_env)
-
-        resume_args += ["--output", str(self.tmp_session)]
-        stdout = self.deps.run_super(resume_args, cwd=self.run_dir, env=self.super_env)
-        shutil.move(str(self.tmp_session), str(self.session_file))
-        return stdout
+        resume_args += ["--output", str(self.session_file)]
+        return self.deps.run_super(resume_args, stream=True, cwd=self.run_dir, env=self.super_env)
 
     def cleanup_repl_daemons(self) -> None:
         cleanup_repl_daemons_impl(self)

@@ -22,6 +22,72 @@ from harness_scorecard_timeout_hack import (
 )
 
 
+def _as_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return int(default)
+
+
+def _find_step_level_regression(
+    *,
+    levels_before_resume: int,
+    new_events: list[dict],
+) -> dict | None:
+    """Find the first step event that regresses levels_completed within new events."""
+    last_levels = int(levels_before_resume)
+    for idx, event in enumerate(new_events):
+        if str(event.get("kind", "")).strip() != "step":
+            continue
+        levels_now = _as_int(event.get("levels_completed", last_levels), last_levels)
+        if levels_now < last_levels:
+            return {
+                "event_offset": idx,
+                "action": str(event.get("action", "")).strip() or "?",
+                "from_levels_completed": int(last_levels),
+                "to_levels_completed": int(levels_now),
+            }
+        last_levels = levels_now
+    return None
+
+
+def _classify_level_drop(
+    *,
+    prev_state: dict | None,
+    post_state: dict | None,
+    new_events: list[dict],
+) -> dict | None:
+    """Classify a level drop; returns None when no hard-stop is needed."""
+    prev_levels = _as_int((prev_state or {}).get("levels_completed", 0), 0)
+    post_levels = _as_int((post_state or {}).get("levels_completed", prev_levels), prev_levels)
+    if post_levels >= prev_levels:
+        return None
+
+    post_state_name = str((post_state or {}).get("state", "")).strip().upper()
+    if post_state_name == "GAME_OVER":
+        return {
+            "kind": "drop_after_game_over",
+            "from_levels_completed": prev_levels,
+            "to_levels_completed": post_levels,
+        }
+
+    confirmed = _find_step_level_regression(
+        levels_before_resume=prev_levels,
+        new_events=new_events,
+    )
+    if confirmed:
+        return {
+            "kind": "confirmed_step_regression_without_game_over",
+            **confirmed,
+        }
+
+    return {
+        "kind": "unconfirmed_level_drop_without_game_over",
+        "from_levels_completed": prev_levels,
+        "to_levels_completed": post_levels,
+    }
+
+
 def _resolve_arc_base_url(args) -> str:
     if args.arc_base_url and str(args.arc_base_url).strip():
         return str(args.arc_base_url).strip()
@@ -157,7 +223,7 @@ def _run_single_game(
                 "--cycle-limit", str(runtime.cycle_limit),
                 "--output", str(runtime.session_file),
             ],
-            stream=args.verbose,
+            stream=True,
             cwd=runtime.run_dir,
             env=runtime.super_env,
         )
@@ -219,6 +285,7 @@ def _run_single_game(
                         runtime.log(f"[harness] reset output: {reset_stdout}")
                     break
                 state = runtime.load_state()
+            history_len_before_resume = processed_history_len
             stdout = runtime.resume_super()
             runtime.sync_active_conversation_id_from_session()
             if not stdout.strip():
@@ -227,6 +294,11 @@ def _run_single_game(
                     "continuing (likely supervisor fork/transition without assistant text)."
                 )
             history_after_resume = deps.load_history_events(runtime.history_json)
+            new_events = (
+                history_after_resume[history_len_before_resume:]
+                if history_len_before_resume <= len(history_after_resume)
+                else history_after_resume
+            )
             current_engine_turn = runtime.load_engine_turn()
             if current_engine_turn > processed_engine_turn:
                 last_scorecard_action_at = time.monotonic()
@@ -235,6 +307,29 @@ def _run_single_game(
 
             post_state = runtime.load_state()
             post_completed = int(post_state.get("levels_completed", 0)) if post_state else 0
+            drop = _classify_level_drop(
+                prev_state=state,
+                post_state=post_state,
+                new_events=new_events,
+            )
+            if drop and drop.get("kind") != "drop_after_game_over":
+                runtime.log(
+                    "[harness] ERROR: level regression without GAME_OVER detected; "
+                    "stopping run for diagnostics."
+                )
+                runtime.log(
+                    "[harness] regression details: "
+                    + ", ".join(
+                        [
+                            f"kind={drop.get('kind')}",
+                            f"from={drop.get('from_levels_completed')}",
+                            f"to={drop.get('to_levels_completed')}",
+                            f"action={drop.get('action', '?')}",
+                            f"event_offset={drop.get('event_offset', '?')}",
+                        ]
+                    )
+                )
+                break
             if post_completed > prev_completed:
                 last_recorded_completed_level = max(
                     last_recorded_completed_level,
