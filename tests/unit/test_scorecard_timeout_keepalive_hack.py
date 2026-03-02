@@ -1,16 +1,9 @@
 from __future__ import annotations
 
-import json
 from argparse import Namespace
-from pathlib import Path
-
-import numpy as np
 
 from harness_scorecard_timeout_hack import (
     KEEPALIVE_IDLE_SECONDS,
-    KEEPALIVE_SOURCE,
-    choose_keepalive_action,
-    has_new_agent_steps,
     maybe_inject_scorecard_keepalive_hack,
 )
 
@@ -20,215 +13,58 @@ from harness_scorecard_timeout_hack import (
 # Remove this file when the timeout hack is replaced by a proper heartbeat mechanism.
 
 
-def _step(action: str, *, data=None, source: str | None = None) -> dict:
-    event = {"kind": "step", "action": action, "levels_completed": 0}
-    if data is not None:
-        event["data"] = data
-    if source is not None:
-        event["source"] = source
-    return event
+class _FakeResponse:
+    def __init__(self, *, body: dict | None = None, should_raise: bool = False) -> None:
+        self._body = body or {}
+        self._should_raise = should_raise
+
+    def raise_for_status(self) -> None:
+        if self._should_raise:
+            raise RuntimeError("http error")
+
+    def json(self) -> dict:
+        return dict(self._body)
 
 
-def test_timeout_hack_prefers_action5_when_recent_agent_history_has_no_action5() -> None:
-    action_id, data = choose_keepalive_action(
-        events=[_step("ACTION1"), _step("ACTION2"), _step("ACTION6", data={"x": 0, "y": 0})],
-        grid_shape=(5, 5),
-        min_event_index=0,
-        available_actions=[1, 2, 3, 4, 5, 6],
-    )
-    assert action_id == 5
-    assert data is None
+class _FakeSession:
+    def __init__(self, response: _FakeResponse) -> None:
+        self._response = response
+        self.calls: list[dict] = []
+
+    def post(self, url: str, *, json=None, headers=None, timeout=None):
+        self.calls.append(
+            {
+                "url": url,
+                "json": dict(json or {}),
+                "headers": dict(headers or {}),
+                "timeout": timeout,
+            }
+        )
+        return self._response
 
 
-def test_timeout_hack_uses_unclicked_corner_for_action6_after_action5_seen() -> None:
-    events = [
-        _step("ACTION5"),
-        _step("ACTION6", data={"x": 0, "y": 0}),
-    ]
-    action_id, data = choose_keepalive_action(
-        events=events,
-        grid_shape=(4, 4),
-        min_event_index=0,
-        available_actions=[1, 2, 3, 4, 5, 6],
-    )
-    assert action_id == 6
-    assert data == {"x": 3, "y": 0}
-
-
-def test_timeout_hack_prefers_edge_when_all_corners_already_clicked() -> None:
-    events = [_step("ACTION5")]
-    for x, y in [(0, 0), (4, 0), (0, 4), (4, 4)]:
-        events.append(_step("ACTION6", data={"x": x, "y": y}))
-    action_id, data = choose_keepalive_action(
-        events=events,
-        grid_shape=(5, 5),
-        min_event_index=0,
-        available_actions=[1, 2, 3, 4, 5, 6],
-    )
-    assert action_id == 6
-    assert data == {"x": 1, "y": 0}
-
-
-def test_timeout_hack_prefers_near_edge_interior_after_edges_exhausted() -> None:
-    events = [_step("ACTION5")]
-    for y in range(5):
-        for x in range(5):
-            if x in {0, 4} or y in {0, 4}:
-                events.append(_step("ACTION6", data={"x": x, "y": y}))
-    action_id, data = choose_keepalive_action(
-        events=events,
-        grid_shape=(5, 5),
-        min_event_index=0,
-        available_actions=[1, 2, 3, 4, 5, 6],
-    )
-    assert action_id == 6
-    assert data == {"x": 1, "y": 1}
-
-
-def test_timeout_hack_falls_back_to_corner_if_all_cells_clicked() -> None:
-    events = [_step("ACTION5")]
-    for y in range(3):
-        for x in range(3):
-            events.append(_step("ACTION6", data={"x": x, "y": y}))
-    action_id, data = choose_keepalive_action(
-        events=events,
-        grid_shape=(3, 3),
-        min_event_index=0,
-        available_actions=[1, 2, 3, 4, 5, 6],
-    )
-    assert action_id == 6
-    assert data == {"x": 0, "y": 0}
-
-
-def test_timeout_hack_only_looks_back_100_agent_actions() -> None:
-    events = [_step("ACTION5")]
-    events.extend(_step("ACTION1") for _ in range(100))
-    action_id, data = choose_keepalive_action(
-        events=events,
-        grid_shape=(6, 6),
-        min_event_index=0,
-        available_actions=[1, 2, 3, 4, 5, 6],
-    )
-    assert action_id == 5
-    assert data is None
-
-
-def test_timeout_hack_ignores_harness_marked_events_and_pre_agent_floor() -> None:
-    events = [
-        _step("ACTION5"),  # before floor, should be ignored
-        _step("ACTION1"),
-        _step("ACTION5", source=KEEPALIVE_SOURCE),  # harness event, ignored
-        _step("ACTION2"),
-    ]
-    action_id, data = choose_keepalive_action(
-        events=events,
-        grid_shape=(5, 5),
-        min_event_index=2,
-        available_actions=[1, 2, 3, 4, 5, 6],
-    )
-    assert action_id == 5
-    assert data is None
-
-
-def test_timeout_hack_detects_new_agent_steps_but_not_harness_steps() -> None:
-    events = [
-        _step("ACTION1", source=KEEPALIVE_SOURCE),
-        _step("ACTION2", source=KEEPALIVE_SOURCE),
-        _step("ACTION3"),
-    ]
-    assert has_new_agent_steps(events=events, since_event_index=0, agent_history_floor=0) is True
-    assert has_new_agent_steps(events=events, since_event_index=0, agent_history_floor=3) is False
-
-
-def test_timeout_hack_uses_supported_action_when_5_and_6_unavailable() -> None:
-    action_id, data = choose_keepalive_action(
-        events=[_step("ACTION1"), _step("ACTION2")],
-        grid_shape=(5, 5),
-        min_event_index=0,
-        available_actions=[1, 2, 3, 4],
-    )
-    assert action_id in {1, 2, 3, 4}
-    assert data is None
-
-
-def test_timeout_hack_returns_no_action_when_available_actions_empty() -> None:
-    action_id, data = choose_keepalive_action(
-        events=[_step("ACTION1")],
-        grid_shape=(5, 5),
-        min_event_index=0,
-        available_actions=[],
-    )
-    assert action_id == 0
-    assert data is None
-
-
-class _FakeDeps:
-    @staticmethod
-    def load_history_events(path: Path):
-        payload = json.loads(path.read_text())
-        return payload.get("events", [])
+class _FakeScorecardClient:
+    def __init__(self, session: _FakeSession) -> None:
+        self._session = session
 
 
 class _FakeRuntime:
-    def __init__(self, history_json: Path) -> None:
-        self.history_json = history_json
+    def __init__(self, *, response: _FakeResponse) -> None:
         self.active_scorecard_id = "sc-1"
-        self.args = Namespace(game_id="ls20")
-        self.deps = _FakeDeps()
-        self._pixels = np.zeros((4, 4), dtype=np.int8)
+        self.active_game_id = "ls20-cb3b57cc"
+        self.args = Namespace(game_id="ls20-cb3b57cc")
+        self.arc_api_key = "k-test"
+        self.arc_base_url = "https://three.arcprize.org"
+        self.scorecard_client = _FakeScorecardClient(_FakeSession(response))
+        self.scorecard_keepalive_guid: str | None = None
         self.logs: list[str] = []
-        self._state = {"available_actions": [1, 2, 3, 4, 5, 6]}
-
-    def load_current_pixels(self):
-        return self._pixels
 
     def log(self, msg: str) -> None:
         self.logs.append(msg)
 
-    def load_state(self):
-        return dict(self._state)
 
-    def run_arc_repl(self, payload: dict):
-        script = str(payload.get("script", ""))
-        history = json.loads(self.history_json.read_text())
-        events = list(history.get("events", []))
-        if "env.step(6" in script:
-            # script format is fixed in maybe_inject_scorecard_keepalive_hack
-            x_part = script.split("'x':", 1)[1].split(",", 1)[0].strip()
-            y_part = script.split("'y':", 1)[1].split("}", 1)[0].strip()
-            events.append(_step("ACTION6", data={"x": int(x_part), "y": int(y_part)}))
-        elif "env.step(" in script:
-            action_part = script.split("env.step(", 1)[1].split(")", 1)[0].strip()
-            events.append(_step(f"ACTION{int(action_part)}"))
-        else:
-            return None, "invalid script", 1
-        history["events"] = events
-        self.history_json.write_text(json.dumps(history, indent=2) + "\n")
-        return None, "", 0
-
-
-def test_timeout_hack_injects_and_tags_keepalive_event_when_idle(tmp_path: Path) -> None:
-    history_json = tmp_path / "tool-engine-history.json"
-    history_json.write_text(json.dumps({"events": [_step("ACTION1")]}, indent=2) + "\n")
-    rt = _FakeRuntime(history_json)
-    ts, injected = maybe_inject_scorecard_keepalive_hack(
-        rt,
-        last_action_at_monotonic=0.0,
-        agent_history_floor=0,
-        now_monotonic=KEEPALIVE_IDLE_SECONDS + 1.0,
-    )
-    assert injected is True
-    assert ts == KEEPALIVE_IDLE_SECONDS + 1.0
-    payload = json.loads(history_json.read_text())
-    assert payload["events"][-1]["action"] == "ACTION5"
-    assert payload["events"][-1]["source"] == KEEPALIVE_SOURCE
-    assert any("HACK(scorecard-timeout-keepalive) injected" in msg for msg in rt.logs)
-
-
-def test_timeout_hack_does_not_inject_when_not_idle(tmp_path: Path) -> None:
-    history_json = tmp_path / "tool-engine-history.json"
-    history_json.write_text(json.dumps({"events": [_step("ACTION1")]}, indent=2) + "\n")
-    rt = _FakeRuntime(history_json)
+def test_timeout_hack_does_not_inject_when_not_idle() -> None:
+    rt = _FakeRuntime(response=_FakeResponse(body={"guid": "g-1"}))
     ts, injected = maybe_inject_scorecard_keepalive_hack(
         rt,
         last_action_at_monotonic=100.0,
@@ -237,22 +73,74 @@ def test_timeout_hack_does_not_inject_when_not_idle(tmp_path: Path) -> None:
     )
     assert injected is False
     assert ts == 100.0
-    payload = json.loads(history_json.read_text())
-    assert len(payload["events"]) == 1
+    assert rt.scorecard_client._session.calls == []
 
 
-def test_timeout_hack_injects_supported_action_when_5_6_not_available(tmp_path: Path) -> None:
-    history_json = tmp_path / "tool-engine-history.json"
-    history_json.write_text(json.dumps({"events": [_step("ACTION1")]}, indent=2) + "\n")
-    rt = _FakeRuntime(history_json)
-    rt._state = {"available_actions": [1, 2, 3, 4]}
-    _, injected = maybe_inject_scorecard_keepalive_hack(
+def test_timeout_hack_posts_reset_without_guid_on_first_injection() -> None:
+    rt = _FakeRuntime(response=_FakeResponse(body={"guid": "g-keepalive"}))
+    ts, injected = maybe_inject_scorecard_keepalive_hack(
         rt,
         last_action_at_monotonic=0.0,
         agent_history_floor=0,
         now_monotonic=KEEPALIVE_IDLE_SECONDS + 1.0,
     )
     assert injected is True
-    payload = json.loads(history_json.read_text())
-    assert payload["events"][-1]["action"] in {"ACTION1", "ACTION2", "ACTION3", "ACTION4"}
-    assert payload["events"][-1]["source"] == KEEPALIVE_SOURCE
+    assert ts == KEEPALIVE_IDLE_SECONDS + 1.0
+    assert len(rt.scorecard_client._session.calls) == 1
+    call = rt.scorecard_client._session.calls[0]
+    assert call["url"] == "https://three.arcprize.org/api/cmd/RESET"
+    assert call["json"] == {
+        "card_id": "sc-1",
+        "game_id": "ls20-cb3b57cc",
+    }
+    assert "guid" not in call["json"]
+    assert rt.scorecard_keepalive_guid == "g-keepalive"
+    assert any("RESET(heartbeat-guid) guid=g-keepalive" in msg for msg in rt.logs)
+
+
+def test_timeout_hack_reuses_heartbeat_guid_after_bootstrap() -> None:
+    rt = _FakeRuntime(response=_FakeResponse(body={"guid": "g-keepalive"}))
+    rt.scorecard_keepalive_guid = "g-keepalive"
+    ts, injected = maybe_inject_scorecard_keepalive_hack(
+        rt,
+        last_action_at_monotonic=0.0,
+        agent_history_floor=0,
+        now_monotonic=KEEPALIVE_IDLE_SECONDS + 1.0,
+    )
+    assert injected is True
+    assert ts == KEEPALIVE_IDLE_SECONDS + 1.0
+    assert len(rt.scorecard_client._session.calls) == 1
+    call = rt.scorecard_client._session.calls[0]
+    assert call["json"] == {
+        "card_id": "sc-1",
+        "game_id": "ls20-cb3b57cc",
+        "guid": "g-keepalive",
+    }
+    assert rt.scorecard_keepalive_guid == "g-keepalive"
+
+
+def test_timeout_hack_logs_failure_and_does_not_advance_timer() -> None:
+    rt = _FakeRuntime(response=_FakeResponse(should_raise=True))
+    ts, injected = maybe_inject_scorecard_keepalive_hack(
+        rt,
+        last_action_at_monotonic=0.0,
+        agent_history_floor=0,
+        now_monotonic=KEEPALIVE_IDLE_SECONDS + 1.0,
+    )
+    assert injected is False
+    assert ts == 0.0
+    assert any("HACK(scorecard-timeout-keepalive) failed" in msg for msg in rt.logs)
+
+
+def test_timeout_hack_skips_when_scorecard_not_active() -> None:
+    rt = _FakeRuntime(response=_FakeResponse(body={"guid": "unused"}))
+    rt.active_scorecard_id = None
+    ts, injected = maybe_inject_scorecard_keepalive_hack(
+        rt,
+        last_action_at_monotonic=0.0,
+        agent_history_floor=0,
+        now_monotonic=KEEPALIVE_IDLE_SECONDS + 1.0,
+    )
+    assert injected is False
+    assert ts == 0.0
+    assert rt.scorecard_client._session.calls == []

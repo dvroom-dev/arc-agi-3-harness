@@ -18,7 +18,6 @@ from harness_scorecard_helpers import (
     validate_scorecard_owner_check,
 )
 from harness_scorecard_timeout_hack import (
-    has_new_agent_steps,
     maybe_inject_scorecard_keepalive_hack,
 )
 
@@ -166,6 +165,7 @@ def _run_single_game(
         history_events_after_new = deps.load_history_events(runtime.history_json)
         agent_history_floor = len(history_events_after_new)
         processed_history_len = len(history_events_after_new)
+        processed_engine_turn = runtime.load_engine_turn()
         last_scorecard_action_at = time.monotonic()
 
         super_turn = 1
@@ -185,6 +185,7 @@ def _run_single_game(
             if injected_keepalive:
                 history_after_keepalive = deps.load_history_events(runtime.history_json)
                 processed_history_len = len(history_after_keepalive)
+                processed_engine_turn = runtime.load_engine_turn()
 
             state = runtime.load_state()
             prev_completed = int(state.get("levels_completed", 0)) if state else 0
@@ -226,13 +227,11 @@ def _run_single_game(
                     "continuing (likely supervisor fork/transition without assistant text)."
                 )
             history_after_resume = deps.load_history_events(runtime.history_json)
-            if has_new_agent_steps(
-                events=history_after_resume,
-                since_event_index=processed_history_len,
-                agent_history_floor=agent_history_floor,
-            ):
+            current_engine_turn = runtime.load_engine_turn()
+            if current_engine_turn > processed_engine_turn:
                 last_scorecard_action_at = time.monotonic()
             processed_history_len = len(history_after_resume)
+            processed_engine_turn = current_engine_turn
 
             post_state = runtime.load_state()
             post_completed = int(post_state.get("levels_completed", 0)) if post_state else 0
