@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import sys
 import time
+import traceback
 from argparse import Namespace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -239,6 +240,12 @@ def _run_single_game(
                         f"[harness] GAME_OVER detected "
                         f"(auto-reset {game_over_resets}/{args.max_game_over_resets})"
                     )
+                    if args.max_game_over_resets <= 0:
+                        runtime.log(
+                            "[harness] GAME_OVER auto-reset disabled "
+                            "(--max-game-over-resets=0); stopping for agent/supervisor recovery."
+                        )
+                        return False
                     if game_over_resets > args.max_game_over_resets:
                         runtime.log("[harness] max GAME_OVER auto-resets reached, stopping")
                         return False
@@ -376,6 +383,10 @@ def _run_single_game(
                 _run_super_loop(keepalive_enabled=False)
 
         runtime.log(f"[harness] session files: {runtime.session_dir}")
+    except BaseException as exc:
+        runtime.log(f"[harness] FATAL: {type(exc).__name__}: {exc}")
+        runtime.log(traceback.format_exc().rstrip())
+        raise
     finally:
         runtime.close_scorecard_if_needed()
         runtime.cleanup_repl_daemons()

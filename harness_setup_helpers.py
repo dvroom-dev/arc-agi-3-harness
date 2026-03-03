@@ -59,8 +59,11 @@ def parse_args_impl() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--max-game-over-resets", type=int, default=8,
-        help="Maximum automatic level resets after GAME_OVER before stopping",
+        "--max-game-over-resets", type=int, default=0,
+        help=(
+            "Maximum harness-driven automatic reset_level calls after GAME_OVER before stopping "
+            "(default: 0, disabled; let agent/supervisor own recovery)."
+        ),
     )
     parser.add_argument(
         "--arc-backend",

@@ -189,6 +189,28 @@ class BaseReplSession:
         self.history["turn"] = self.turn
         self.deps._save_history(self.cwd, self.history)
 
+    def _reset_noop_reason(self) -> str | None:
+        """Return noop reason when reset_level must not call env.reset()."""
+        if steps_since_level_start(self.events) == 0:
+            return "already_at_level_start"
+
+        # Defense-in-depth: if the most recent recorded action was RESET_LEVEL
+        # for this same level snapshot, treat another reset as consecutive noop
+        # even if in-memory event counters are stale/missing.
+        if self.action_history.records:
+            last = self.action_history.records[-1]
+            action_name = str(last.get("action_name", "")).strip().upper()
+            if action_name == "RESET_LEVEL":
+                try:
+                    same_level = int(last.get("level_after", -1)) == (int(self.frame.levels_completed) + 1)
+                    same_progress = int(last.get("levels_completed_after", -1)) == int(self.frame.levels_completed)
+                except Exception:
+                    same_level = False
+                    same_progress = False
+                if same_level and same_progress:
+                    return "consecutive_reset_guard"
+        return None
+
     def _normalize_action(self, action: Any) -> tuple[GameAction, str]:
         if isinstance(action, GameAction):
             return action, action.name
@@ -366,7 +388,8 @@ class BaseReplSession:
         before_frame = self.frame
         before_pixels = np.array(self.pixels, copy=True)
         call_turn = self.turn + 1
-        if steps_since_level_start(self.events) == 0:
+        noop_reason = self._reset_noop_reason()
+        if noop_reason is not None:
             self.turn += 1
             self._sync_history_file()
             self._append_action_history_record(
@@ -405,7 +428,7 @@ class BaseReplSession:
                 session_created=session_created,
             )
             result["reset_noop"] = True
-            result["noop_reason"] = "already_at_level_start"
+            result["noop_reason"] = noop_reason
             return result
 
         self.frame = self.env.reset()

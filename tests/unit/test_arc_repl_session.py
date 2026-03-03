@@ -147,6 +147,34 @@ def test_repl_reset_level_executes_after_step_in_level(monkeypatch, tmp_path: Pa
     assert any(str(e.get("kind", "")).strip() == "reset" for e in session.events)
 
 
+def test_repl_reset_level_consecutive_guard_with_stale_events(monkeypatch, tmp_path: Path) -> None:
+    _patch_session_dependencies(monkeypatch, tmp_path)
+    session = arc_repl.ReplSession(
+        cwd=tmp_path,
+        conversation_id="conv-1",
+        requested_game_id="ls20",
+    )
+    _ = session.do_exec(
+        "ls20",
+        "env.step(GameAction.ACTION1)\n",
+        session_created=False,
+    )
+    _ = session.do_reset_level("ls20", session_created=False)
+    resets_after_first = session.env.resets
+
+    # Simulate stale local step bookkeeping after an out-of-band reset event:
+    # event counter says there was activity, but action history says last action
+    # already reset this level snapshot.
+    session.events.append({"kind": "step", "levels_completed": int(session.frame.levels_completed)})
+
+    result = session.do_reset_level("ls20", session_created=False)
+    assert result["ok"] is True
+    assert result["action"] == "reset_level"
+    assert result["reset_noop"] is True
+    assert result["noop_reason"] == "consecutive_reset_guard"
+    assert session.env.resets == resets_after_first
+
+
 def test_repl_main_status_via_send_request(monkeypatch, capsys) -> None:
     monkeypatch.setattr(arc_repl.sys, "argv", ["arc_repl"])
     monkeypatch.setattr(
