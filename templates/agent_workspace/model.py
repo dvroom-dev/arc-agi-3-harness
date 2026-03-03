@@ -12,7 +12,7 @@ State model:
   - `set_level` therefore persists across subsequent `exec` / `exec_file` calls.
   - `shutdown` removes persisted model session state for that game-id.
 Dry-run workflow:
-  - Run `./model.py exec_file ./play.py` before `arc_repl exec_file ./play.py`.
+  - Run `python3 "$GAME_DIR/model.py" exec_file "$GAME_DIR/play.py"` before `arc_repl exec_file "$GAME_DIR/play.py"`.
   - Compare model output and real-game output to maintain parity.
 """
 from __future__ import annotations
@@ -23,7 +23,6 @@ import re
 import sys
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
-from dataclasses import dataclass
 from pathlib import Path
 import numpy as np
 from arcengine import GameAction
@@ -102,14 +101,7 @@ class _Frame:
         self.full_reset = bool(env.full_reset)
         self.action_input = _ActionInput(action_name)
         self.frame = [np.array(env.grid, dtype=np.int8, copy=True)]
-@dataclass(frozen=True)
-class LevelConfig:
-    level_num: int
-    name: str
-    turn_budget: int
-LEVEL_REGISTRY = {
-    1: LevelConfig(level_num=1, name="level_1", turn_budget=100),
-}
+# Keep model.py thin: all level data/mechanics belong in model_lib.py.
 MODEL_SESSION_SCHEMA_VERSION = 1
 def _sanitize_game_id(game_id: str) -> str:
     text = str(game_id or "game")
@@ -184,7 +176,7 @@ class ModelEnv:
         self.grid = np.zeros((8, 8), dtype=np.int8)
         self._init_level(1)
     def _init_level(self, level_num: int) -> None:
-        cfg = LEVEL_REGISTRY.get(level_num)
+        cfg = model_lib.get_level_config(level_num)
         self.current_level = level_num
         self.turn = 0
         self.state = "NOT_FINISHED"

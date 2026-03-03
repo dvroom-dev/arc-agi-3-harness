@@ -2,14 +2,18 @@
 
 Run order for solve mode:
 1) Dry-run in model:
-   ./game_<id>/model.py exec_file ./game_<id>/play.py
+   python3 "$GAME_DIR/model.py" exec_file "$GAME_DIR/play.py"
 2) Real execution:
-   arc_repl exec_file ./game_<id>/play.py
+   arc_repl exec_file "$GAME_DIR/play.py"
 
 This file should stay thin: dispatch by level and call helpers from play_lib.py.
 """
 
 import json
+from pathlib import Path
+
+
+GAME_DIR = Path(__file__).resolve().parent
 
 
 def _is_model(state: dict) -> bool:

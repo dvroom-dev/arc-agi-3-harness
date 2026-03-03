@@ -2,8 +2,8 @@ runtime_defaults:
   agent_provider: claude
   agent_model: claude-opus-4-6
   agent_model_reasoning_effort: high
-  supervisor_provider: claude
-  supervisor_model: claude-opus-4-6
+  supervisor_provider: codex
+  supervisor_model: gpt-5.3-codex
   supervisor_model_reasoning_effort: high
 
 supervisor:
@@ -33,6 +33,10 @@ supervisor:
       - "Do not fork solely because required files are still incomplete at a cadence review. Missing artifacts alone should trigger guidance first, not immediate fork."
       - "Only fork for missing-artifact drift after at least two explicit cadence guidance messages were issued in this same conversation and ignored, with concrete evidence of no net artifact progress between reviews."
       - "When claiming incomplete outputs, cite concrete file evidence (for example: missing level solver branch, stale level status in theory.md, or absent proof command output)."
+      - "In model mode, if a real-game batch produced novel causal evidence, the very next step should be model/theory updates and parity checks before any further real-game probing. If not, treat as drift and intervene."
+      - "For new frontier level completions, require replay artifacts before moving on: play.py level branch, play_lib helpers as needed, and a recorded proof run."
+      - "If theory.md already contains a concrete, ordered causal completion path for the current level, do not allow repeated read-only re-derivations of that same path in model mode. Direct immediate transition to solve_model artifact completion."
+      - "When model-mode turns are dominated by zero-step/read-only exec output without net artifact progress (model.py/model_lib.py/play.py/play_lib.py/theory.md), treat as drift and intervene with explicit transition guidance."
       - "At cadence, default to `continue` when there is no clear problem or high-value guidance opportunity. Do not interfere with the agent turn for elapsed-time reasons alone."
       - "Do not force handoff/fork based on elapsed time alone. Time can be a hint, never a sufficient condition."
   supervisor_triggers:
@@ -103,6 +107,14 @@ agent:
             - model_lib.py
             - play.py
             - play_lib.py
+          Resolve and reuse a single game directory variable in shell:
+          - `GAME_DIR="$(find ./agent -maxdepth 1 -type d -name 'game_*' | head -n 1)"`
+          - If empty, fallback: `GAME_DIR="$(find . -maxdepth 3 -type d -name 'game_*' | head -n 1)"`
+          - Print and verify it once per conversation start.
+          - Use `$GAME_DIR/...` paths for all file operations and command args.
+          - Do not assume your shell CWD is the game directory.
+          - Do not run `cd game_*` blindly. If you `cd`, echo `pwd` first and still use explicit paths.
+          - Write temporary artifacts under `$GAME_DIR/` (for example `$GAME_DIR/_tmp.json`), not system paths like `/tmp` or `/dev/null`.
 
           # Tool policy
           - Both the `arc_repl` tool and model.py present the same interface to a test environment, but arc_repl addresses the game and model.py addresses the model.
@@ -112,6 +124,11 @@ agent:
           - `exec` script is stdin heredoc Python.
           - `exec_file` executes code loaded from a file path and sets `__file__` to that path; the file's parent directory is added to `sys.path` during execution so local imports from that directory work.
           - `arc_repl status`/`reset_level` return JSON; `arc_repl exec` prints only what your script prints.
+          - Path-safe command examples:
+            - `python3 "$GAME_DIR/model.py" status`
+            - `python3 "$GAME_DIR/model.py" set_level <n>`
+            - `python3 "$GAME_DIR/model.py" exec_file "$GAME_DIR/play.py"`
+            - `arc_repl exec_file "$GAME_DIR/play.py"`
           - `env` in the REPL contains the current environment state.
           - `get_state()` exposes the grid as `grid_hex_rows` (do not assume a `grid` key).
           - Print `env.action_space` to see all legal actions for the current game. Reading `env.action_space` is metadata inspection, not a game action.
@@ -172,9 +189,85 @@ agent:
                 })
             PY
             </example>
+          - Example (single-call diagnostic snapshot with current state + level-initial state + high-signal diffs):
+            <example>
+            arc_repl exec <<'PY'
+            import json
+            import statistics
+
+            current = get_state()
+            level = int(current.get("current_level", 0) or 0)
+            history = get_action_history() or []
+
+            records = []
+            for item in history:
+                if not isinstance(item, dict):
+                    continue
+                idx = item.get("action_index")
+                if idx is None:
+                    continue
+                rec = get_action_record(idx)
+                if not isinstance(rec, dict):
+                    continue
+                lb = int(rec.get("level_before", -1) or -1)
+                la = int(rec.get("level_after", -1) or -1)
+                if lb == level or la == level:
+                    records.append(rec)
+
+            level_initial_state = current
+            for rec in records:
+                if int(rec.get("level_before", -1) or -1) == level:
+                    level_initial_state = rec.get("state_before") or current
+                    break
+
+            def diff_size(rec):
+                d = rec.get("diff")
+                if not isinstance(d, dict):
+                    return 0
+                cp = d.get("changed_pixels")
+                if isinstance(cp, int):
+                    return cp
+                changes = d.get("changes")
+                return len(changes) if isinstance(changes, list) else 0
+
+            sizes = [diff_size(r) for r in records]
+            median = int(statistics.median(sizes)) if sizes else 0
+
+            above_median = []
+            for rec in records:
+                size = diff_size(rec)
+                if size <= median:
+                    continue
+                above_median.append({
+                    "action_index": rec.get("action_index"),
+                    "action_name": rec.get("action_name"),
+                    "level_before": rec.get("level_before"),
+                    "level_after": rec.get("level_after"),
+                    "changed_pixels": size,
+                    "diff": rec.get("diff"),
+                    "state_before": rec.get("state_before"),
+                    "state_after": rec.get("state_after"),
+                })
+
+            print(json.dumps({
+                "current_state": current,
+                "current_level_initial_state": level_initial_state,
+                "current_level_history_stats": {
+                    "records_considered": len(records),
+                    "median_changed_pixels": median,
+                    "above_median_count": len(above_median),
+                },
+                "above_median_actions": above_median,
+            }, indent=2))
+            PY
+            </example>
           - Model code organization: Write common model abstractions in `model_lib.py` and use them from model.py to keep model.py small and clean.
+          - Keep `model.py` thin: CLI/session/wiring only. Put level data, feature anchors, routing helpers, and reusable mechanics in `model_lib.py`.
+          - Do not paste full per-level grids or large constants into `model.py`; store those in `model_lib.py`.
           - Play code organization: Write common play abstractions in `play_lib.py` at every opportunity so play.py and your ad-hoc scripts stay short, composable, and easy to adapt.
-          - Do not use exploratory or exhaustive state/action search to discover solutions (for example broad BFS/DFS over unknown solution space). Deterministic route construction on already-known fixed geometry to execute a theory-backed plan is allowed.
+          - Do not use exploratory or exhaustive state/action search to discover solutions (for example broad BFS/DFS over unknown solution space).
+          - Deterministic route construction on already-known fixed geometry to execute a theory-backed plan is allowed.
+          - If you use deterministic routing (for example BFS pathing), implement shared helpers once in `model_lib.py` and call them; do not keep retyping ad-hoc route scripts.
 
           ## theory.md
           theory.md will have these sections:
@@ -281,6 +374,8 @@ agent:
           - Treat level completion as two distinct cases:
             - Frontier completion (new): if the completed level was not already marked `SOLVED` in `theory.md` before this turn, stop actions immediately, update required files, and yield with an assistant message.
             - Replay completion (regression recovery): if that level was already marked `SOLVED` in `theory.md` before this turn, do not treat completion as terminal; continue toward the frontier per mode goals.
+          - Discovery to model handoff: once a real-game action batch yields novel causal evidence, stop real-game probing until you (a) update theory/model code, and (b) run parity checks on equivalent sequences in the model.
+          - If model parity now supports a clear level-solution attempt, yield for mode transition instead of continuing discovery probes.
       - literal: |
           ## Script Safety Before Actions (required)
           - Use two-phase execution for any non-trivial script:
@@ -342,11 +437,15 @@ modes:
             - Think about game theories and identify important unknowns to explore and questions to answer.
             - Run the minimum number of real-game actions needed to resolve the current highest-value unknown mechanics/rules.
             - Do not run real-game actions when the same question can be answered from existing runtime state/history or from model-only execution.
+            - When a real-game batch yields novel causal evidence, immediately pause additional real-game probing and execute the model update cycle (theory/model updates + parity checks) before any next real-game batch.
             - Before any real-game action batch, state the unknowns it will resolve, why existing history/model cannot already answer them, and expected outcomes that would discriminate theories.
             - After each real-game batch, either update model/theory from new evidence or mark it inconclusive and define exactly one follow-up discriminating probe.
             - Novelty gate for read-only analysis: if a read-only probe does not produce new evidence for the current unknowns, mark it as non-novel and do not repeat materially equivalent probes on unchanged state.
             - If two consecutive read-only probes are non-novel, stop read-only probing and do one of: (a) update model/theory from existing evidence, (b) run one targeted discriminating real-game action batch, or (c) yield for mode transition guidance.
             - Use this completion checklist to decide when to stop this mode and switch: (1) have game-state features/mechanics been reasonably explored in the real game, and (2) does model behavior match the game when the same actions are executed in both.
+            - If the checklist is satisfied and the level appears solvable in model, stop this mode and yield for transition to solve_model.
+            - Transition trigger (required): if theory.md contains an explicit ordered completion path for the current level (for example, sequence of trigger effects and final completion condition), stop additional read-only re-derivation and yield for solve_model.
+            - Do not run more than two consecutive zero-step/read-only `arc_repl exec` probes without either (a) updating artifacts, or (b) yielding for mode transition.
 
             ## Detailed Process
 
@@ -385,8 +484,10 @@ modes:
         - "When evidence is contradictory or unexplained after reasonable probing, enumerate plausible alternatives and the minimum probes needed to disambiguate. Do not expand theory lists without new contradictory evidence."
         - "Capture all new information gained, in theory.md, model.py/model_lib.py, and in your assistant messages."
         - "Verify all changes made to the model by running actions in the model."
+        - "If theory.md already has a concrete ordered completion path for the current level, yield for solve_model instead of further read-only re-derivation."
       violations:
         - "Repeating materially equivalent read-only probes on unchanged game state without introducing a new unknown or discriminating test."
+        - "In model mode, running three or more consecutive zero-step/read-only probes after a concrete level completion path is already documented in theory.md."
 
   solve_model:
     description: "Attempt to solve the level using only the model."
@@ -407,6 +508,9 @@ modes:
       parts:
         - literal: |
             Solve the current benchmark test level in the model. When you are finished, this command should solve the current benchmark test level in the model: `model.py set_level <n>; model.py exec_file play.py`. There is no cost to taking actions in the model but you must use causal reasoning based on the known game rules to solve the model; do not use exploratory/exhaustive search over unknown action/state space.
+            Use explicit paths in shell commands:
+            - `python3 "$GAME_DIR/model.py" set_level <n>`
+            - `python3 "$GAME_DIR/model.py" exec_file "$GAME_DIR/play.py"`
             Use play.py and play_lib.py to iterate on a full solution from the start to the end of the level. play.py should have high level code that leverages custom abstractions you maintain in play_lib.py to address lower level details like identification of features and action planning.
             Developing this model solution should be easy since you can read model.py. Your inputs are the model state and all local files in the ./game_<id>/ directory. Your outputs are changes to play.py and play_lib.py and assistant messages.
             Do not execute real game actions or edit model.py.
@@ -416,7 +520,7 @@ modes:
             In this mode, prioritize completion artifacts over additional analysis:
             1) Ensure play.py has a solver branch for the current level.
             2) Update play_lib.py with reusable helper logic needed by that branch.
-            3) Run a proof command: `model.py set_level <n>; model.py exec_file play.py`.
+            3) Run a proof command: `python3 "$GAME_DIR/model.py" set_level <n>; python3 "$GAME_DIR/model.py" exec_file "$GAME_DIR/play.py"`.
             4) If proof succeeds, update theory.md Level status to SOLVED with concise causal evidence.
             If proof fails, patch play.py/play_lib.py and rerun proof. Do not stay in analysis loops.
             Do not run more than two exploratory shell commands in a row without either editing play.py/play_lib.py or executing the proof command.
@@ -474,6 +578,7 @@ modes:
       requirements:
         - "The full solution to the level from the starting state must be recorded in play.py"
         - "When a level is completed that was previously unsolved, the solution must be added to the Levels section in theory.md. Then write an assistant message with all changes to theory.md."
+        - "When a new frontier level is completed, add/verify a deterministic replay branch for that level in play.py (with supporting abstractions in play_lib.py as needed) before yielding."
         - "Complex and low level logic should be factored out of play.py into play_lib.py."
         - "In solve_game on a frontier UNSOLVED level: execute, verify, and if the level does not complete after one deterministic attempt, yield for a switch back to model mode."
         - "Do not create or run exploratory real-game route scripts in solve_game."
