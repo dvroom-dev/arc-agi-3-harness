@@ -84,15 +84,31 @@ Hard rule:
 
 ## Long-run process control (Codex tool environment)
 
-Durable monitoring must use a persistent tool session, not shell backgrounding.
+In this Codex tool runtime, durable monitoring must use a persistent exec session (`session_id` + polling). Shell backgrounding may be reaped when the tool shell exits.
 
 Hard rules:
-- Do not rely on `nohup`, `&`, or shell job control for long-running harness/super runs in this environment.
-- Start long runs with `functions.exec_command` and keep the returned `session_id` alive.
-- Monitor by repeatedly calling `functions.write_stdin` with empty `chars` to poll output.
-- For waits/check cadence, use `write_stdin` polling with `yield_time_ms` (do not "wait" by returning control to user).
-- If the process must continue while monitored, keep interacting with the same `session_id` until an explicit stop condition is met.
-- If you lose the session or process exits unexpectedly, report it immediately and restart explicitly (with a new run id).
+- Start long runs with a persistent exec session and keep polling it (`write_stdin`) until stop conditions are met.
+- Always launch from outside the agent filesystem root and pass explicit dirs/args; do not rely on ambient cwd.
+- Monitor continuously: poll run state files and session output on a fixed cadence (`sleep`/poll between checks).
+- If user asks for ongoing monitoring, do not return control without either:
+  - reaching the requested stop condition, or
+  - reporting a concrete blocker/error and the next recovery action.
+- On any unexpected process exit, collect root cause from stderr/logs first, then restart explicitly (new run id unless user says resume).
+- Before starting a new run, kill stale/orphan daemons from prior runs.
+
+If running manually outside Codex tools (real shell on host), use the nohup pattern:
+- `nohup env ... python harness.py ... > "$LOG" 2>&1 < /dev/null &`
+- `echo $! > "$PID"; disown; ps -p "$(cat "$PID")" ...`
+
+Canonical launch pattern (Codex tools):
+- `session = exec_command(cmd=\"python harness.py ...\", tty=true)`
+- keep returned `session_id`
+- poll with `write_stdin(session_id=<id>, chars=\"\", yield_time_ms=...)`
+
+Canonical monitor loop (Codex tools):
+- repeat:
+- `  write_stdin(session_id=<id>, chars=\"\", yield_time_ms=10000)`
+- `  check state/history/log artifacts`
 
 ## Legacy code policy
 
