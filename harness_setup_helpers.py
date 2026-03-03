@@ -192,6 +192,8 @@ def setup_run_config_dir_impl(
         "arc_repl_daemon.py",
     ]
     optional_tools = [
+        "arc_repl_paths.py",
+        "proc_utils.py",
         "arc_action_diffs.py",
         "arc_action_env.py",
         "arc_action_exec.py",
