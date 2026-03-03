@@ -83,12 +83,26 @@ def test_coerce_grid_from_multiple_shapes() -> None:
 
 def test_parse_daemon_args() -> None:
     ns = arc_repl._parse_daemon_args(
-        ["--daemon", "--cwd", "/tmp", "--conversation-id", "c1", "--game-id", "ls20"]
+        [
+            "--daemon",
+            "--cwd",
+            "/tmp",
+            "--conversation-id",
+            "c1",
+            "--game-id",
+            "ls20",
+            "--parent-pid",
+            "123",
+            "--parent-start-ticks",
+            "456",
+        ]
     )
     assert ns.daemon is True
     assert ns.cwd == "/tmp"
     assert ns.conversation_id == "c1"
     assert ns.game_id == "ls20"
+    assert ns.parent_pid == 123
+    assert ns.parent_start_ticks == 456
 
 
 def test_error_and_read_args_validation(monkeypatch) -> None:

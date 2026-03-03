@@ -340,6 +340,17 @@ def assert_no_game_files_in_agent_dir(agent_dir: Path) -> None:
 
 
 def main() -> None:
+    def _handle_termination(signum, _frame):
+        signame = signal.Signals(signum).name
+        print(
+            f"[harness] received signal {signame}; terminating",
+            file=sys.stderr,
+            flush=True,
+        )
+        raise SystemExit(128 + signum)
+
+    for sig in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT):
+        signal.signal(sig, _handle_termination)
     run_main(sys.modules[__name__])
 
 

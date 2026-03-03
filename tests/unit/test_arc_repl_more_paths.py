@@ -21,6 +21,7 @@ def test_spawn_daemon_writes_pid(monkeypatch, tmp_path: Path) -> None:
 
     def _fake_popen(*a, **k):
         seen.update(k)
+        seen["argv"] = list(a[0]) if a else []
         return SimpleNamespace(pid=1234)
 
     monkeypatch.setattr(
@@ -28,11 +29,18 @@ def test_spawn_daemon_writes_pid(monkeypatch, tmp_path: Path) -> None:
         "Popen",
         _fake_popen,
     )
+    monkeypatch.setenv("ARC_REPL_PARENT_PID", "555")
+    monkeypatch.setenv("ARC_REPL_PARENT_START_TICKS", "777")
     arc_repl._spawn_daemon(tmp_path, "c1", "ls20")
     assert (tmp_path / "s" / "daemon.pid").read_text().strip() == "1234"
     lifecycle = (tmp_path / "s" / "daemon.lifecycle.jsonl").read_text()
     assert '"event": "spawned"' in lifecycle
     assert seen.get("start_new_session") is True
+    cmd = seen.get("argv", [])
+    assert "--parent-pid" in cmd
+    assert "555" in cmd
+    assert "--parent-start-ticks" in cmd
+    assert "777" in cmd
 
 
 def test_wait_for_daemon_timeout(monkeypatch, tmp_path: Path) -> None:

@@ -10,6 +10,42 @@ from pathlib import Path
 from typing import Callable
 
 
+def _read_proc_start_ticks(pid: int) -> int | None:
+    stat_path = Path("/proc") / str(int(pid)) / "stat"
+    try:
+        raw = stat_path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    try:
+        # /proc/<pid>/stat field 22 is process starttime in clock ticks.
+        return int(raw.rsplit(")", 1)[1].split()[19])
+    except Exception:
+        return None
+
+
+def _parent_alive(parent_pid: int | None, parent_start_ticks: int | None) -> bool:
+    if parent_pid is None:
+        return True
+    try:
+        pid = int(parent_pid)
+    except Exception:
+        return False
+    if pid <= 1:
+        return False
+
+    current_start_ticks = _read_proc_start_ticks(pid)
+    if parent_start_ticks is not None:
+        if current_start_ticks is None:
+            return False
+        if int(current_start_ticks) != int(parent_start_ticks):
+            return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
+
 def run_daemon(
     *,
     cwd: Path,
@@ -21,6 +57,8 @@ def run_daemon(
     append_lifecycle_event: Callable[..., None],
     error_payload: Callable[..., dict],
     schema_version: str,
+    parent_pid: int | None = None,
+    parent_start_ticks: int | None = None,
 ) -> int:
     # Detach daemon from terminal interrupt/hangup signals so agent/harness
     # keyboard interrupts do not silently kill session state mid-run.
@@ -39,6 +77,10 @@ def run_daemon(
         "daemon_boot",
         daemon_pid=int(os.getpid()),
         requested_game_id=str(requested_game_id),
+        parent_pid=(int(parent_pid) if parent_pid is not None else None),
+        parent_start_ticks=(
+            int(parent_start_ticks) if parent_start_ticks is not None else None
+        ),
     )
     session = make_session()
     started_at_unix = time.time()
@@ -126,8 +168,23 @@ def run_daemon(
         )
 
     should_stop = False
+    stop_reason = "shutdown"
+    next_parent_check = 0.0
     try:
         while not should_stop:
+            now = time.monotonic()
+            if now >= next_parent_check:
+                next_parent_check = now + 1.0
+                if not _parent_alive(parent_pid, parent_start_ticks):
+                    stop_reason = "parent_exit"
+                    append_lifecycle_event(
+                        cwd,
+                        conversation_id,
+                        "daemon_parent_exit_detected",
+                        daemon_pid=int(os.getpid()),
+                        parent_pid=(int(parent_pid) if parent_pid is not None else None),
+                    )
+                    break
             request_file: Path | None = None
             try:
                 request_candidates = sorted(requests_dir.glob("*.json"))
@@ -143,6 +200,8 @@ def run_daemon(
                     )
                     continue
                 result, should_stop = _handle_request(request)
+                if should_stop:
+                    stop_reason = "shutdown_request"
                 _send_response(request_file, result)
             except Exception as exc:
                 traceback_text = traceback.format_exc()
@@ -200,6 +259,7 @@ def run_daemon(
             "daemon_stop",
             daemon_pid=int(os.getpid()),
             graceful=bool(should_stop),
+            reason=str(stop_reason),
         )
         try:
             if socket_path.exists():

@@ -30,6 +30,19 @@ from harness_scorecard_helpers import (
 )
 
 
+def _read_proc_start_ticks(pid: int) -> int | None:
+    stat_path = Path("/proc") / str(int(pid)) / "stat"
+    try:
+        raw = stat_path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    try:
+        # /proc/<pid>/stat field 22 is process starttime in clock ticks.
+        return int(raw.rsplit(")", 1)[1].split()[19])
+    except Exception:
+        return None
+
+
 class HarnessRuntime:
     def __init__(
         self,
@@ -167,6 +180,8 @@ class HarnessRuntime:
         self.level_start_images_dir = self.supervisor_dir / "arc" / "level-start-images"
         self.level_start_images_dir.mkdir(parents=True, exist_ok=True)
         self.current_level_start_image = self.supervisor_dir / "arc" / "current-level-start.png"
+        self.repl_parent_pid = int(os.getpid())
+        self.repl_parent_start_ticks = _read_proc_start_ticks(self.repl_parent_pid)
 
         self.super_env = dict(os.environ)
         self.super_env["ARC_OPERATION_MODE"] = self.operation_mode_name
@@ -182,6 +197,9 @@ class HarnessRuntime:
             self.super_env["ARC_SCORECARD_COOKIES"] = self.scorecard_cookies_json
         self.super_env["ARC_REPL_SESSION_KEY"] = self.active_repl_session_key
         self.super_env["ARC_ACTIVE_GAME_ID"] = self.active_game_id
+        self.super_env["ARC_REPL_PARENT_PID"] = str(self.repl_parent_pid)
+        if self.repl_parent_start_ticks is not None:
+            self.super_env["ARC_REPL_PARENT_START_TICKS"] = str(self.repl_parent_start_ticks)
         self.super_env["PATH"] = f"{self.run_bin_dir}:{os.environ.get('PATH', '')}"
 
     def open_scorecard_now(self) -> str:
@@ -292,6 +310,9 @@ class HarnessRuntime:
         if self.scorecard_cookies_json:
             child_env["ARC_SCORECARD_COOKIES"] = self.scorecard_cookies_json
         child_env["ARC_REPL_SESSION_KEY"] = self.active_repl_session_key
+        child_env["ARC_REPL_PARENT_PID"] = str(self.repl_parent_pid)
+        if self.repl_parent_start_ticks is not None:
+            child_env["ARC_REPL_PARENT_START_TICKS"] = str(self.repl_parent_start_ticks)
 
         proc = self.deps.subprocess.run(
             cmd,

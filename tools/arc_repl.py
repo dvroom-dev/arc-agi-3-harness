@@ -114,6 +114,39 @@ def _session_key() -> str:
         return safe[:120] or "default"
     return _conversation_id()
 
+
+def _read_proc_start_ticks(pid: int) -> int | None:
+    stat_path = Path("/proc") / str(int(pid)) / "stat"
+    try:
+        raw = stat_path.read_text(encoding="utf-8")
+    except Exception:
+        return None
+    try:
+        # /proc/<pid>/stat field 22 is process starttime in clock ticks.
+        return int(raw.rsplit(")", 1)[1].split()[19])
+    except Exception:
+        return None
+
+
+def _spawn_parent_identity() -> tuple[int | None, int | None]:
+    raw_pid = str(os.getenv("ARC_REPL_PARENT_PID", "") or "").strip()
+    if not raw_pid:
+        return None, None
+    try:
+        parent_pid = int(raw_pid)
+    except Exception:
+        return None, None
+    if parent_pid <= 1:
+        return None, None
+
+    raw_ticks = str(os.getenv("ARC_REPL_PARENT_START_TICKS", "") or "").strip()
+    if raw_ticks:
+        try:
+            return parent_pid, int(raw_ticks)
+        except Exception:
+            pass
+    return parent_pid, _read_proc_start_ticks(parent_pid)
+
 def _session_dir(cwd: Path, conversation_id: str) -> Path:
     return _arc_dir(cwd) / "repl-sessions" / conversation_id
 def _socket_path(cwd: Path, conversation_id: str) -> Path:
@@ -177,18 +210,24 @@ def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
             pass
     log_path = _daemon_log_path(cwd, conversation_id)
     with log_path.open("a", encoding="utf-8") as logf:
+        parent_pid, parent_start_ticks = _spawn_parent_identity()
+        daemon_cmd = [
+            sys.executable,
+            str(Path(__file__).resolve()),
+            "--daemon",
+            "--cwd",
+            str(cwd),
+            "--conversation-id",
+            conversation_id,
+            "--game-id",
+            game_id,
+        ]
+        if parent_pid is not None:
+            daemon_cmd.extend(["--parent-pid", str(parent_pid)])
+            if parent_start_ticks is not None:
+                daemon_cmd.extend(["--parent-start-ticks", str(parent_start_ticks)])
         proc = subprocess.Popen(
-            [
-                sys.executable,
-                str(Path(__file__).resolve()),
-                "--daemon",
-                "--cwd",
-                str(cwd),
-                "--conversation-id",
-                conversation_id,
-                "--game-id",
-                game_id,
-            ],
+            daemon_cmd,
             cwd=str(cwd),
             env=dict(os.environ),
             stdin=subprocess.DEVNULL,
@@ -204,6 +243,12 @@ def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
         daemon_pid=int(proc.pid),
         game_id=str(game_id),
         parent_pid=int(os.getpid()),
+        lifecycle_parent_pid=(
+            int(parent_pid) if parent_pid is not None else None
+        ),
+        lifecycle_parent_start_ticks=(
+            int(parent_start_ticks) if parent_start_ticks is not None else None
+        ),
         transport="file",
         socket_path=str(socket_path),
         log_file=str(log_path),
@@ -331,7 +376,14 @@ def _send_request(cwd: Path, conversation_id: str, request: dict) -> tuple[dict,
                 _raise_daemon_unavailable("post_spawn_connect_failure", retry_exc)
         _raise_daemon_unavailable("connect_failure_no_respawn", exc)
 
-def _daemon_main(cwd: Path, conversation_id: str, requested_game_id: str) -> int:
+def _daemon_main(
+    cwd: Path,
+    conversation_id: str,
+    requested_game_id: str,
+    *,
+    parent_pid: int | None = None,
+    parent_start_ticks: int | None = None,
+) -> int:
     session_dir = _session_dir(cwd, conversation_id)
     session_dir.mkdir(parents=True, exist_ok=True)
 
@@ -355,6 +407,8 @@ def _daemon_main(cwd: Path, conversation_id: str, requested_game_id: str) -> int
         append_lifecycle_event=_append_lifecycle_event,
         error_payload=_error,
         schema_version=SCHEMA_VERSION,
+        parent_pid=parent_pid,
+        parent_start_ticks=parent_start_ticks,
     )
 
 def _parse_daemon_args(argv: list[str]) -> argparse.Namespace:
@@ -363,6 +417,8 @@ def _parse_daemon_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--cwd", default="")
     parser.add_argument("--conversation-id", default="")
     parser.add_argument("--game-id", default="")
+    parser.add_argument("--parent-pid", type=int, default=None)
+    parser.add_argument("--parent-start-ticks", type=int, default=None)
     return parser.parse_args(argv)
 
 def main() -> int:
@@ -372,7 +428,13 @@ def main() -> int:
         conversation_id = str(daemon_args.conversation_id).strip() or _session_key()
         requested_game_id = str(daemon_args.game_id).strip()
         try:
-            return _daemon_main(cwd, conversation_id, requested_game_id)
+            return _daemon_main(
+                cwd,
+                conversation_id,
+                requested_game_id,
+                parent_pid=daemon_args.parent_pid,
+                parent_start_ticks=daemon_args.parent_start_ticks,
+            )
         except Exception as exc:
             _append_lifecycle_event(
                 cwd,
