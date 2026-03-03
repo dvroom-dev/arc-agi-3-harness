@@ -4,13 +4,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 import subprocess
 import sys
 import time
 import traceback
 from pathlib import Path
-from uuid import uuid4
 from arc_action_diffs import (
     _change_bbox,
     _iter_cell_changes,
@@ -55,14 +53,37 @@ from arc_repl_session_core import (
     _grid_from_hex_rows,
     _same_game_lineage as _same_game_lineage_impl,
 )
+from arc_repl_paths import (
+    conversation_id_from_env,
+    daemon_log_path,
+    ipc_paths,
+    lifecycle_path,
+    meta_path,
+    pid_path,
+    send_ipc_request,
+    session_dir,
+    session_key_from_env,
+    socket_path,
+    spawn_parent_identity_from_env,
+)
 
 SCHEMA_VERSION = "arc_repl.v1"
 SOCKET_WAIT_TIMEOUT_S = 90.0
 
 def _load_history(cwd: Path, game_id: str) -> dict:
     return _load_history_impl(cwd, game_id, _make_id_candidates)
-def _lifecycle_path(cwd: Path, conversation_id: str) -> Path:
-    return _session_dir(cwd, conversation_id) / "daemon.lifecycle.jsonl"
+
+
+_session_dir = lambda cwd, conversation_id: session_dir(_arc_dir(cwd), conversation_id)
+_socket_path = lambda cwd, conversation_id: socket_path(_arc_dir(cwd), conversation_id)
+_pid_path = lambda cwd, conversation_id: pid_path(_arc_dir(cwd), conversation_id)
+_meta_path = lambda cwd, conversation_id: meta_path(_arc_dir(cwd), conversation_id)
+_daemon_log_path = lambda cwd, conversation_id: daemon_log_path(_arc_dir(cwd), conversation_id)
+_lifecycle_path = lambda cwd, conversation_id: lifecycle_path(_arc_dir(cwd), conversation_id)
+_ipc_paths = lambda cwd, conversation_id: ipc_paths(_arc_dir(cwd), conversation_id)
+_send_ipc_request = lambda cwd, conversation_id, request, timeout_s: send_ipc_request(arc_dir=_arc_dir(cwd), conversation_id=conversation_id, request=request, timeout_s=timeout_s)
+
+
 def _append_lifecycle_event(cwd: Path, conversation_id: str, event: str, **fields: object) -> None:
     try:
         session_dir = _session_dir(cwd, conversation_id)
@@ -102,67 +123,13 @@ def _emit_json(payload: dict) -> None:
     if not sys.stdout.isatty():
         sys.stdout.write("\n")
 def _conversation_id() -> str:
-    raw = str(os.getenv("ARC_CONVERSATION_ID", "") or "").strip()
-    if not raw:
-        raw = "default"
-    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._")
-    return safe[:120] or "default"
+    return conversation_id_from_env()
+
+
 def _session_key() -> str:
-    raw = str(os.getenv("ARC_REPL_SESSION_KEY", "") or "").strip()
-    if raw:
-        safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._")
-        return safe[:120] or "default"
-    return _conversation_id()
+    return session_key_from_env()
 
 
-def _read_proc_start_ticks(pid: int) -> int | None:
-    stat_path = Path("/proc") / str(int(pid)) / "stat"
-    try:
-        raw = stat_path.read_text(encoding="utf-8")
-    except Exception:
-        return None
-    try:
-        # /proc/<pid>/stat field 22 is process starttime in clock ticks.
-        return int(raw.rsplit(")", 1)[1].split()[19])
-    except Exception:
-        return None
-
-
-def _spawn_parent_identity() -> tuple[int | None, int | None]:
-    raw_pid = str(os.getenv("ARC_REPL_PARENT_PID", "") or "").strip()
-    if not raw_pid:
-        return None, None
-    try:
-        parent_pid = int(raw_pid)
-    except Exception:
-        return None, None
-    if parent_pid <= 1:
-        return None, None
-
-    raw_ticks = str(os.getenv("ARC_REPL_PARENT_START_TICKS", "") or "").strip()
-    if raw_ticks:
-        try:
-            return parent_pid, int(raw_ticks)
-        except Exception:
-            pass
-    return parent_pid, _read_proc_start_ticks(parent_pid)
-
-def _session_dir(cwd: Path, conversation_id: str) -> Path:
-    return _arc_dir(cwd) / "repl-sessions" / conversation_id
-def _socket_path(cwd: Path, conversation_id: str) -> Path:
-    # Use a stable per-session marker path so calls from subdirectories resolve consistently.
-    return _session_dir(cwd, conversation_id) / "daemon.ready"
-
-def _pid_path(cwd: Path, conversation_id: str) -> Path:
-    return _session_dir(cwd, conversation_id) / "daemon.pid"
-def _meta_path(cwd: Path, conversation_id: str) -> Path:
-    return _session_dir(cwd, conversation_id) / "session.json"
-def _daemon_log_path(cwd: Path, conversation_id: str) -> Path:
-    return _session_dir(cwd, conversation_id) / "daemon.log"
-def _ipc_paths(cwd: Path, conversation_id: str) -> tuple[Path, Path]:
-    session_dir = _session_dir(cwd, conversation_id)
-    ipc_dir = session_dir / "ipc"
-    return ipc_dir / "requests", ipc_dir / "responses"
 def _same_game_lineage(existing_game_id: str, requested_game_id: str) -> bool:
     return _same_game_lineage_impl(existing_game_id, requested_game_id, _make_id_candidates)
 class ReplSession(BaseReplSession):
@@ -173,31 +140,6 @@ class ReplSession(BaseReplSession):
             requested_game_id=requested_game_id,
             deps=sys.modules[__name__],
         )
-def _send_ipc_request(cwd: Path, conversation_id: str, request: dict, timeout_s: float) -> dict:
-    requests_dir, responses_dir = _ipc_paths(cwd, conversation_id)
-    requests_dir.mkdir(parents=True, exist_ok=True)
-    responses_dir.mkdir(parents=True, exist_ok=True)
-    request_id = f"{time.time_ns()}_{os.getpid()}_{uuid4().hex}"
-    request_file = requests_dir / f"{request_id}.json"
-    response_file = responses_dir / f"{request_id}.json"
-    tmp_request = request_file.with_suffix(".json.tmp")
-    tmp_request.write_text(json.dumps(request), encoding="utf-8")
-    tmp_request.replace(request_file)
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        if response_file.exists():
-            try:
-                payload = json.loads(response_file.read_text(encoding="utf-8"))
-            finally:
-                try:
-                    response_file.unlink()
-                except Exception:
-                    pass
-            if not isinstance(payload, dict):
-                raise RuntimeError("daemon returned non-object response")
-            return payload
-        time.sleep(0.05)
-    raise RuntimeError(f"arc_repl daemon response timeout after {timeout_s}s")
 def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
     session_dir = _session_dir(cwd, conversation_id)
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -210,7 +152,7 @@ def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
             pass
     log_path = _daemon_log_path(cwd, conversation_id)
     with log_path.open("a", encoding="utf-8") as logf:
-        parent_pid, parent_start_ticks = _spawn_parent_identity()
+        parent_pid, parent_start_ticks = spawn_parent_identity_from_env()
         daemon_cmd = [
             sys.executable,
             str(Path(__file__).resolve()),

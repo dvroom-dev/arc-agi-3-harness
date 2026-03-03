@@ -9,18 +9,7 @@ import traceback
 from pathlib import Path
 from typing import Callable
 
-
-def _read_proc_start_ticks(pid: int) -> int | None:
-    stat_path = Path("/proc") / str(int(pid)) / "stat"
-    try:
-        raw = stat_path.read_text(encoding="utf-8")
-    except Exception:
-        return None
-    try:
-        # /proc/<pid>/stat field 22 is process starttime in clock ticks.
-        return int(raw.rsplit(")", 1)[1].split()[19])
-    except Exception:
-        return None
+from proc_utils import read_proc_start_ticks
 
 
 def _parent_alive(parent_pid: int | None, parent_start_ticks: int | None) -> bool:
@@ -33,7 +22,7 @@ def _parent_alive(parent_pid: int | None, parent_start_ticks: int | None) -> boo
     if pid <= 1:
         return False
 
-    current_start_ticks = _read_proc_start_ticks(pid)
+    current_start_ticks = read_proc_start_ticks(pid)
     if parent_start_ticks is not None:
         if current_start_ticks is None:
             return False
