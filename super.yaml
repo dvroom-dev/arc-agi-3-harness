@@ -2,8 +2,8 @@ runtime_defaults:
   agent_provider: claude
   agent_model: claude-opus-4-6
   agent_model_reasoning_effort: high
-  supervisor_provider: codex
-  supervisor_model: gpt-5.3-codex
+  supervisor_provider: claude
+  supervisor_model: claude-opus-4-6
   supervisor_model_reasoning_effort: high
 
 supervisor:
@@ -276,6 +276,8 @@ agent:
             3) minimal recovery plan.
           - Detect level transitions by comparing `levels_completed` / `current_level` before vs after actions.
           - Never assume continuation state; verify via runtime state fields before planning next actions.
+          - State-change gate: if no real-game actions occurred since your last check, treat established facts as unchanged and reuse prior evidence instead of re-deriving constants.
+          - Evidence-linked claims: when asserting mechanics, coordinates, or causal effects, cite concrete evidence from `action_index` records or exact command output in this conversation.
           - Treat level completion as two distinct cases:
             - Frontier completion (new): if the completed level was not already marked `SOLVED` in `theory.md` before this turn, stop actions immediately, update required files, and yield with an assistant message.
             - Replay completion (regression recovery): if that level was already marked `SOLVED` in `theory.md` before this turn, do not treat completion as terminal; continue toward the frontier per mode goals.
@@ -299,6 +301,7 @@ agent:
     requirements:
       - "Any new information about game state features, mechanics, goals or level details must be recorded in theory.md."
       - "When game over is triggered, update the Goals section in theory.md with your theory about the cause so game over can be avoided in the future."
+      - "Claims about mechanics, coordinates, and causal effects must cite concrete evidence (action_index and/or exact command output). Uncited statements must be labeled hypotheses."
     violations:
       - "Using exploratory/exhaustive search over unknown state/action space (for example broad BFS/DFS) to discover solutions in simulation or real game."
 
@@ -331,6 +334,7 @@ modes:
             # Modeling process
            
             ## Main Loop
+            - Modeling cycle (repeat): (1) choose 1-2 highest-value unknowns, (2) run one targeted discriminating real-game batch only if needed, (3) update model.py/model_lib.py and theory.md, (4) run model parity checks on the same action sequences.
             - Read the game state, action history (`get_action_history`), and metadata to learn game features and mechanics.
             - Codify these learnings into model code in model.py and reusable helpers in model_lib.py. Describe them in theory.md.
             - Take actions in the model and compare results to your expectations and observed game state artifacts, iterate on model.py/model_lib.py to align the model with the game.
@@ -338,7 +342,8 @@ modes:
             - Think about game theories and identify important unknowns to explore and questions to answer.
             - Run the minimum number of real-game actions needed to resolve the current highest-value unknown mechanics/rules.
             - Do not run real-game actions when the same question can be answered from existing runtime state/history or from model-only execution.
-            - Before any real-game action batch, name the specific unknowns it will resolve; after the batch, either update model/theory from the new evidence or stop real-game actions.
+            - Before any real-game action batch, state the unknowns it will resolve, why existing history/model cannot already answer them, and expected outcomes that would discriminate theories.
+            - After each real-game batch, either update model/theory from new evidence or mark it inconclusive and define exactly one follow-up discriminating probe.
             - Novelty gate for read-only analysis: if a read-only probe does not produce new evidence for the current unknowns, mark it as non-novel and do not repeat materially equivalent probes on unchanged state.
             - If two consecutive read-only probes are non-novel, stop read-only probing and do one of: (a) update model/theory from existing evidence, (b) run one targeted discriminating real-game action batch, or (c) yield for mode transition guidance.
             - Use this completion checklist to decide when to stop this mode and switch: (1) have game-state features/mechanics been reasonably explored in the real game, and (2) does model behavior match the game when the same actions are executed in both.
@@ -355,6 +360,7 @@ modes:
 
             ### Details
             - The supervisor may direct you to focus on modeling specific features / theories, follow their instructions.
+            - Model session sanity: verify model level/state in command outputs before assuming continuity across shell invocations. If `set_level` and later `exec` outputs disagree, report exact command/output evidence and resolve that mismatch before further model reasoning.
             - Apply two-phase execution in real-game scripts: preflight (no actions) then action phase only if preflight passes.
             - For level-local static geometry (for example fixed regions, gates, exits, anchors), once confirmed from runtime state/history, treat it as fixed for that level. Do not keep re-deriving constants unless contradictory evidence appears.
             - Real-game actions are expensive and reduce score; translate learned mechanics/rules into model code as soon as evidence is sufficient, then continue iteration in the model.
@@ -452,6 +458,8 @@ modes:
         - literal: |
             Solve the current game level using play.py. `arc_repl reset_level; arc_repl exec_file play.py` should be sufficient to solve the level when you are done. Your inputs are the game state, play.py, and play_lib.py. Your outputs are changes to play.py, play_lib.py, and assistant messages.
             This mode is execution-only, not exploration: run the existing solver and verify outcome.
+            Solve_game loop: (1) `arc_repl status`, (2) one deterministic solver execution (`arc_repl exec_file play.py` or one deterministic continuation), (3) `arc_repl status`, (4) decide next mode.
+            If the deterministic run fails on a frontier UNSOLVED level, stop and switch to model mode with mismatch evidence. Do not explore unknown routes in solve_game.
             If the level is UNSOLVED/frontier and the solver fails once in the real game, stop further real-game route experimentation and switch to model mode to improve play.py/play_lib.py there.
             If the current game state is not the start of the level (actions have already been taken), do at most one deterministic continuation attempt from current state based on existing play.py logic; if not solved, switch to model mode.
             If you need a debugging script in real game, use two-phase execution (preflight without `env.step`, then action phase) so coding errors do not burn actions.
