@@ -1,6 +1,6 @@
 runtime_defaults:
-  agent_provider: codex
-  agent_model: gpt-5.3-codex
+  agent_provider: claude
+  agent_model: claude-opus-4-6
   agent_model_reasoning_effort: high
   supervisor_provider: codex
   supervisor_model: gpt-5.3-codex
@@ -13,6 +13,8 @@ supervisor:
     1) All levels of the game are complete
     2) The run is irrecoverably blocked by errors.
   review_timeout_ms: 300000
+  cadence_time_ms: 300000
+  cadence_interrupt_policy: boundary
   disable_synthetic_check_supervisor_on_rule_failure: false
   context_carryover_limit_bytes: 98304
   instructions:
@@ -40,12 +42,10 @@ supervisor:
         parts:
           - literal: |
               Review the agent's progress, choose an action (in decreasing precedence):
-              - If any Agent Rule violation is clearly matched with concrete evidence, enforce immediately: do not use `append_message_and_continue`. Use `fork_new_conversation` (or `rewrite_with_check_supervisor_and_continue` only for unmet requirement-type fixes that are still possible in-place).
-              - If mode-required artifacts are missing, first use `append_message_and_continue` with a narrow artifact checklist and concrete evidence pointers. Do not fork on first missing-artifact cadence hit.
-              - Only if missing-artifact drift persists after at least two explicit cadence guidance messages in this same conversation (and no net artifact progress) should you fork_new_conversation with a narrow artifact checklist.
+              - If any Agent Rule violation is clearly matched with concrete evidence, enforce immediately: Use `fork_new_conversation` and choose the same mode or a new mode based on mode criteria. Provide a user_message with all the context and guidance that would help the agent be productive.
               - If the current mode's goals are satisfied or you determine switching modes is appropriate now without handoff from the agent, fork_new_conversation.
               - If you have context that could help guide the agent, use `append_message_and_continue` to write a user message with the advice/instructions in 'supervisor-advice' xml tags.
-              - Otherwise `continue` to pass.
+              - Otherwise `continue` to pass. Do not enforce mode-required artifacts from this cadence trigger.
       message_templates:
         - name: handoff_command
           description: "Tell the agent this session is wrapping up and require the full mid-level handoff checklist."
@@ -269,6 +269,7 @@ agent:
           - Treat runtime game state and action history as source of truth: `state`, `current_level`, `levels_completed`, `full_reset`, and executed action records.
           - If `theory.md` conflicts with runtime state or action history, runtime state/history wins. Update `theory.md` immediately.
           - Whenever you execute actions, immediately inspect resulting state (either print `get_state()` in script output or run `arc_repl status`).
+          - Do not repeatedly re-check unchanged facts. If no game action has occurred since your last check and the same question was already answered, reuse prior evidence instead of rerunning equivalent read-only probes.
           - If `state == "GAME_OVER"`, stop further actions in that turn and record:
             1) likely cause sequence,
             2) prevention theory,
@@ -278,6 +279,15 @@ agent:
           - Treat level completion as two distinct cases:
             - Frontier completion (new): if the completed level was not already marked `SOLVED` in `theory.md` before this turn, stop actions immediately, update required files, and yield with an assistant message.
             - Replay completion (regression recovery): if that level was already marked `SOLVED` in `theory.md` before this turn, do not treat completion as terminal; continue toward the frontier per mode goals.
+      - literal: |
+          ## Script Safety Before Actions (required)
+          - Use two-phase execution for any non-trivial script:
+            1) preflight phase with no `env.step` calls (derive values, run checks, print diagnostics),
+            2) action phase only after preflight succeeds.
+          - When introducing new helper logic, run a helper-only preflight script first, then run the action script.
+          - Before numeric/ordering comparisons, guard values for `None` and unexpected types.
+          - Keep variable types stable within a script; avoid reusing names for different types.
+          - For frontier UNSOLVED levels, prefer smaller first action batches unless replaying a known solved path.
       - builtin: tools
 
   user_message:
@@ -326,7 +336,11 @@ modes:
             - Take actions in the model and compare results to your expectations and observed game state artifacts, iterate on model.py/model_lib.py to align the model with the game.
             - Use only public interfaces while probing (`env.step`, `get_state`, `get_action_history`, `get_action_record`, `diff`, and injected helpers). Do not use private internals (anything with a leading `_`).
             - Think about game theories and identify important unknowns to explore and questions to answer.
-            - Run a minimal set of actions in the game to gather new evidence.
+            - Run the minimum number of real-game actions needed to resolve the current highest-value unknown mechanics/rules.
+            - Do not run real-game actions when the same question can be answered from existing runtime state/history or from model-only execution.
+            - Before any real-game action batch, name the specific unknowns it will resolve; after the batch, either update model/theory from the new evidence or stop real-game actions.
+            - Novelty gate for read-only analysis: if a read-only probe does not produce new evidence for the current unknowns, mark it as non-novel and do not repeat materially equivalent probes on unchanged state.
+            - If two consecutive read-only probes are non-novel, stop read-only probing and do one of: (a) update model/theory from existing evidence, (b) run one targeted discriminating real-game action batch, or (c) yield for mode transition guidance.
             - Use this completion checklist to decide when to stop this mode and switch: (1) have game-state features/mechanics been reasonably explored in the real game, and (2) does model behavior match the game when the same actions are executed in both.
 
             ## Detailed Process
@@ -341,7 +355,10 @@ modes:
 
             ### Details
             - The supervisor may direct you to focus on modeling specific features / theories, follow their instructions.
+            - Apply two-phase execution in real-game scripts: preflight (no actions) then action phase only if preflight passes.
             - For level-local static geometry (for example fixed regions, gates, exits, anchors), once confirmed from runtime state/history, treat it as fixed for that level. Do not keep re-deriving constants unless contradictory evidence appears.
+            - Real-game actions are expensive and reduce score; translate learned mechanics/rules into model code as soon as evidence is sufficient, then continue iteration in the model.
+            - Avoid analysis loops: repeated near-identical read-only shell/REPL checks against unchanged state are not progress.
             - The game cannot be efficiently solved without understanding all game state features and mechanics. If there is game state you don't understand or evidence that can't be explained with your current theories, prioritize testing causal relationships in the game to develop and high confidence theory. Write low confidence theories and alternatives for every game state feature you can see but have insufficient evidence to determine their purpose.
             - Give each identified game state feature a name in theory.md and regularly reevaluate whether features are grouped correctly - combine or divide feature definitions as you learn more.
             - Maintain game goal theories, how levels are solved and how game over can be avoided. theory.md needs at least one level completion goal, if there are none take an educated guess based on your knowledge of common puzzle games. Review and update game goal confidence ratings. Goal theories that are not high confidence should have at least one alternative theory.
@@ -358,9 +375,12 @@ modes:
     agent_rules:
       operation: append
       requirements:
+        - "For read-only probes, state the unknown being tested and whether the result was novel. If the result is non-novel on unchanged state, do not repeat materially equivalent checks."
         - "When evidence is contradictory or unexplained after reasonable probing, enumerate plausible alternatives and the minimum probes needed to disambiguate. Do not expand theory lists without new contradictory evidence."
         - "Capture all new information gained, in theory.md, model.py/model_lib.py, and in your assistant messages."
         - "Verify all changes made to the model by running actions in the model."
+      violations:
+        - "Repeating materially equivalent read-only probes on unchanged game state without introducing a new unknown or discriminating test."
 
   solve_model:
     description: "Attempt to solve the level using only the model."
@@ -415,11 +435,12 @@ modes:
   solve_game:
     description: "Use play.py to solve the benchmark test game"
     start_when:
-      - "Confidence in the parity between the model and the game is high and play.py solves the model level."
+      - "Confidence in model/game parity is high for the current level, play.py has a level solver branch, and that branch has a successful model proof-run for the same level."
     stop_when:
       - "Game level complete"
       - "Game over happens or the current level regresses to a previously SOLVED level; switch to recover mode."
       - "Discrepancies are identified between how the model reacts to running play.py vs the game."
+      - "Current frontier level is still UNSOLVED after one deterministic real-game execution attempt; switch to model mode."
     system_message:
       operation: append
       parts:
@@ -430,7 +451,10 @@ modes:
       parts:
         - literal: |
             Solve the current game level using play.py. `arc_repl reset_level; arc_repl exec_file play.py` should be sufficient to solve the level when you are done. Your inputs are the game state, play.py, and play_lib.py. Your outputs are changes to play.py, play_lib.py, and assistant messages.
-            If the current game state is not the start of the level (actions have already been taken), use ad-hoc scripts based on play.py to try to solve the level.
+            This mode is execution-only, not exploration: run the existing solver and verify outcome.
+            If the level is UNSOLVED/frontier and the solver fails once in the real game, stop further real-game route experimentation and switch to model mode to improve play.py/play_lib.py there.
+            If the current game state is not the start of the level (actions have already been taken), do at most one deterministic continuation attempt from current state based on existing play.py logic; if not solved, switch to model mode.
+            If you need a debugging script in real game, use two-phase execution (preflight without `env.step`, then action phase) so coding errors do not burn actions.
             If the level is complete or solving it is blocked in some way currently, write an assistant message with everything you've learned.
             Maintain solutions to all solved game levels in play.py, which automatically run conditionally based on the current level number.
         - template: |
@@ -443,8 +467,11 @@ modes:
         - "The full solution to the level from the starting state must be recorded in play.py"
         - "When a level is completed that was previously unsolved, the solution must be added to the Levels section in theory.md. Then write an assistant message with all changes to theory.md."
         - "Complex and low level logic should be factored out of play.py into play_lib.py."
+        - "In solve_game on a frontier UNSOLVED level: execute, verify, and if the level does not complete after one deterministic attempt, yield for a switch back to model mode."
+        - "Do not create or run exploratory real-game route scripts in solve_game."
       violations:
         - "Repeatedly failing to solve the level without real progress or evidence-backed theory updates"
+        - "Exploring unknown routes/mechanics in the real game while in solve_game instead of switching back to model mode."
 
   recover:
     description: "Replay previously SOLVED levels quickly and safely to return to the frontier UNSOLVED level."
