@@ -40,6 +40,8 @@ supervisor:
       - "Treat repeated long real-game script runs with materially equivalent action sequences and no new expected signal as a violation pattern. Intervene immediately with a mode change or explicit corrective advice."
       - "Before allowing additional long real-game batches, require concrete novelty intent (what unknown is being resolved and what output would differentiate theories) and require immediate artifact updates after the batch."
       - "If solve_game repeats the same deterministic script without intervening model/theory updates, treat it as drift and force a switch back to model mode."
+      - "When contradictions appear, require one discriminating check that can resolve them; then require an artifact update or a mode transition. Do not permit open-ended reconciliation loops."
+      - "When intervening on drift, prefer action-oriented guidance: one specific next check, one required artifact update, and explicit transition criteria."
       - "At cadence, default to `continue` when there is no clear problem or high-value guidance opportunity. Do not interfere with the agent turn for elapsed-time reasons alone."
       - "Do not force handoff/fork based on elapsed time alone. Time can be a hint, never a sufficient condition."
   supervisor_triggers:
@@ -376,9 +378,11 @@ agent:
       - literal: |
           ## Runtime Event Handling (required)
           - Treat runtime game state and action history as source of truth: `state`, `current_level`, `levels_completed`, `full_reset`, and executed action records.
+          - Conversation compaction/handoff summaries are hints only. Do not treat summaries as authoritative facts; verify against runtime state/history and files.
           - If `theory.md` conflicts with runtime state or action history, runtime state/history wins. Update `theory.md` immediately.
           - Whenever you execute actions, immediately inspect resulting state (either print `get_state()` in script output or run `arc_repl status`).
           - Do not repeatedly re-check unchanged facts. If no game action has occurred since your last check and the same question was already answered, reuse prior evidence instead of rerunning equivalent read-only probes.
+          - Facts-freeze rule: if no real-game action occurred and no model artifact (`model.py`/`model_lib.py`) changed since the last validation, treat level geometry/constants/mechanics as unchanged and do not re-derive them.
           - If `state == "GAME_OVER"`, stop further actions in that turn and record:
             1) likely cause sequence,
             2) prevention theory,
@@ -386,7 +390,7 @@ agent:
           - Detect level transitions by comparing `levels_completed` / `current_level` before vs after actions.
           - Never assume continuation state; verify via runtime state fields before planning next actions.
           - State-change gate: if no real-game actions occurred since your last check, treat established facts as unchanged and reuse prior evidence instead of re-deriving constants.
-          - Evidence-linked claims: when asserting mechanics, coordinates, or causal effects, cite concrete evidence from `action_index` records or exact command output in this conversation.
+          - Evidence-linked claims for durable artifacts: when updating `theory.md` or writing final handoff claims, cite concrete evidence from `action_index` records or exact command output. Intermediate shell reasoning can be tentative without full citation.
           - Treat level completion as two distinct cases:
             - Frontier completion (new): if the completed level was not already marked `SOLVED` in `theory.md` before this turn, stop actions immediately, update required files, and yield with an assistant message.
             - Replay completion (regression recovery): if that level was already marked `SOLVED` in `theory.md` before this turn, do not treat completion as terminal; continue toward the frontier per mode goals.
@@ -412,7 +416,7 @@ agent:
     requirements:
       - "Any new information about game state features, mechanics, goals or level details must be recorded in theory.md."
       - "When game over is triggered, update the Goals section in theory.md with your theory about the cause so game over can be avoided in the future."
-      - "Claims about mechanics, coordinates, and causal effects must cite concrete evidence (action_index and/or exact command output). Uncited statements must be labeled hypotheses."
+      - "Durable claims written to theory.md and final handoff messages must cite concrete evidence (action_index and/or exact command output). Uncited statements must be labeled hypotheses."
     violations:
       - "Using exploratory/exhaustive search over unknown state/action space (for example broad BFS/DFS) to discover solutions in simulation or real game."
 
@@ -425,6 +429,7 @@ modes:
       - "The model has bugs."
     stop_when:
       - "Model completion checklist is satisfied for the current level: (1) game state features/mechanics have been reasonably explored in the real game with evidence in theory.md, and (2) model behavior matches game behavior when the same game actions are executed in both environments."
+      - "Concrete model exit gate: once one representative parity replay passes on the current level (covering relevant triggers/boundaries) and theory.md includes an ordered completion path for that level, yield immediately for solve_model."
       - "Game level advances to a frontier UNSOLVED level. Fork a new conversation in the same mode."
       - "Game over happens or the current level regresses to a previously SOLVED level; switch to recover mode."
     system_message:
@@ -464,6 +469,7 @@ modes:
             - If the checklist is satisfied and the level appears solvable in model, stop this mode and yield for transition to solve_model.
             - Transition trigger (required): if theory.md contains an explicit ordered completion path for the current level (for example, sequence of trigger effects and final completion condition), stop additional read-only re-derivation and yield for solve_model.
             - Do not run more than two consecutive zero-step/read-only `arc_repl exec` probes without either (a) updating artifacts, or (b) yielding for mode transition.
+            - Contradiction handling is one-pass: run one consolidated discriminating check to resolve conflicting evidence, then immediately either (a) patch artifacts (`model.py`/`model_lib.py`/`theory.md`) or (b) yield for transition; do not continue reconciliation-only loops.
             - Geometry lock-in before declaring parity: copy the current level's real initial `grid_hex_rows` into model level data first, then run a short parity replay (for example 5-15 actions that touch relevant boundaries/triggers) to verify movement/blocking behavior matches before claiming model parity.
             - If model says a sequence completes but real does not, assume model geometry/trigger coordinates are wrong until proven otherwise. Compare the final 1-3 actions in both environments and fix model before modifying play.py.
 
@@ -480,6 +486,7 @@ modes:
             ### Details
             - The supervisor may direct you to focus on modeling specific features / theories, follow their instructions.
             - Model session sanity: verify model level/state in command outputs before assuming continuity across shell invocations. If `set_level` and later `exec` outputs disagree, report exact command/output evidence and resolve that mismatch before further model reasoning.
+            - Prefer the canonical diagnostic snapshot script in the base system prompt for state/history inspection; reuse and lightly adapt it instead of creating many ad-hoc `python3 -c` parsing scripts.
             - Apply two-phase execution in real-game scripts: preflight (no actions) then action phase only if preflight passes.
             - For level-local static geometry (for example fixed regions, gates, exits, anchors), once confirmed from runtime state/history, treat it as fixed for that level. Do not keep re-deriving constants unless contradictory evidence appears.
             - Real-game actions are expensive and reduce score; translate learned mechanics/rules into model code as soon as evidence is sufficient, then continue iteration in the model.
