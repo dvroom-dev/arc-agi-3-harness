@@ -302,9 +302,12 @@ def _send_request(cwd: Path, conversation_id: str, request: dict) -> tuple[dict,
     if not socket_path.exists():
         if prior_session_artifacts:
             _raise_daemon_unavailable("socket_missing_after_prior_session")
-        if request_action != "status":
-            _raise_daemon_unavailable("socket_missing_before_bootstrap_status")
-        _spawn_for_request("socket_missing_initial_status_bootstrap")
+        if request_action == "shutdown":
+            _raise_daemon_unavailable("socket_missing_before_shutdown")
+        # Initial session bootstrap should work for all stateful actions, not
+        # only status. This is required for flows that intentionally start a new
+        # conversation/session key with reset_level (e.g. scored replay).
+        _spawn_for_request(f"socket_missing_initial_{request_action}_bootstrap")
 
     try:
         return _try_send(), session_created

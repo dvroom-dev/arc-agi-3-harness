@@ -79,20 +79,31 @@ def test_send_request_refuses_recovery_after_prior_session(monkeypatch, tmp_path
         arc_repl._send_request(tmp_path, "c1", {"action": "status", "game_id": "ls20"})
 
 
-def test_send_request_refuses_bootstrap_for_non_status(monkeypatch, tmp_path: Path) -> None:
+def test_send_request_bootstraps_for_non_status(monkeypatch, tmp_path: Path) -> None:
     arc_dir = tmp_path / "arc"
     arc_dir.mkdir()
     monkeypatch.setenv("ARC_STATE_DIR", str(arc_dir))
     monkeypatch.setattr(arc_repl, "_socket_path", lambda cwd, cid: tmp_path / "missing.sock")
+    spawned = {"n": 0}
     monkeypatch.setattr(
         arc_repl,
         "_spawn_daemon",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not spawn")),
+        lambda *a, **k: spawned.__setitem__("n", spawned["n"] + 1),
     )
+    monkeypatch.setattr(arc_repl, "_wait_for_daemon", lambda *a, **k: None)
     monkeypatch.setattr(arc_repl, "_default_game_id", lambda cwd: "ls20")
+    monkeypatch.setattr(
+        arc_repl,
+        "_send_ipc_request",
+        lambda *a, **k: {"ok": True, "action": "reset_level"},
+    )
 
-    with pytest.raises(RuntimeError, match=r"socket_missing_before_bootstrap_status"):
-        arc_repl._send_request(tmp_path, "c1", {"action": "exec", "game_id": "ls20"})
+    result, created = arc_repl._send_request(
+        tmp_path, "c1", {"action": "reset_level", "game_id": "ls20"}
+    )
+    assert result["ok"] is True
+    assert created is True
+    assert spawned["n"] == 1
 
 
 def test_main_exec_prints_script_stdout(monkeypatch, capsys) -> None:

@@ -214,6 +214,7 @@ def test_harness_score_after_solve_opens_mid_run_and_uses_start_mode(
                     "levels_completed": 0,
                     "win_levels": 7,
                     "available_actions": [0, 1, 2, 3, 4],
+                    "scorecard_id": env.get("ARC_SCORECARD_ID"),
                 }
                 _write_state(arc_state_dir, state="NOT_FINISHED", current_level=1, levels_completed=0)
             elif action == "reset_level":

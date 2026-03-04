@@ -367,6 +367,21 @@ def _run_single_game(
             runtime.super_env["ARC_REPL_SESSION_KEY"] = runtime.active_repl_session_key
             runtime.last_repl_daemon_pid = None
 
+            # Explicitly bootstrap the fresh scored REPL session before reset.
+            # This avoids relying on action-specific implicit bootstrap behavior.
+            _, scored_status_stdout, scored_status_rc = runtime.run_arc_repl(
+                {"action": "status", "game_id": args.game_id}
+            )
+            if scored_status_rc != 0:
+                runtime.log(
+                    "[harness] score-after-solve: failed to bootstrap scored replay session"
+                )
+                if scored_status_stdout:
+                    runtime.log(
+                        f"[harness] score-after-solve status output: {scored_status_stdout}"
+                    )
+                return False
+
             _, reset_stdout, reset_rc = runtime.run_arc_repl(
                 {"action": "reset_level", "game_id": args.game_id}
             )
