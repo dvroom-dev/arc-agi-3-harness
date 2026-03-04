@@ -7,7 +7,16 @@ __pycache__/
 .mypy_cache/
 .ctxs/
 runs/
+experiments/
 .ai-supervisor/
 environment_files/
 .env
 *.log
+
+# Local benchmark scratch/config variants
+super-minimal.yaml
+super.code_model.yaml
+$RUN_DIR/
+
+# Stray local game artifact roots (generated outside run dirs)
+game_*/
