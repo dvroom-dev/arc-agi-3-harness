@@ -74,6 +74,26 @@ def test_arc_repl_cli_exec_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "print('ok')" in captured["payload"]["script"]
 
 
+def test_arc_repl_cli_enable_history_functions_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured = {}
+
+    def fake_run(payload):
+        captured["payload"] = payload
+        return 0
+
+    monkeypatch.setattr(arc_repl_cli, "_run", fake_run)
+    monkeypatch.setattr(
+        arc_repl_cli.sys,
+        "argv",
+        ["arc_repl", "--enable-history-functions", "status", "--game-id", "ls20"],
+    )
+    rc = arc_repl_cli.main()
+    assert rc == 0
+    assert captured["payload"]["action"] == "status"
+    assert captured["payload"]["game_id"] == "ls20"
+    assert captured["payload"]["enable_history_functions"] is True
+
+
 def test_arc_repl_cli_exec_file_payload(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

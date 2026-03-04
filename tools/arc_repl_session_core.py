@@ -4,10 +4,8 @@ import os
 import re
 from pathlib import Path
 from typing import Any
-
 import numpy as np
 from arcengine import GameAction
-
 try:
     from arc_repl_action_history import ActionHistoryStore
     from arc_repl_session_artifacts import steps_since_level_start, write_state_artifacts
@@ -35,6 +33,7 @@ class BaseReplSession:
         cwd: Path,
         conversation_id: str,
         requested_game_id: str,
+        enable_history_functions: bool,
         deps,
     ) -> None:
         self.cwd = cwd
@@ -87,11 +86,10 @@ class BaseReplSession:
             "GA": GameAction,
             "get_state": self._state_payload,
             "diff": self.diff,
-            "get_action_history": self.get_action_history,
-            "get_action_record": self.get_action_record,
         }
+        self.history_functions_enabled = False
+        self.set_history_helpers_enabled(bool(enable_history_functions))
         self._refresh_play_lib(force=True)
-
     def _same_game_lineage(self, requested_game_id: str) -> bool:
         return _same_game_lineage(
             self.game_id,
@@ -109,7 +107,6 @@ class BaseReplSession:
         source = self.play_lib_file.read_text()
         exec(compile(source, str(self.play_lib_file), "exec"), self.globals)
         self.last_play_lib_mtime_ns = mtime_ns
-
     def _state_payload_for(self, frame, pixels: np.ndarray) -> dict:
         scorecard_id = str(os.getenv("ARC_SCORECARD_ID", "") or "").strip() or None
         return {
@@ -126,10 +123,8 @@ class BaseReplSession:
             "action_history_count": len(self.action_history.records),
             "action_history_file": str(self.action_history_path),
         }
-
     def _state_payload(self) -> dict:
         return self._state_payload_for(self.frame, self.pixels)
-
     def _append_action_history_record(
         self,
         *,
@@ -158,10 +153,8 @@ class BaseReplSession:
             state_after=after_state,
             diff_payload=diff_payload,
         )
-
     def get_action_record(self, action_index: int) -> dict | None:
         return self.action_history.get_record(action_index)
-
     def get_action_history(
         self,
         *,
@@ -178,13 +171,20 @@ class BaseReplSession:
             until=until,
             last=last,
         )
-
+    def set_history_helpers_enabled(self, enabled: bool) -> None:
+        if enabled:
+            self.globals["get_action_history"] = self.get_action_history
+            self.globals["get_action_record"] = self.get_action_record
+            self.history_functions_enabled = True
+            return
+        self.globals.pop("get_action_history", None)
+        self.globals.pop("get_action_record", None)
+        self.history_functions_enabled = False
     def _sync_history_file(self) -> None:
         self.history["game_id"] = self.game_id
         self.history["events"] = self.events
         self.history["turn"] = self.turn
         self.deps._save_history(self.cwd, self.history)
-
     def _reset_noop_reason(self) -> str | None:
         """Return noop reason when reset_level must not call env.reset()."""
         if steps_since_level_start(self.events) == 0:
@@ -206,7 +206,6 @@ class BaseReplSession:
                 if same_level and same_progress:
                     return "consecutive_reset_guard"
         return None
-
     def _normalize_action(self, action: Any) -> tuple[GameAction, str]:
         if isinstance(action, GameAction):
             return action, action.name
@@ -236,7 +235,6 @@ class BaseReplSession:
             return member, member.name
         member = self.deps._action_from_event_name(name)
         return member, member.name
-
     def diff(
         self,
         before_state: Any,
@@ -266,7 +264,6 @@ class BaseReplSession:
                 for (r, c, b, a) in changes
             ],
         }
-
     def _finalize_result(
         self,
         *,
@@ -338,7 +335,6 @@ class BaseReplSession:
             },
         }
         return result
-
     def do_status(self, requested_game_id: str, *, session_created: bool) -> dict:
         if requested_game_id and not self._same_game_lineage(requested_game_id):
             raise RuntimeError(
@@ -375,7 +371,6 @@ class BaseReplSession:
             trace_path=trace_path,
             session_created=session_created,
         )
-
     def do_reset_level(self, requested_game_id: str, *, session_created: bool) -> dict:
         if requested_game_id and not self._same_game_lineage(requested_game_id):
             raise RuntimeError(
@@ -431,7 +426,6 @@ class BaseReplSession:
             result["reset_noop"] = True
             result["noop_reason"] = noop_reason
             return result
-
         self.frame = self.env.reset()
         if self.frame is None:
             raise RuntimeError("env.reset() returned None")
@@ -451,7 +445,6 @@ class BaseReplSession:
             after_frame=self.frame,
             after_pixels=np.array(self.pixels, copy=True),
         )
-
         trace_path = write_state_artifacts(
             self,
             action_label="reset_level",
@@ -479,7 +472,6 @@ class BaseReplSession:
         )
         result["reset_noop"] = False
         return result
-
     def do_exec(
         self,
         requested_game_id: str,

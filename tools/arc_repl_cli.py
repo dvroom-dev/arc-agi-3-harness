@@ -2,10 +2,10 @@
 """Command-line wrapper for arc_repl tool.
 
 Usage:
-  arc_repl status [--game-id GAME]
-  arc_repl reset_level [--game-id GAME]
-  arc_repl exec [--game-id GAME] < script.py
-  arc_repl exec_file [--game-id GAME] SCRIPT_PATH
+  arc_repl [--enable-history-functions] status [--game-id GAME]
+  arc_repl [--enable-history-functions] reset_level [--game-id GAME]
+  arc_repl [--enable-history-functions] exec [--game-id GAME] < script.py
+  arc_repl [--enable-history-functions] exec_file [--game-id GAME] SCRIPT_PATH
   arc_repl shutdown
 
 Output contract:
@@ -70,6 +70,14 @@ def _run(payload: dict) -> int:
 
 def main() -> int:
     parser = JsonArgumentParser(description="ARC REPL CLI")
+    parser.add_argument(
+        "--enable-history-functions",
+        action="store_true",
+        help=(
+            "Enable read-only action-history helpers (`get_action_history`, "
+            "`get_action_record`) inside arc_repl exec globals."
+        ),
+    )
     sub = parser.add_subparsers(dest="action", required=True)
 
     p_status = sub.add_parser("status")
@@ -89,7 +97,9 @@ def main() -> int:
 
     args = parser.parse_args()
 
-    payload: dict[str, str] = {"action": args.action}
+    payload: dict[str, object] = {"action": args.action}
+    if bool(getattr(args, "enable_history_functions", False)):
+        payload["enable_history_functions"] = True
     game_id = str(getattr(args, "game_id", "") or "").strip()
     if game_id:
         payload["game_id"] = game_id

@@ -88,6 +88,8 @@ def test_repl_session_status_reset_exec(monkeypatch, tmp_path: Path) -> None:
         conversation_id="conv-1",
         requested_game_id="ls20",
     )
+    assert "get_action_history" not in session.globals
+    assert "get_action_record" not in session.globals
 
     status = session.do_status("ls20", session_created=True)
     assert status["ok"] is True
@@ -107,6 +109,26 @@ def test_repl_session_status_reset_exec(monkeypatch, tmp_path: Path) -> None:
     assert result["ok"] is True
     assert result["steps_executed"] >= 1
     assert result["state"] in {"NOT_FINISHED", "WIN"}
+
+
+def test_repl_history_helpers_can_be_enabled(monkeypatch, tmp_path: Path) -> None:
+    _patch_session_dependencies(monkeypatch, tmp_path)
+    session = arc_repl.ReplSession(
+        cwd=tmp_path,
+        conversation_id="conv-1",
+        requested_game_id="ls20",
+        enable_history_functions=True,
+    )
+    assert "get_action_history" in session.globals
+    assert "get_action_record" in session.globals
+
+    session.set_history_helpers_enabled(False)
+    assert "get_action_history" not in session.globals
+    assert "get_action_record" not in session.globals
+
+    session.set_history_helpers_enabled(True)
+    assert "get_action_history" in session.globals
+    assert "get_action_record" in session.globals
 
 
 def test_repl_reset_level_is_noop_at_level_start(monkeypatch, tmp_path: Path) -> None:

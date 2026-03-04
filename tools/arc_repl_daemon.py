@@ -114,6 +114,12 @@ def run_daemon(
     def _handle_request(request: dict) -> tuple[dict, bool]:
         action = str(request.get("action", "")).strip()
         req_game_id = str(request.get("game_id", "") or "").strip()
+        enable_history_functions = bool(request.get("enable_history_functions", False))
+        if enable_history_functions and hasattr(session, "set_history_helpers_enabled"):
+            try:
+                session.set_history_helpers_enabled(True)
+            except Exception:
+                pass
 
         if action == "ping":
             return {"ok": True, "action": "ping"}, False

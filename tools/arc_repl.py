@@ -66,14 +66,11 @@ from arc_repl_paths import (
     socket_path,
     spawn_parent_identity_from_env,
 )
-
 SCHEMA_VERSION = "arc_repl.v1"
 SOCKET_WAIT_TIMEOUT_S = 90.0
 
 def _load_history(cwd: Path, game_id: str) -> dict:
     return _load_history_impl(cwd, game_id, _make_id_candidates)
-
-
 _session_dir = lambda cwd, conversation_id: session_dir(_arc_dir(cwd), conversation_id)
 _socket_path = lambda cwd, conversation_id: socket_path(_arc_dir(cwd), conversation_id)
 _pid_path = lambda cwd, conversation_id: pid_path(_arc_dir(cwd), conversation_id)
@@ -82,8 +79,6 @@ _daemon_log_path = lambda cwd, conversation_id: daemon_log_path(_arc_dir(cwd), c
 _lifecycle_path = lambda cwd, conversation_id: lifecycle_path(_arc_dir(cwd), conversation_id)
 _ipc_paths = lambda cwd, conversation_id: ipc_paths(_arc_dir(cwd), conversation_id)
 _send_ipc_request = lambda cwd, conversation_id, request, timeout_s: send_ipc_request(arc_dir=_arc_dir(cwd), conversation_id=conversation_id, request=request, timeout_s=timeout_s)
-
-
 def _append_lifecycle_event(cwd: Path, conversation_id: str, event: str, **fields: object) -> None:
     try:
         session_dir = _session_dir(cwd, conversation_id)
@@ -122,22 +117,25 @@ def _emit_json(payload: dict) -> None:
     sys.stdout.write(json.dumps(payload, indent=2))
     if not sys.stdout.isatty():
         sys.stdout.write("\n")
-def _conversation_id() -> str:
-    return conversation_id_from_env()
-
-
+def _conversation_id() -> str: return conversation_id_from_env()
 def _session_key() -> str:
     return session_key_from_env()
-
-
 def _same_game_lineage(existing_game_id: str, requested_game_id: str) -> bool:
     return _same_game_lineage_impl(existing_game_id, requested_game_id, _make_id_candidates)
 class ReplSession(BaseReplSession):
-    def __init__(self, *, cwd: Path, conversation_id: str, requested_game_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        cwd: Path,
+        conversation_id: str,
+        requested_game_id: str,
+        enable_history_functions: bool = False,
+    ) -> None:
         super().__init__(
             cwd=cwd,
             conversation_id=conversation_id,
             requested_game_id=requested_game_id,
+            enable_history_functions=enable_history_functions,
             deps=sys.modules[__name__],
         )
 def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
@@ -432,6 +430,8 @@ def main() -> int:
         "action": action,
         "game_id": requested_game_id,
     }
+    if bool(args.get("enable_history_functions", False)):
+        request["enable_history_functions"] = True
     if action == "exec":
         request["script"] = str(args.get("script", ""))
         script_path = str(args.get("script_path", "") or "").strip()
