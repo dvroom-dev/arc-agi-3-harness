@@ -150,7 +150,7 @@ agent:
           - `arc_repl` exec globals include `env`, `current`, `GameAction`/`GA`, `diff(...)`, `get_state()`, and helpers from `play_lib.py`.
           - `model.py` exec globals include the same plus helpers from `model_lib.py`.
           - Use enum symbols for actions (`GameAction.ACTION1`, `GA.ACTION2`, etc.). Do not cast raw integers with `GameAction(2)`; that has been error-prone in this harness.
-          - Use only public interfaces in scripts: `env.step(...)`, `get_state()`, `diff(...)`, `get_action_history(...)`, `get_action_record(...)`, and injected helpers from `play_lib.py`/`model_lib.py`.
+          - Use only public interfaces in scripts: `env.step(...)`, `get_state()`, `diff(...)`, and injected helpers from `play_lib.py`/`model_lib.py`.
           - Do not use private or undocumented internals (anything starting with `_`), for example `env._init_level`, `env._level_state`, or private frame/env fields. They are unstable and not part of the supported interface.
           - Historical turn artifacts are written to disk under `$GAME_DIR` after every `arc_repl` call:
             - `level_<n>/turn_<m>/before_state.hex`
@@ -159,11 +159,7 @@ agent:
             - `level_<n>/turn_<m>/meta.json` (action label, turn, levels, state transitions, changed-pixel summary)
             - `level_<n>/turn_index.jsonl` and `$GAME_DIR/turn_index.jsonl` (append-only turn ledgers)
           - Prefer these on-disk turn artifacts for historical analysis. Avoid repeated read-only `arc_repl exec` probes when the needed evidence is already in files.
-          - `arc_repl` exec globals also include persistent action-history helpers:
-            - `get_action_history(...)` returns game action records across all levels in this game for this run.
-            - `get_action_record(action_index)` returns one action record by index.
-            - Use `get_action_history(last=...)`, `get_action_history(level=...)`, or `get_action_history(action_name="ACTION6")` to filter.
-            - Each action record includes full `state_before`, full `state_after`, and `diff` for that action. For level transitions, `diff.suppressed_cross_level_diff=true` and you should inspect `state_before`/`state_after` directly.
+          - Optional history helper functions in REPL exec globals are disabled by default (`get_action_history`, `get_action_record`) because equivalent data is persisted to files. Enable only if needed by calling `arc_repl --enable-history-functions ...`.
           - Do not import `play_lib` or `model_lib` inside REPL scripts; helper symbols are injected into exec globals.
           - Example (direct helper use in `( arc_repl | model.py ) exec`):
             <example>
@@ -178,28 +174,6 @@ agent:
                 for i, a in enumerate(actions[:10], 1):
                     r = env.step(a)
                     print({"step": i, "action": int(a), "state": r.state.name, "level": r.current_level})
-
-            # Inspect action history and per-action before/after/diff:
-            recent = get_action_history(last=3)
-            for rec in recent:
-                print({
-                    "action_index": rec["action_index"],
-                    "action_name": rec["action_name"],
-                    "level_before": rec["level_before"],
-                    "level_after": rec["level_after"],
-                    "changed_pixels": rec["diff"].get("changed_pixels"),
-                    "suppressed_cross_level_diff": rec["diff"].get("suppressed_cross_level_diff", False),
-                })
-
-            # Look up one action in detail:
-            first = get_action_record(1)
-            if first:
-                print({
-                    "before_state": first["state_before"]["state"],
-                    "after_state": first["state_after"]["state"],
-                    "before_grid_top_row": first["state_before"]["grid_hex_rows"][0],
-                    "after_grid_top_row": first["state_after"]["grid_hex_rows"][0],
-                })
             PY
             </example>
           - Example (safe state/action usage to avoid common script failures):
@@ -421,7 +395,7 @@ modes:
             - Read the current game state plus on-disk turn artifacts in `$GAME_DIR/level_<n>/turn_<m>/...` and `turn_index.jsonl` to learn game features and mechanics.
             - Codify these learnings into model code in model.py and reusable helpers in model_lib.py. Describe them in theory.md.
             - Take actions in the model and compare results to your expectations and observed game state artifacts, iterate on model.py/model_lib.py to align the model with the game.
-            - Use only public interfaces while probing (`env.step`, `get_state`, `get_action_history`, `get_action_record`, `diff`, and injected helpers). Do not use private internals (anything with a leading `_`).
+            - Use only public interfaces while probing (`env.step`, `get_state`, `diff`, and injected helpers). Do not use private internals (anything with a leading `_`).
             - Think about game theories and identify important unknowns to explore and questions to answer.
             - Run the minimum number of real-game actions needed to resolve the current highest-value unknown mechanics/rules.
             - Do not run real-game actions when the same question can be answered from existing runtime state/history or from model-only execution.
