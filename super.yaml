@@ -37,6 +37,9 @@ supervisor:
       - "For new frontier level completions, require replay artifacts before moving on: play.py level branch, play_lib helpers as needed, and a recorded proof run."
       - "If theory.md already contains a concrete, ordered causal completion path for the current level, do not allow repeated read-only re-derivations of that same path in model mode. Direct immediate transition to solve_model artifact completion."
       - "When model-mode turns are dominated by zero-step/read-only exec output without net artifact progress (model.py/model_lib.py/play.py/play_lib.py/theory.md), treat as drift and intervene with explicit transition guidance."
+      - "Treat repeated long real-game script runs with materially equivalent action sequences and no new expected signal as a violation pattern. Intervene immediately with a mode change or explicit corrective advice."
+      - "Before allowing additional long real-game batches, require concrete novelty intent (what unknown is being resolved and what output would differentiate theories) and require immediate artifact updates after the batch."
+      - "If solve_game repeats the same deterministic script without intervening model/theory updates, treat it as drift and force a switch back to model mode."
       - "At cadence, default to `continue` when there is no clear problem or high-value guidance opportunity. Do not interfere with the agent turn for elapsed-time reasons alone."
       - "Do not force handoff/fork based on elapsed time alone. Time can be a hint, never a sufficient condition."
   supervisor_triggers:
@@ -144,6 +147,7 @@ agent:
           - Available actions are game-specific; always consult `get_state()["available_actions"]`.
           - `arc_repl` exec globals include `env`, `current`, `GameAction`/`GA`, `diff(...)`, `get_state()`, and helpers from `play_lib.py`.
           - `model.py` exec globals include the same plus helpers from `model_lib.py`.
+          - Use enum symbols for actions (`GameAction.ACTION1`, `GA.ACTION2`, etc.). Do not cast raw integers with `GameAction(2)`; that has been error-prone in this harness.
           - Use only public interfaces in scripts: `env.step(...)`, `get_state()`, `diff(...)`, `get_action_history(...)`, `get_action_record(...)`, and injected helpers from `play_lib.py`/`model_lib.py`.
           - Do not use private or undocumented internals (anything starting with `_`), for example `env._init_level`, `env._level_state`, or private frame/env fields. They are unstable and not part of the supported interface.
           - `arc_repl` exec globals also include persistent action-history helpers:
@@ -187,6 +191,18 @@ agent:
                     "before_grid_top_row": first["state_before"]["grid_hex_rows"][0],
                     "after_grid_top_row": first["state_after"]["grid_hex_rows"][0],
                 })
+            PY
+            </example>
+          - Example (safe state/action usage to avoid common script failures):
+            <example>
+            arc_repl exec <<'PY'
+            s0 = get_state()
+            print({"before_level": s0["current_level"], "before_state": s0["state"]})
+
+            # Use enum actions directly; avoid GameAction(<int>) casts.
+            r = env.step(GA.ACTION1)
+            s1 = get_state()
+            print({"step_state": r.state.name, "after_level": s1["current_level"], "after_state": s1["state"]})
             PY
             </example>
           - Example (single-call diagnostic snapshot with current state + level-initial state + high-signal diffs):
@@ -439,13 +455,17 @@ modes:
             - Do not run real-game actions when the same question can be answered from existing runtime state/history or from model-only execution.
             - When a real-game batch yields novel causal evidence, immediately pause additional real-game probing and execute the model update cycle (theory/model updates + parity checks) before any next real-game batch.
             - Before any real-game action batch, state the unknowns it will resolve, why existing history/model cannot already answer them, and expected outcomes that would discriminate theories.
+            - For any real-game batch longer than 8 actions, include a one-line precommit in your assistant message before running it: (a) unknown being resolved, (b) expected novel signal, and (c) which artifact(s) you will update immediately after.
             - After each real-game batch, either update model/theory from new evidence or mark it inconclusive and define exactly one follow-up discriminating probe.
+            - If a real-game batch is non-novel, do not run another long real-game batch until you update model/theory and explain why another batch is still required.
             - Novelty gate for read-only analysis: if a read-only probe does not produce new evidence for the current unknowns, mark it as non-novel and do not repeat materially equivalent probes on unchanged state.
             - If two consecutive read-only probes are non-novel, stop read-only probing and do one of: (a) update model/theory from existing evidence, (b) run one targeted discriminating real-game action batch, or (c) yield for mode transition guidance.
             - Use this completion checklist to decide when to stop this mode and switch: (1) have game-state features/mechanics been reasonably explored in the real game, and (2) does model behavior match the game when the same actions are executed in both.
             - If the checklist is satisfied and the level appears solvable in model, stop this mode and yield for transition to solve_model.
             - Transition trigger (required): if theory.md contains an explicit ordered completion path for the current level (for example, sequence of trigger effects and final completion condition), stop additional read-only re-derivation and yield for solve_model.
             - Do not run more than two consecutive zero-step/read-only `arc_repl exec` probes without either (a) updating artifacts, or (b) yielding for mode transition.
+            - Geometry lock-in before declaring parity: copy the current level's real initial `grid_hex_rows` into model level data first, then run a short parity replay (for example 5-15 actions that touch relevant boundaries/triggers) to verify movement/blocking behavior matches before claiming model parity.
+            - If model says a sequence completes but real does not, assume model geometry/trigger coordinates are wrong until proven otherwise. Compare the final 1-3 actions in both environments and fix model before modifying play.py.
 
             ## Detailed Process
 
@@ -473,6 +493,35 @@ modes:
               - But if there's a theory to explain why the 8 features might be following the same logical rules, it would be more efficient to probe 2-3 of them and extrapolate if they act consistently.
               - On another dimension, take care not to trigger game over with your actions, many games trigger game over after some number of actions without calling `arc_repl reset_level`. Game over will regress the state back to the first level so if the level is > 1, prefer reset_level over risking game over.
             - Always write an assistant message with everything you learned when yielding control to the user.
+            - Example (level-init geometry lock + parity check):
+              <example>
+              # 1) Read real initial state for current level
+              arc_repl exec <<'PY'
+              import json
+              s = get_state()
+              print(json.dumps({
+                  "level": s["current_level"],
+                  "state": s["state"],
+                  "grid_hex_rows": s["grid_hex_rows"],
+              }))
+              PY
+
+              # 2) Update model level base grid/constants from that state (edit model_lib.py)
+              # 3) Verify parity on a short discriminating sequence in both model and game:
+              python3 "$GAME_DIR/model.py" set_level <n>
+              python3 "$GAME_DIR/model.py" exec <<'PY'
+              seq = [GA.ACTION1, GA.ACTION3, GA.ACTION3, GA.ACTION2, GA.ACTION4]
+              for a in seq:
+                  env.step(a)
+              print(get_state()["current_level"])
+              PY
+              arc_repl exec <<'PY'
+              seq = [GA.ACTION1, GA.ACTION3, GA.ACTION3, GA.ACTION2, GA.ACTION4]
+              for a in seq:
+                  env.step(a)
+              print(get_state()["current_level"])
+              PY
+              </example>
         - template: |
             <supervisor-context>
             {{supervisor.user_message}}
@@ -566,6 +615,8 @@ modes:
             If the deterministic run fails on a frontier UNSOLVED level, stop and switch to model mode with mismatch evidence. Do not explore unknown routes in solve_game.
             If the level is UNSOLVED/frontier and the solver fails once in the real game, stop further real-game route experimentation and switch to model mode to improve play.py/play_lib.py there.
             If the current game state is not the start of the level (actions have already been taken), do at most one deterministic continuation attempt from current state based on existing play.py logic; if not solved, switch to model mode.
+            If a deterministic run fails but the last step was a normal movement step (for example non-zero changed pixels and no level transition), do one minimal continuation attempt from current state (1-3 actions max) before any reset or full rerun.
+            Never rerun the same deterministic solve script in solve_game without intervening model/theory updates that justify the retry.
             If you need a debugging script in real game, use two-phase execution (preflight without `env.step`, then action phase) so coding errors do not burn actions.
             If the level is complete or solving it is blocked in some way currently, write an assistant message with everything you've learned.
             Maintain solutions to all solved game levels in play.py, which automatically run conditionally based on the current level number.
@@ -585,6 +636,7 @@ modes:
       violations:
         - "Repeatedly failing to solve the level without real progress or evidence-backed theory updates"
         - "Exploring unknown routes/mechanics in the real game while in solve_game instead of switching back to model mode."
+        - "Rerunning materially equivalent deterministic solve scripts in solve_game without intervening model/theory updates that justify the retry."
 
   recover:
     description: "Replay previously SOLVED levels quickly and safely to return to the frontier UNSOLVED level."
