@@ -1,0 +1,1 @@
+Direct Claude experiment for L5 modeling from L4 baseline.\n- model.py and model_lib.py were copied from run baseline and trimmed to <=L4.\n- level_5_initial.hex contains the first observed L5 state.\n

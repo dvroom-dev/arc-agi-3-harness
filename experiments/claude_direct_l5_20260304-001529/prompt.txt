@@ -1,0 +1,21 @@
+You are given an LS20 model baseline truncated to levels 1-4 only:
+- model.py
+- model_lib.py
+
+You are also given the initial level-5 game state grid:
+- level_5_initial.hex
+
+Task:
+1) Decide whether additional real-game exploration is required to add level 5 to the model, based only on existing level 1-4 mechanics and the level_5_initial.hex layout.
+2) If additional exploration is NOT required, implement level-5 support in model_lib.py (and model.py only if needed) so set_level 5 works with this level data and known mechanics.
+3) Keep changes minimal and consistent with existing architecture.
+4) Run quick local checks (python compile and a minimal runtime check) and report results.
+
+Constraints:
+- No super, no external web lookups.
+- Do not add speculative new mechanics beyond what is necessary for level 5 as a combination of known mechanics.
+- Prefer editing model_lib.py only.
+
+Output:
+- First line: "exploration_needed: yes|no"
+- Then concise rationale and a summary of file edits and validation results.
