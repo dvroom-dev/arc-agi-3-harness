@@ -236,3 +236,43 @@ def test_repl_action_history_contains_before_after_and_diff(monkeypatch, tmp_pat
     payload = json.loads(history_file.read_text())
     assert isinstance(payload.get("records"), list)
     assert len(payload["records"]) >= 1
+
+
+def test_repl_writes_level_turn_files(monkeypatch, tmp_path: Path) -> None:
+    _patch_session_dependencies(monkeypatch, tmp_path)
+    session = arc_repl.ReplSession(
+        cwd=tmp_path,
+        conversation_id="conv-1",
+        requested_game_id="ls20",
+    )
+
+    _ = session.do_status("ls20", session_created=False)
+    _ = session.do_exec(
+        "ls20",
+        "env.step(GameAction.ACTION1)\n",
+        session_created=False,
+    )
+
+    game_dir = tmp_path / "game_ls20"
+    level_dir = game_dir / "level_1"
+    turn_1 = level_dir / "turn_0001"
+    turn_2 = level_dir / "turn_0002"
+
+    for turn_dir in (turn_1, turn_2):
+        assert (turn_dir / "before_state.hex").exists()
+        assert (turn_dir / "after_state.hex").exists()
+        assert (turn_dir / "diff.hex").exists()
+        assert (turn_dir / "meta.json").exists()
+        meta = json.loads((turn_dir / "meta.json").read_text())
+        assert meta["schema_version"] == "arc_repl.level_turn_artifact.v1"
+        assert meta["tool_turn"] in {1, 2}
+
+    level_index = level_dir / "turn_index.jsonl"
+    game_index = game_dir / "turn_index.jsonl"
+    assert level_index.exists()
+    assert game_index.exists()
+    level_entries = [json.loads(line) for line in level_index.read_text().splitlines() if line.strip()]
+    game_entries = [json.loads(line) for line in game_index.read_text().splitlines() if line.strip()]
+    assert len(level_entries) >= 2
+    assert len(game_entries) >= 2
+    assert level_entries[-1]["turn_dir"].endswith("turn_0002")

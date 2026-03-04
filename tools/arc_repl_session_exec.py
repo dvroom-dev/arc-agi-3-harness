@@ -236,6 +236,8 @@ def execute_exec_turn(
     trace_path = write_state_artifacts(
         session,
         action_label=f"exec({script_label})",
+        state_before_action=state_before,
+        levels_before_action=levels_before,
         script_output=script_output,
         error=error,
         pre_pixels=pre_pixels,

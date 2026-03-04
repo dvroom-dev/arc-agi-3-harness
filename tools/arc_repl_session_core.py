@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import json
 import os
 import re
@@ -29,8 +28,6 @@ except Exception:
         _grid_from_hex_rows,
         _same_game_lineage,
     )
-
-
 class BaseReplSession:
     def __init__(
         self,
@@ -101,7 +98,6 @@ class BaseReplSession:
             requested_game_id,
             self.deps._make_id_candidates,
         )
-
     def _refresh_play_lib(self, *, force: bool = False) -> None:
         try:
             stat = self.play_lib_file.stat()
@@ -351,14 +347,17 @@ class BaseReplSession:
 
         state_before = str(self.frame.state.value)
         levels_before = int(self.frame.levels_completed)
+        pre_pixels = np.array(self.pixels, copy=True)
         self.turn += 1
         self._sync_history_file()
         trace_path = write_state_artifacts(
             self,
             action_label="status",
+            state_before_action=state_before,
+            levels_before_action=levels_before,
             script_output="",
             error="",
-            pre_pixels=None,
+            pre_pixels=pre_pixels,
             step_snapshots=[],
             step_results=[],
         )
@@ -367,7 +366,7 @@ class BaseReplSession:
             requested_game_id=requested_game_id,
             state_before_action=state_before,
             levels_before_action=levels_before,
-            pre_pixels=None,
+            pre_pixels=pre_pixels,
             step_snapshots=[],
             step_results=[],
             script_output="",
@@ -407,9 +406,11 @@ class BaseReplSession:
             trace_path = write_state_artifacts(
                 self,
                 action_label="reset_level(noop)",
+                state_before_action=state_before,
+                levels_before_action=levels_before,
                 script_output="",
                 error="",
-                pre_pixels=None,
+                pre_pixels=before_pixels,
                 step_snapshots=[],
                 step_results=[],
             )
@@ -418,7 +419,7 @@ class BaseReplSession:
                 requested_game_id=requested_game_id,
                 state_before_action=state_before,
                 levels_before_action=levels_before,
-                pre_pixels=None,
+                pre_pixels=before_pixels,
                 step_snapshots=[],
                 step_results=[],
                 script_output="",
@@ -454,9 +455,11 @@ class BaseReplSession:
         trace_path = write_state_artifacts(
             self,
             action_label="reset_level",
+            state_before_action=state_before,
+            levels_before_action=levels_before,
             script_output="",
             error="",
-            pre_pixels=None,
+            pre_pixels=before_pixels,
             step_snapshots=[],
             step_results=[],
         )
@@ -465,7 +468,7 @@ class BaseReplSession:
             requested_game_id=requested_game_id,
             state_before_action=state_before,
             levels_before_action=levels_before,
-            pre_pixels=None,
+            pre_pixels=before_pixels,
             step_snapshots=[],
             step_results=[],
             script_output="",
