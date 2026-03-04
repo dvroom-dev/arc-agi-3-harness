@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import re
 import sys
 import time
@@ -7,7 +6,6 @@ import traceback
 from argparse import Namespace
 from datetime import datetime, timezone
 from pathlib import Path
-
 from harness_explore import run_input_exploration_from_reset
 from harness_repl_health import format_repl_health_summary
 from harness_repl_health import collect_repl_health, format_repl_crash_diagnostics
@@ -25,15 +23,12 @@ from harness_scorecard_helpers import (
 from harness_scorecard_timeout_hack import (
     maybe_inject_scorecard_keepalive_hack,
 )
-
 def _resolve_arc_base_url(args) -> str:
     if args.arc_base_url and str(args.arc_base_url).strip():
         return str(args.arc_base_url).strip()
     if args.arc_backend == "server":
         return "http://127.0.0.1:8000"
     return "https://three.arcprize.org"
-
-
 def _resolve_game_ids(args) -> list[str]:
     raw = str(getattr(args, "game_ids", "") or "").strip()
     if not raw:
@@ -52,7 +47,6 @@ def _resolve_game_ids(args) -> list[str]:
         seen.add(token)
         unique.append(token)
     return unique
-
 
 def _session_name_for_game(session_base: str, game_id: str, index: int) -> str:
     safe_game = re.sub(r"[^A-Za-z0-9_.-]+", "-", game_id).strip("-")

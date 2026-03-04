@@ -68,7 +68,6 @@ from arc_repl_paths import (
 )
 SCHEMA_VERSION = "arc_repl.v1"
 SOCKET_WAIT_TIMEOUT_S = 90.0
-
 def _load_history(cwd: Path, game_id: str) -> dict:
     return _load_history_impl(cwd, game_id, _make_id_candidates)
 _session_dir = lambda cwd, conversation_id: session_dir(_arc_dir(cwd), conversation_id)
@@ -141,7 +140,6 @@ class ReplSession(BaseReplSession):
 def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
     session_dir = _session_dir(cwd, conversation_id)
     session_dir.mkdir(parents=True, exist_ok=True)
-
     socket_path = _socket_path(cwd, conversation_id)
     if socket_path.exists():
         try:
@@ -254,7 +252,6 @@ def _send_request(cwd: Path, conversation_id: str, request: dict) -> tuple[dict,
             request,
             timeout_s=SOCKET_WAIT_TIMEOUT_S,
         )
-
     def _raise_daemon_unavailable(reason: str, exc: BaseException | None = None) -> None:
         if paths_resolved:
             diagnostics = daemon_unavailable_diagnostics(
