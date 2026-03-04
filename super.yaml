@@ -152,6 +152,13 @@ agent:
           - Use enum symbols for actions (`GameAction.ACTION1`, `GA.ACTION2`, etc.). Do not cast raw integers with `GameAction(2)`; that has been error-prone in this harness.
           - Use only public interfaces in scripts: `env.step(...)`, `get_state()`, `diff(...)`, `get_action_history(...)`, `get_action_record(...)`, and injected helpers from `play_lib.py`/`model_lib.py`.
           - Do not use private or undocumented internals (anything starting with `_`), for example `env._init_level`, `env._level_state`, or private frame/env fields. They are unstable and not part of the supported interface.
+          - Historical turn artifacts are written to disk under `$GAME_DIR` after every `arc_repl` call:
+            - `level_<n>/turn_<m>/before_state.hex`
+            - `level_<n>/turn_<m>/after_state.hex`
+            - `level_<n>/turn_<m>/diff.hex` (changed cells shown as after-values; unchanged cells are `.`)
+            - `level_<n>/turn_<m>/meta.json` (action label, turn, levels, state transitions, changed-pixel summary)
+            - `level_<n>/turn_index.jsonl` and `$GAME_DIR/turn_index.jsonl` (append-only turn ledgers)
+          - Prefer these on-disk turn artifacts for historical analysis. Avoid repeated read-only `arc_repl exec` probes when the needed evidence is already in files.
           - `arc_repl` exec globals also include persistent action-history helpers:
             - `get_action_history(...)` returns game action records across all levels in this game for this run.
             - `get_action_record(action_index)` returns one action record by index.
@@ -207,76 +214,36 @@ agent:
             print({"step_state": r.state.name, "after_level": s1["current_level"], "after_state": s1["state"]})
             PY
             </example>
-          - Example (single-call diagnostic snapshot with current state + level-initial state + high-signal diffs):
+          - Example (file-first historical snapshot for the current level):
             <example>
-            arc_repl exec <<'PY'
+            python3 - <<'PY'
             import json
-            import statistics
+            import os
+            from pathlib import Path
 
-            current = get_state()
-            level = int(current.get("current_level", 0) or 0)
-            history = get_action_history() or []
-
-            records = []
-            for item in history:
-                if not isinstance(item, dict):
-                    continue
-                idx = item.get("action_index")
-                if idx is None:
-                    continue
-                rec = get_action_record(idx)
-                if not isinstance(rec, dict):
-                    continue
-                lb = int(rec.get("level_before", -1) or -1)
-                la = int(rec.get("level_after", -1) or -1)
-                if lb == level or la == level:
-                    records.append(rec)
-
-            level_initial_state = current
-            for rec in records:
-                if int(rec.get("level_before", -1) or -1) == level:
-                    level_initial_state = rec.get("state_before") or current
-                    break
-
-            def diff_size(rec):
-                d = rec.get("diff")
-                if not isinstance(d, dict):
-                    return 0
-                cp = d.get("changed_pixels")
-                if isinstance(cp, int):
-                    return cp
-                changes = d.get("changes")
-                return len(changes) if isinstance(changes, list) else 0
-
-            sizes = [diff_size(r) for r in records]
-            median = int(statistics.median(sizes)) if sizes else 0
-
-            above_median = []
-            for rec in records:
-                size = diff_size(rec)
-                if size <= median:
-                    continue
-                above_median.append({
-                    "action_index": rec.get("action_index"),
-                    "action_name": rec.get("action_name"),
-                    "level_before": rec.get("level_before"),
-                    "level_after": rec.get("level_after"),
-                    "changed_pixels": size,
-                    "diff": rec.get("diff"),
-                    "state_before": rec.get("state_before"),
-                    "state_after": rec.get("state_after"),
-                })
-
+            game_dir = Path(os.environ.get("GAME_DIR", "")).resolve()
+            level = 6  # set this to the level you are analyzing
+            level_dir = game_dir / f"level_{level}"
+            index = level_dir / "turn_index.jsonl"
+            rows = []
+            if index.exists():
+                for line in index.read_text().splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    rows.append(json.loads(line))
             print(json.dumps({
-                "current_state": current,
-                "current_level_initial_state": level_initial_state,
-                "current_level_history_stats": {
-                    "records_considered": len(records),
-                    "median_changed_pixels": median,
-                    "above_median_count": len(above_median),
-                },
-                "above_median_actions": above_median,
+                "level": level,
+                "turn_count": len(rows),
+                "recent_turns": rows[-5:],
             }, indent=2))
+            if rows:
+                turn_dir = game_dir / rows[-1]["turn_dir"]
+                print("latest_turn_dir", turn_dir)
+                print("meta", (turn_dir / "meta.json").read_text())
+                print("before_top_rows", "\n".join((turn_dir / "before_state.hex").read_text().splitlines()[:4]))
+                print("after_top_rows", "\n".join((turn_dir / "after_state.hex").read_text().splitlines()[:4]))
+                print("diff_top_rows", "\n".join((turn_dir / "diff.hex").read_text().splitlines()[:4]))
             PY
             </example>
           - Model code organization: Write common model abstractions in `model_lib.py` and use them from model.py to keep model.py small and clean.
@@ -451,7 +418,7 @@ modes:
            
             ## Main Loop
             - Modeling cycle (repeat): (1) choose 1-2 highest-value unknowns, (2) run one targeted discriminating real-game batch only if needed, (3) update model.py/model_lib.py and theory.md, (4) run model parity checks on the same action sequences.
-            - Read the game state, action history (`get_action_history`), and metadata to learn game features and mechanics.
+            - Read the current game state plus on-disk turn artifacts in `$GAME_DIR/level_<n>/turn_<m>/...` and `turn_index.jsonl` to learn game features and mechanics.
             - Codify these learnings into model code in model.py and reusable helpers in model_lib.py. Describe them in theory.md.
             - Take actions in the model and compare results to your expectations and observed game state artifacts, iterate on model.py/model_lib.py to align the model with the game.
             - Use only public interfaces while probing (`env.step`, `get_state`, `get_action_history`, `get_action_record`, `diff`, and injected helpers). Do not use private internals (anything with a leading `_`).
@@ -486,7 +453,7 @@ modes:
             ### Details
             - The supervisor may direct you to focus on modeling specific features / theories, follow their instructions.
             - Model session sanity: verify model level/state in command outputs before assuming continuity across shell invocations. If `set_level` and later `exec` outputs disagree, report exact command/output evidence and resolve that mismatch before further model reasoning.
-            - Prefer the canonical diagnostic snapshot script in the base system prompt for state/history inspection; reuse and lightly adapt it instead of creating many ad-hoc `python3 -c` parsing scripts.
+            - Prefer file-first diagnostics from `$GAME_DIR/level_<n>/turn_index.jsonl` and per-turn `meta.json`/`before_state.hex`/`after_state.hex`/`diff.hex` before adding new read-only `arc_repl exec` probes.
             - Apply two-phase execution in real-game scripts: preflight (no actions) then action phase only if preflight passes.
             - For level-local static geometry (for example fixed regions, gates, exits, anchors), once confirmed from runtime state/history, treat it as fixed for that level. Do not keep re-deriving constants unless contradictory evidence appears.
             - Real-game actions are expensive and reduce score; translate learned mechanics/rules into model code as soon as evidence is sufficient, then continue iteration in the model.
@@ -502,15 +469,16 @@ modes:
             - Always write an assistant message with everything you learned when yielding control to the user.
             - Example (level-init geometry lock + parity check):
               <example>
-              # 1) Read real initial state for current level
-              arc_repl exec <<'PY'
-              import json
-              s = get_state()
-              print(json.dumps({
-                  "level": s["current_level"],
-                  "state": s["state"],
-                  "grid_hex_rows": s["grid_hex_rows"],
-              }))
+              # 1) Read level's first recorded state from on-disk turn artifacts
+              python3 - <<'PY'
+              import json, os
+              from pathlib import Path
+              game_dir = Path(os.environ["GAME_DIR"]).resolve()
+              level = 4
+              idx = game_dir / f"level_{level}" / "turn_index.jsonl"
+              rows = [json.loads(x) for x in idx.read_text().splitlines() if x.strip()]
+              first_turn_dir = game_dir / rows[0]["turn_dir"]
+              print((first_turn_dir / "before_state.hex").read_text())
               PY
 
               # 2) Update model level base grid/constants from that state (edit model_lib.py)
