@@ -447,6 +447,7 @@ class HarnessRuntime:
             "--config-dir", str(self.run_config_dir),
             "--agent-dir", str(self.agent_dir),
             "--supervisor-dir", str(self.supervisor_dir),
+            "--define", f"game_id={self.active_game_id}",
             *self.provider_args(),
             *self.supervisor_args(),
             "--cycle-limit", str(self.cycle_limit),
