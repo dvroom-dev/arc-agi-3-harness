@@ -1,7 +1,6 @@
 from __future__ import annotations
 import re
 import sys
-import time
 import traceback
 from argparse import Namespace
 from datetime import datetime, timezone
@@ -19,9 +18,6 @@ from harness_scorecard_helpers import (
     open_shared_scorecard,
     run_scorecard_session_preflight,
     validate_scorecard_owner_check,
-)
-from harness_scorecard_timeout_hack import (
-    maybe_inject_scorecard_keepalive_hack,
 )
 def _resolve_arc_base_url(args) -> str:
     if args.arc_base_url and str(args.arc_base_url).strip():
@@ -177,32 +173,19 @@ def _run_single_game(
                 f"raw_events={monitor.get('raw_events_path') or '(not-found-yet)'}"
             )
 
-        def _run_super_loop(*, keepalive_enabled: bool) -> bool:
+        def _run_super_loop() -> bool:
             nonlocal super_turn
             nonlocal game_over_resets
             nonlocal last_recorded_completed_level
 
             history_events_after_new = runtime.load_history_events()
-            agent_history_floor = len(history_events_after_new)
             processed_history_len = len(history_events_after_new)
             processed_engine_turn = runtime.load_engine_turn()
-            last_scorecard_action_at = time.monotonic()
 
             while True:
                 if args.max_turns is not None and super_turn > args.max_turns:
                     runtime.log(f"[harness] max turns ({args.max_turns}) reached")
                     return False
-
-                if keepalive_enabled and runtime.active_scorecard_id:
-                    last_scorecard_action_at, injected_keepalive = maybe_inject_scorecard_keepalive_hack(
-                        runtime,
-                        last_action_at_monotonic=last_scorecard_action_at,
-                        agent_history_floor=agent_history_floor,
-                    )
-                    if injected_keepalive:
-                        history_after_keepalive = runtime.load_history_events()
-                        processed_history_len = len(history_after_keepalive)
-                        processed_engine_turn = runtime.load_engine_turn()
 
                 monitor = runtime.monitor_snapshot()
                 state = monitor.get("state")
@@ -252,6 +235,7 @@ def _run_single_game(
                             runtime.log(f"[harness] reset output: {reset_stdout}")
                         return False
                     state = runtime.load_state()
+
                 history_len_before_resume = processed_history_len
                 stdout = runtime.resume_super()
                 runtime.sync_active_conversation_id_from_session()
@@ -267,8 +251,6 @@ def _run_single_game(
                     else history_after_resume
                 )
                 current_engine_turn = runtime.load_engine_turn()
-                if current_engine_turn > processed_engine_turn:
-                    last_scorecard_action_at = time.monotonic()
                 processed_history_len = len(history_after_resume)
                 processed_engine_turn = current_engine_turn
 
@@ -344,7 +326,7 @@ def _run_single_game(
         ).strip() or "recover"
 
         _start_super_new(phase_label="discovery")
-        discovery_won = _run_super_loop(keepalive_enabled=not score_after_solve)
+        discovery_won = _run_super_loop()
 
         if score_after_solve and discovery_won and not runtime.active_scorecard_id:
             scorecard_id = runtime.open_scorecard_now()
@@ -389,7 +371,7 @@ def _run_single_game(
                     f"{runtime.format_state_summary(runtime.load_state())}"
                 )
                 _start_super_new(phase_label="scored-replay", start_mode=replay_start_mode)
-                _run_super_loop(keepalive_enabled=False)
+                _run_super_loop()
 
         runtime.log(f"[harness] session files: {runtime.session_dir}")
     except BaseException as exc:

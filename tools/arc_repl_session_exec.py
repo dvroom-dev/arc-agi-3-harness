@@ -130,6 +130,54 @@ def execute_exec_turn(
         }
         if levels_gained > 0:
             step_record["suppressed_cross_level_diff"] = True
+        # Defensive integrity guard:
+        # Non-RESET actions should not regress completed levels unless the
+        # frame explicitly reports GAME_OVER. If this happens, stop immediately
+        # to avoid burning additional actions on a corrupted/stale session.
+        levels_regressed = int(frame.levels_completed) < int(prev_levels)
+        entered_game_over = str(frame.state.value) == "GAME_OVER"
+        if levels_regressed and action_name != "RESET" and not entered_game_over:
+            step_record["integrity_error"] = "unexpected_level_regression_without_game_over"
+            step_record["levels_before_step"] = prev_levels
+            step_record["levels_completed"] = int(frame.levels_completed)
+            step_record["state_before_step"] = prev_state
+            step_record["state"] = str(frame.state.value)
+            step_record["changed_pixels"] = step_changed_pixels
+            step_record["change_bbox"] = step_bbox
+            step_results.append(step_record)
+            session.pixels = current_pixels
+            session._append_action_history_record(
+                call_action="exec",
+                action_name=action_name,
+                action_data=data or {},
+                source=source,
+                tool_turn=session.turn + 1,
+                step_in_call=step_index,
+                before_frame=prev_frame,
+                before_pixels=before_pixels,
+                after_frame=frame,
+                after_pixels=np.array(current_pixels, copy=True),
+            )
+            event_record = {
+                "kind": "step",
+                "action": action_name,
+                "data": data,
+                "levels_completed": int(frame.levels_completed),
+            }
+            if source:
+                event_record["source"] = source
+            executed_events.append(event_record)
+            desc = (
+                f"{action_name}{' data=' + str(data) if data else ''} -> "
+                f"state={frame.state.value} levels={frame.levels_completed}/{frame.win_levels}"
+            )
+            transition_log.append(desc)
+            step_snapshots.append((desc, current_pixels))
+            raise RuntimeError(
+                "unexpected level regression during non-RESET action: "
+                f"levels_completed {prev_levels}->{int(frame.levels_completed)} "
+                f"state {prev_state}->{str(frame.state.value)} action={action_name}"
+            )
         step_results.append(step_record)
         session.pixels = current_pixels
         session._append_action_history_record(

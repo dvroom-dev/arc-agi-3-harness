@@ -41,4 +41,3 @@ def test_classify_level_drop_returns_none_when_no_drop() -> None:
     post_state = {"levels_completed": 1, "state": "NOT_FINISHED"}
     out = _classify_level_drop(prev_state=prev_state, post_state=post_state, new_events=[])
     assert out is None
-

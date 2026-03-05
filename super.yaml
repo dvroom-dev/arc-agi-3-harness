@@ -46,6 +46,15 @@ supervisor:
       - "When intervening on drift, prefer action-oriented guidance: one specific next check, one required artifact update, and explicit transition criteria."
       - "At cadence, default to `continue` when there is no clear problem or high-value guidance opportunity. Do not interfere with the agent turn for elapsed-time reasons alone."
       - "Do not force handoff/fork based on elapsed time alone. Time can be a hint, never a sufficient condition."
+      - "In solve_model, do not allow transition to solve_game without clean-session proof evidence showing the target level transitions or completion conditions expected by solve_game."
+      - "In solve_game on a frontier UNSOLVED level, enforce one-attempt discipline: after one deterministic real-game attempt fails, require immediate switch back to plan_model with mismatch evidence."
+      - "If solve_game includes diagnostic arc_repl scripts or repeated deterministic retries on an UNSOLVED frontier level, treat as a clear violation and fork to plan_model."
+      - "In code_model, prioritize outcome gating over style sequencing. Do not enforce cosmetic ordering if there is clear net progress in model.py/model_lib.py or a valid mode transition."
+      - "In code_model, if two consecutive cadence reviews show mostly read-only/proof activity with no net model.py/model_lib.py changes and no switch_mode call, treat as sustained drift and fork with one explicit required next action."
+      - "In code_model, once one clean parity/proof bundle for the target level passes, require immediate switch_mode to solve_model. Additional parity-only loops after a passing bundle are drift."
+      - "In code_model, if Read/shell analysis calls dominate model-file edits by more than 3:1 after implementation has started, treat as analysis drift and intervene with an explicit transition-or-edit command."
+      - "In plan_model, once a new level mechanic is identified and at least one discriminating check has resolved the core unknown, block further pixel-level geometry re-derivation and require patch-plan handoff to code_model."
+      - "Prefer a single canonical level-summary extraction format in plan_model. If the agent keeps creating new ad-hoc analysis scripts for the same static state, treat as drift and steer back to canonical summary + plan artifact completion."
   supervisor_triggers:
     cadence:
       supervisor_prompt:
@@ -56,7 +65,7 @@ supervisor:
               - If any Agent Rule violation is clearly matched with concrete evidence, enforce immediately: Use `fork_new_conversation` and choose the same mode or a new mode based on mode criteria. Provide a user_message with all the context and guidance that would help the agent be productive.
               - If the current mode's goals are satisfied or you determine switching modes is appropriate now without handoff from the agent, fork_new_conversation.
               - If you have context that could help guide the agent, use `append_message_and_continue` to write a user message with the advice/instructions in 'supervisor-advice' xml tags.
-              - Otherwise `continue` to pass. Do not enforce mode-required artifacts from this cadence trigger.
+              - Otherwise `continue` to pass.
       message_templates:
         - name: handoff_command
           description: "Tell the agent this session is wrapping up and require the full mid-level handoff checklist."
@@ -371,7 +380,7 @@ modes:
       - "The model behavior doesn't match the game behavior."
       - "The model has bugs."
     stop_when:
-      - "A concrete patch plan is written to `$GAME_DIR/plan_model.md` and the mode_payload for code_model is prepared; switch_mode to code_model."
+      - "A concrete patch plan is written to `$GAME_DIR/plan_model.md`, all open unknowns are explicitly marked BLOCKING or NON-BLOCKING, and the mode_payload for code_model is prepared; switch_mode to code_model."
       - "Game level advances to a frontier UNSOLVED level. Fork a new conversation in the same mode."
       - "Game over happens or the current level regresses to a previously SOLVED level; switch to recover mode."
     tools:
@@ -406,7 +415,8 @@ modes:
               2) New level delta (what changed from prior solved level)
               3) Minimal model patch plan (`model_lib.py`/`model.py` targets)
               4) Post-code validation checklist (model parity/proof)
-              5) Open unknowns + one discriminating check for each
+              5) Open unknowns + one discriminating check for each + BLOCKING/NON-BLOCKING status
+              6) Canonical summary snapshot for current level (JSON keys only): `level`, `exit_top_left`, `player_center`, `box_bounds`, `box_target_pattern`, `hud_pattern`, `hud_fill_color`, `new_features`, `rotations_needed`, `shortest_route_estimates`
 
             Loop:
             1) choose 1-2 highest-value unknowns,
@@ -428,6 +438,7 @@ modes:
             Efficiency rules:
             - Real-game actions are expensive; do not probe when history or hex/diff artifacts already answer the question.
             - Prefer reading `$GAME_DIR/level_<n>/turn_*/{before_state.hex,after_state.hex,diff.hex,meta.json}` and `turn_index.jsonl` for read-only analysis.
+            - Reuse one canonical summary extractor and keep appending/updating that summary format; do not create many one-off geometry scripts for the same unchanged state.
             - After any novel real-game evidence, pause probing and update theory + patch plan before new probes.
             - Avoid repeated read-only checks on unchanged state.
             - If no real-game action and no artifact edit occurred since your previous conclusion, do not re-derive; either update the plan artifact or run one discriminating probe for a named unknown.
@@ -441,10 +452,13 @@ modes:
       requirements:
         - "In plan_model, keep theory.md current with new evidence and explicit confidence updates."
         - "In plan_model, maintain `$GAME_DIR/plan_model.md` as the single source of truth for the current level patch plan."
+        - "Before switching to code_model, classify each open unknown in `$GAME_DIR/plan_model.md` as BLOCKING or NON-BLOCKING."
         - "Before switching to code_model, provide a concrete patch plan tied to observed evidence."
+        - "Before switching to code_model, include a canonical summary snapshot in `$GAME_DIR/plan_model.md` for the current level with the required keys."
       violations:
         - "Editing model.py/model_lib.py while in plan_model."
         - "Repeating materially equivalent read-only probes on unchanged state without a new unknown or discriminating test."
+        - "In plan_model, repeatedly deriving pixel-level geometry for unchanged state after core mechanic + one discriminating check are already established."
 
   code_model:
     description: "Implement model code from the approved plan and verify parity using model-only execution."
@@ -471,8 +485,12 @@ modes:
             Your goal is to implement model code quickly and correctly from existing evidence.
             code_model is implementation mode: edit model.py/model_lib.py and run model-side checks.
             Do not call arc_repl or execute real-game actions in this mode.
+            After parity/proof checks, prioritize code change or mode transition over additional analysis.
             If implementation reveals evidence gaps, switch_mode back to plan_model with a concise missing-evidence list.
             If completion criteria are met, you must call switch_mode to solve_model in this same turn. Do not only state intent in prose.
+            End each code_model turn with one of: (a) a net edit to model.py/model_lib.py, (b) switch_mode to plan_model with explicit missing evidence, or (c) switch_mode to solve_model with proof evidence.
+            After your first passing target-level parity/proof bundle, stop further parity exploration and switch_mode to solve_model immediately.
+            Do not re-prove static geometry repeatedly in code_model; only collect additional evidence if it directly blocks an edit decision.
     user_message:
       operation: append
       parts:
@@ -485,14 +503,15 @@ modes:
             - Do not use arc_repl in this mode.
 
             Required execution pattern:
-            1) apply code edits,
+            1) apply model.py/model_lib.py code edits first,
             2) run focused model parity/proof checks,
             3) summarize exact pass/fail evidence,
-            4) choose next mode:
+            4) if parity fails, patch code before any additional broad analysis,
+            5) choose next mode:
                - switch_mode to solve_model when model behavior is ready for solver construction/proof,
                - switch_mode to plan_model if missing evidence blocks correct implementation.
 
-            Keep this mode code-first and concise. Avoid exploratory analysis loops.
+            Keep this mode code-first and concise. Avoid exploratory analysis loops and repeated unchanged-file re-reads.
             Example (required shape when transitioning):
             - `switch_mode(target_mode=\"solve_model\", reason=\"code_model complete\", mode_payload={\"user_message\":\"<compact handoff with edited files + proof evidence>\"})`
         - template: |
@@ -502,12 +521,16 @@ modes:
     agent_rules:
       operation: append
       requirements:
-        - "In code_model, every turn must include model code edits and/or model proof evidence."
+        - "In code_model, parity/proof checks must be followed by model code edits unless switching modes."
         - "Keep model.py as orchestration/CLI and move mechanics/helpers into model_lib.py."
+        - "Each code_model turn must end with either a net edit to model.py/model_lib.py or a switch_mode call to plan_model/solve_model."
+        - "If two consecutive code_model turns have no net model.py/model_lib.py changes, switch_mode to plan_model with explicit missing evidence."
+        - "If a passing target-level parity/proof bundle is obtained, call switch_mode to solve_model in the same turn."
         - "When code_model completion criteria are met, call switch_mode to solve_model in the same turn with reason and mode_payload.user_message."
       violations:
         - "Executing arc_repl or taking real-game actions while in code_model."
-        - "Extended read-only shell analysis in code_model without producing model.py/model_lib.py updates or parity evidence."
+        - "In code_model, repeating read-only/proof commands across consecutive turns without net model.py/model_lib.py changes and without switch_mode."
+        - "In code_model, continuing parity-only loops after a passing target-level parity/proof bundle without switching to solve_model."
         - "Claiming transition intent in prose (for example 'switching to solve_model') when completion criteria are met, without actually calling switch_mode."
 
   solve_model:
@@ -515,7 +538,7 @@ modes:
     start_when:
       - "Model updates are implemented for the current level and model parity/proof checks pass."
     stop_when:
-      - "A model proof run succeeds for the current level (`model.py set_level <n>; model.py exec_file play.py`), the current-level solver branch exists in play.py, and theory.md marks the level SOLVED with concise evidence."
+      - "A clean-session model proof run succeeds for the current level (`model.py shutdown; model.py set_level <n>; model.py exec_file play.py`) with explicit evidence that the expected level transition/completion occurred, the current-level solver branch exists in play.py, and theory.md marks the level SOLVED with concise evidence."
       - "The model has bugs."
       - "The model is not behaving like the observed game behavior."
       - "Game over happens or the current level regresses to a previously SOLVED level; switch to recover mode."
@@ -539,6 +562,7 @@ modes:
         - literal: |
             Solve the current benchmark test level in the model. When you are finished, this command should solve the current benchmark test level in the model: `model.py set_level <n>; model.py exec_file play.py`. There is no cost to taking actions in the model but you must use causal reasoning based on the known game rules to solve the model; do not use exploratory/exhaustive search over unknown action/state space.
             Use explicit paths in shell commands:
+            - `python3 "$GAME_DIR/model.py" shutdown`
             - `python3 "$GAME_DIR/model.py" set_level <n>`
             - `python3 "$GAME_DIR/model.py" exec_file "$GAME_DIR/play.py"`
             Use play.py and play_lib.py to iterate on a full solution from the start to the end of the level. play.py should have high level code that leverages custom abstractions you maintain in play_lib.py to address lower level details like identification of features and action planning.
@@ -550,10 +574,12 @@ modes:
             In this mode, prioritize completion artifacts over additional analysis:
             1) Ensure play.py has a solver branch for the current level.
             2) Update play_lib.py with reusable helper logic needed by that branch.
-            3) Run a proof command: `python3 "$GAME_DIR/model.py" set_level <n>; python3 "$GAME_DIR/model.py" exec_file "$GAME_DIR/play.py"`.
-            4) If proof succeeds, update theory.md Level status to SOLVED with concise causal evidence.
+            3) Run clean-session proof commands in order: `python3 "$GAME_DIR/model.py" shutdown`; `python3 "$GAME_DIR/model.py" set_level <n>`; `python3 "$GAME_DIR/model.py" exec_file "$GAME_DIR/play.py"`.
+            4) Record exact proof evidence in theory.md: planned action count and final reported level/state.
+            5) If proof succeeds, update theory.md Level status to SOLVED with concise causal evidence.
             If proof fails, patch play.py/play_lib.py and rerun proof. Do not stay in analysis loops.
             Do not run more than two exploratory shell commands in a row without either editing play.py/play_lib.py or executing the proof command.
+            If clean proof only works via ad-hoc manual state-file deletion or other workaround, treat this as a model bug and switch_mode to code_model/plan_model with exact evidence.
             If blocked by a model mismatch, stop and switch_mode to plan_model with exact mismatch evidence.
             Deterministic route construction on already-known fixed geometry to execute a theory-backed plan is allowed; exploratory state-space search to discover solutions is not.
         - template: |
@@ -566,11 +592,13 @@ modes:
         - "Update play.py and play_lib.py with a full, optimized solution if the model level is solved."
         - "Every solve_model turn must produce progress evidence in required artifacts (play.py / play_lib.py / theory.md) and/or a model proof-run result."
         - "When model proof succeeds for the current level, mark that level SOLVED in theory.md with concise evidence before yielding."
+        - "Before switching to solve_game, provide clean-session proof evidence (shutdown + set_level + exec_file) with explicit resulting level/state."
       violations:
         - "Exploratory or exhaustive search over unknown state/action space to discover solutions (for example broad BFS/DFS)."
         - "Editing model.py in solve_model."
         - "Executing real game actions in solve_model."
         - "Repeated exploratory shell analysis in solve_model without producing required artifact updates."
+        - "Switching to solve_game without clean-session proof evidence for the current level."
 
   solve_game:
     description: "Use play.py to solve the benchmark test game"
@@ -600,12 +628,15 @@ modes:
       parts:
         - literal: |
             Solve the current game level using play.py. `arc_repl reset_level; arc_repl exec_file play.py` should be sufficient to solve the level when you are done. Your inputs are the game state, play.py, and play_lib.py. Your outputs are changes to play.py, play_lib.py, and assistant messages.
-            This mode is execution-only, not exploration: run the existing solver and verify outcome.
-            Solve_game loop: (1) `arc_repl status`, (2) one deterministic solver execution (`arc_repl exec_file play.py` or one deterministic continuation), (3) `arc_repl status`, (4) decide next mode.
-            If the deterministic run fails on a frontier UNSOLVED level, stop and switch to plan_model with mismatch evidence. Do not explore unknown routes in solve_game.
-            If the level is UNSOLVED/frontier and the solver fails once in the real game, stop further real-game route experimentation and switch to plan_model to improve model/play artifacts there.
-            If the current game state is not the start of the level (actions have already been taken), do at most one deterministic continuation attempt from current state based on existing play.py logic; if not solved, switch to plan_model.
-            If a deterministic run fails but the last step was a normal movement step (for example non-zero changed pixels and no level transition), do one minimal continuation attempt from current state (1-3 actions max) before any reset or full rerun.
+            This mode is execution-only, not exploration.
+            Solve_game loop for a frontier UNSOLVED level:
+            1) `arc_repl status`
+            2) one deterministic solver run (`arc_repl exec_file "$GAME_DIR/play.py"`)
+            3) `arc_repl status`
+            4) if not solved, immediately switch_mode to plan_model with mismatch evidence.
+            If the deterministic run fails on a frontier UNSOLVED level, stop and switch to plan_model with mismatch evidence in the same turn.
+            On a frontier UNSOLVED level, do not run diagnostic `arc_repl exec` scripts in solve_game.
+            If current state is mid-level, allow at most one deterministic continuation attempt before switching to plan_model.
             Never rerun the same deterministic solve script in solve_game without intervening model/theory updates that justify the retry.
             If you need a debugging script in real game, use two-phase execution (preflight without `env.step`, then action phase) so coding errors do not burn actions.
             If the level is complete or solving it is blocked in some way currently, write an assistant message with everything you've learned.
@@ -623,10 +654,13 @@ modes:
         - "Complex and low level logic should be factored out of play.py into play_lib.py."
         - "In solve_game on a frontier UNSOLVED level: execute, verify, and if the level does not complete after one deterministic attempt, yield for a switch back to plan_model."
         - "Do not create or run exploratory real-game route scripts in solve_game."
+        - "On a frontier UNSOLVED level in solve_game: after one failed deterministic attempt, call switch_mode to plan_model in the same turn."
       violations:
         - "Repeatedly failing to solve the level without real progress or evidence-backed theory updates"
         - "Exploring unknown routes/mechanics in the real game while in solve_game instead of switching back to plan_model."
         - "Rerunning materially equivalent deterministic solve scripts in solve_game without intervening model/theory updates that justify the retry."
+        - "Running diagnostic `arc_repl exec` scripts in solve_game on a frontier UNSOLVED level after a failed deterministic attempt."
+        - "Taking more than one failed deterministic real-game attempt on a frontier UNSOLVED level without switching back to plan_model."
 
   recover:
     description: "Replay previously SOLVED levels quickly and safely to return to the frontier UNSOLVED level."

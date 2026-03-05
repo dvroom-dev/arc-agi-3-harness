@@ -55,6 +55,47 @@ class FakeEnv:
         )
 
 
+class FakeRegressingEnv(FakeEnv):
+    def __init__(self):
+        super().__init__()
+        self.current_levels = 2
+
+    def reset(self):
+        self.resets += 1
+        self.steps = 0
+        action_id = SimpleNamespace(name="RESET", value=0)
+        action_input = SimpleNamespace(id=action_id, data={}, reasoning=None)
+        return SimpleNamespace(
+            game_id="ls20-cb3b57cc",
+            guid="g",
+            state=SimpleNamespace(value="NOT_FINISHED"),
+            levels_completed=2,
+            win_levels=7,
+            available_actions=[0, 1, 2, 3, 4],
+            full_reset=False,
+            action_input=action_input,
+            frame=[np.zeros((64, 64), dtype=np.int8)],
+        )
+
+    def step(self, action, data=None, reasoning=None):
+        self.steps += 1
+        action_id = SimpleNamespace(name=getattr(action, "name", str(action)), value=int(action.value))
+        action_input = SimpleNamespace(id=action_id, data=data or {}, reasoning=reasoning)
+        # Simulate unexpected server-side regression without GAME_OVER.
+        frame = np.full((64, 64), self.steps % 16, dtype=np.int8)
+        return SimpleNamespace(
+            game_id="ls20-cb3b57cc",
+            guid="g",
+            state=SimpleNamespace(value="NOT_FINISHED"),
+            levels_completed=0,
+            win_levels=7,
+            available_actions=[0, 1, 2, 3, 4],
+            full_reset=False,
+            action_input=action_input,
+            frame=[frame],
+        )
+
+
 def _patch_session_dependencies(monkeypatch, tmp_path: Path):
     arc_dir = tmp_path / "arc"
     arc_dir.mkdir()
@@ -258,6 +299,29 @@ def test_repl_action_history_contains_before_after_and_diff(monkeypatch, tmp_pat
     payload = json.loads(history_file.read_text())
     assert isinstance(payload.get("records"), list)
     assert len(payload["records"]) >= 1
+
+
+def test_repl_exec_stops_on_unexpected_level_regression(monkeypatch, tmp_path: Path) -> None:
+    _patch_session_dependencies(monkeypatch, tmp_path)
+    monkeypatch.setattr(arc_repl, "_make_env", lambda gid: FakeRegressingEnv())
+
+    session = arc_repl.ReplSession(
+        cwd=tmp_path,
+        conversation_id="conv-1",
+        requested_game_id="ls20",
+    )
+
+    result = session.do_exec(
+        "ls20",
+        "env.step(GameAction.ACTION1)\nenv.step(GameAction.ACTION2)\n",
+        session_created=False,
+    )
+    assert result["ok"] is False
+    assert result["steps_executed"] == 1
+    assert "unexpected level regression" in (result.get("script_error") or "")
+
+    history_records = session.get_action_history()
+    assert len(history_records) == 1
 
 
 def test_repl_writes_level_turn_files(monkeypatch, tmp_path: Path) -> None:

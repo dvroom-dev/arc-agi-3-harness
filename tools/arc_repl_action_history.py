@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any
@@ -97,6 +98,7 @@ class ActionHistoryStore:
             final_diff_payload = deepcopy(diff_payload)
         record = {
             "action_index": int(self.next_action_index),
+            "recorded_at_utc": datetime.now(timezone.utc).isoformat(),
             "tool_turn": int(tool_turn),
             "call_action": str(call_action),
             "step_in_call": int(step_in_call),

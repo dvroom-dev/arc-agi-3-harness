@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 def _as_int(value, default: int = 0) -> int:
     try:
         return int(value)
