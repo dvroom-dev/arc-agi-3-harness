@@ -362,3 +362,49 @@ def test_repl_writes_level_turn_files(monkeypatch, tmp_path: Path) -> None:
     assert len(level_entries) >= 2
     assert len(game_entries) >= 2
     assert level_entries[-1]["turn_dir"].endswith("turn_0002")
+
+    seq_file = level_dir / "sequences" / "seq_0001.json"
+    assert seq_file.exists()
+    seq_payload = json.loads(seq_file.read_text())
+    assert seq_payload["schema_version"] == "arc_repl.level_sequence.v1"
+    assert seq_payload["level"] == 1
+    assert seq_payload["action_count"] >= 1
+    first_action = seq_payload["actions"][0]
+    files = first_action["files"]
+    assert (level_dir / files["before_state_hex"]).exists()
+    assert (level_dir / files["after_state_hex"]).exists()
+    assert (level_dir / files["diff_hex"]).exists()
+    assert (level_dir / files["meta_json"]).exists()
+
+    assert (level_dir / "initial_state.hex").exists()
+    init_meta = json.loads((level_dir / "initial_state.meta.json").read_text())
+    assert init_meta["schema_version"] == "arc_repl.level_initial_state.v1"
+    assert init_meta["level"] == 1
+
+
+def test_repl_sequence_artifacts_split_on_reset(monkeypatch, tmp_path: Path) -> None:
+    _patch_session_dependencies(monkeypatch, tmp_path)
+    session = arc_repl.ReplSession(
+        cwd=tmp_path,
+        conversation_id="conv-1",
+        requested_game_id="ls20",
+    )
+
+    _ = session.do_exec(
+        "ls20",
+        "env.step(GameAction.ACTION1)\n",
+        session_created=False,
+    )
+    _ = session.do_reset_level("ls20", session_created=False)
+    _ = session.do_exec(
+        "ls20",
+        "env.step(GameAction.ACTION2)\n",
+        session_created=False,
+    )
+
+    level_dir = tmp_path / "game_ls20" / "level_1"
+    seq_1 = json.loads((level_dir / "sequences" / "seq_0001.json").read_text())
+    seq_2 = json.loads((level_dir / "sequences" / "seq_0002.json").read_text())
+    assert seq_1["end_reason"] == "reset_level"
+    assert seq_1["action_count"] == 1
+    assert seq_2["action_count"] == 1
