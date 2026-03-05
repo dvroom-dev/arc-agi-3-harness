@@ -72,41 +72,30 @@ IDLE_KEEPALIVE_INTERCEPT_MARKER = "__ARC_INTERCEPT_IDLE_KEEPALIVE__"
 LEVEL_COMPLETE_MODEL_MISMATCH_MARKER = "__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__"
 COMPARE_RESULTS_BEGIN_MARKER = "__ARC_COMPARE_RESULTS_BEGIN__"
 COMPARE_RESULTS_END_MARKER = "__ARC_COMPARE_RESULTS_END__"
-IDLE_KEEPALIVE_SECONDS = 12 * 60
+IDLE_KEEPALIVE_FLAG_REL = "intercepts/idle_keepalive.flag"
 
 
-def _idle_stamp_path(cwd: Path) -> Path:
+def _idle_keepalive_flag_path(cwd: Path) -> Path:
     arc_state_dir = Path(str(os.getenv("ARC_STATE_DIR", "") or "")).expanduser()
     if not str(arc_state_dir).strip():
         arc_state_dir = _arc_dir(cwd)
     arc_state_dir.mkdir(parents=True, exist_ok=True)
-    return arc_state_dir / "last_real_game_action_at.txt"
+    return arc_state_dir / IDLE_KEEPALIVE_FLAG_REL
 
 
-def _mark_real_game_action(cwd: Path) -> None:
+def _consume_idle_keepalive_marker(cwd: Path) -> str | None:
+    path = _idle_keepalive_flag_path(cwd)
+    if not path.exists():
+        return None
     try:
-        _idle_stamp_path(cwd).write_text(f"{time.monotonic():.6f}\n", encoding="utf-8")
+        payload = path.read_text(encoding="utf-8").strip()
+    except Exception:
+        payload = ""
+    try:
+        path.unlink()
     except Exception:
         pass
-
-
-def _idle_keepalive_needed(cwd: Path) -> tuple[bool, int]:
-    if not str(os.getenv("ARC_SCORECARD_ID", "") or "").strip():
-        return False, 0
-    path = _idle_stamp_path(cwd)
-    now = time.monotonic()
-    if not path.exists():
-        try:
-            path.write_text(f"{now:.6f}\n", encoding="utf-8")
-        except Exception:
-            pass
-        return False, 0
-    try:
-        stamp = float(path.read_text(encoding="utf-8").strip())
-    except Exception:
-        stamp = now
-    idle_seconds = max(0, int(now - stamp))
-    return idle_seconds >= IDLE_KEEPALIVE_SECONDS, idle_seconds
+    return payload or IDLE_KEEPALIVE_INTERCEPT_MARKER
 
 
 def _result_has_real_game_action(action: str, result: object) -> bool:
@@ -615,16 +604,11 @@ def main() -> int:
             repl["session_created"] = bool(session_created or repl.get("session_created"))
             result["repl"] = repl
         real_game_action = _result_has_real_game_action(action, result)
-        if real_game_action:
-            _mark_real_game_action(cwd)
-        idle_keepalive_needed, idle_seconds = _idle_keepalive_needed(cwd)
         idle_intercept_line = None
-        if (not real_game_action) and idle_keepalive_needed:
-            idle_intercept_line = (
-                f"{IDLE_KEEPALIVE_INTERCEPT_MARKER} "
-                f"idle_seconds={idle_seconds} "
-                f"action={action}"
-            )
+        if not real_game_action:
+            idle_marker = _consume_idle_keepalive_marker(cwd)
+            if idle_marker:
+                idle_intercept_line = f"{idle_marker} action={action}".strip()
         level_compare_block = (
             _run_level_completion_compare(cwd, result)
             if str(action).strip().lower() == "exec"

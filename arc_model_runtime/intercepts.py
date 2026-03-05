@@ -1,46 +1,39 @@
 from __future__ import annotations
 
 import os
-import time
 from pathlib import Path
 
 IDLE_KEEPALIVE_INTERCEPT_MARKER = "__ARC_INTERCEPT_IDLE_KEEPALIVE__"
-IDLE_KEEPALIVE_SECONDS = 12 * 60
+IDLE_KEEPALIVE_FLAG_REL = "intercepts/idle_keepalive.flag"
 
 
-def _idle_stamp_path() -> Path:
+def _idle_flag_path() -> Path:
     arc_state_dir = Path(str(os.getenv("ARC_STATE_DIR", "") or "")).expanduser()
     if not str(arc_state_dir).strip():
         arc_state_dir = Path.cwd() / ".arc"
     arc_state_dir.mkdir(parents=True, exist_ok=True)
-    return arc_state_dir / "last_real_game_action_at.txt"
+    return arc_state_dir / IDLE_KEEPALIVE_FLAG_REL
 
 
-def _idle_keepalive_needed() -> tuple[bool, int]:
-    if not str(os.getenv("ARC_SCORECARD_ID", "") or "").strip():
-        return False, 0
-    path = _idle_stamp_path()
-    now = time.monotonic()
+def _consume_idle_keepalive_flag() -> str | None:
+    path = _idle_flag_path()
     if not path.exists():
-        try:
-            path.write_text(f"{now:.6f}\n", encoding="utf-8")
-        except Exception:
-            pass
-        return False, 0
+        return None
     try:
-        stamp = float(path.read_text(encoding="utf-8").strip())
+        payload = path.read_text(encoding="utf-8").strip()
     except Exception:
-        stamp = now
-    idle_seconds = max(0, int(now - stamp))
-    return idle_seconds >= IDLE_KEEPALIVE_SECONDS, idle_seconds
+        payload = ""
+    try:
+        path.unlink()
+    except Exception:
+        pass
+    if payload:
+        return payload
+    return IDLE_KEEPALIVE_INTERCEPT_MARKER
 
 
 def inject_idle_hint(payload: dict, *, action_name: str) -> None:
-    needed, idle_seconds = _idle_keepalive_needed()
-    if not needed:
+    marker_payload = _consume_idle_keepalive_flag()
+    if not marker_payload:
         return
-    payload["intercept_hint"] = (
-        f"{IDLE_KEEPALIVE_INTERCEPT_MARKER} "
-        f"idle_seconds={idle_seconds} "
-        f"action={action_name}"
-    )
+    payload["intercept_hint"] = f"{marker_payload} action={action_name}".strip()

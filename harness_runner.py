@@ -1,6 +1,7 @@
 from __future__ import annotations
 import re
 import sys
+import time
 import traceback
 from argparse import Namespace
 from datetime import datetime, timezone
@@ -60,6 +61,16 @@ def _run_single_game(
     game_index: int,
     total_games: int,
 ) -> None:
+    IDLE_KEEPALIVE_TRIGGER_SECONDS = 12 * 60
+    IDLE_KEEPALIVE_MARKER = "__ARC_INTERCEPT_IDLE_KEEPALIVE__"
+
+    def _events_include_real_game_action(events: list[dict]) -> bool:
+        for event in events:
+            kind = str(event.get("kind", "")).strip().lower()
+            if kind in {"step", "reset"}:
+                return True
+        return False
+
     runtime = HarnessRuntime(
         deps,
         args,
@@ -139,6 +150,7 @@ def _run_single_game(
         super_turn = 1
         game_over_resets = 0
         last_recorded_completed_level = deps.read_max_recorded_completion_level(runtime.completions_md)
+        last_real_game_action_at_monotonic = time.monotonic()
 
         def _start_super_new(*, phase_label: str, start_mode: str | None = None) -> None:
             runtime.log(f"[harness] starting super new ({phase_label})...")
@@ -178,6 +190,7 @@ def _run_single_game(
             nonlocal super_turn
             nonlocal game_over_resets
             nonlocal last_recorded_completed_level
+            nonlocal last_real_game_action_at_monotonic
 
             history_events_after_new = runtime.load_history_events()
             processed_history_len = len(history_events_after_new)
@@ -227,7 +240,7 @@ def _run_single_game(
                     if game_over_resets > args.max_game_over_resets:
                         runtime.log("[harness] max GAME_OVER auto-resets reached, stopping")
                         return False
-                    _, reset_stdout, reset_rc = runtime.run_arc_repl(
+                    reset_result, reset_stdout, reset_rc = runtime.run_arc_repl(
                         {"action": "reset_level", "game_id": args.game_id}
                     )
                     if reset_rc != 0:
@@ -235,7 +248,31 @@ def _run_single_game(
                         if reset_stdout:
                             runtime.log(f"[harness] reset output: {reset_stdout}")
                         return False
+                    if (
+                        isinstance(reset_result, dict)
+                        and not bool(reset_result.get("reset_noop", False))
+                    ):
+                        last_real_game_action_at_monotonic = time.monotonic()
+                        runtime.clear_idle_keepalive_marker()
                     state = runtime.load_state()
+
+                if runtime.idle_keepalive_enabled():
+                    idle_seconds = int(time.monotonic() - last_real_game_action_at_monotonic)
+                    if (
+                        idle_seconds >= IDLE_KEEPALIVE_TRIGGER_SECONDS
+                        and not runtime.has_idle_keepalive_marker()
+                    ):
+                        runtime.write_idle_keepalive_marker(
+                            marker=IDLE_KEEPALIVE_MARKER,
+                            details=(
+                                f"idle_seconds={idle_seconds} "
+                                f"level={int(state.get('current_level', 0) if state else 0)}"
+                            ),
+                        )
+                        runtime.log(
+                            "[harness] queued idle keepalive intercept marker "
+                            f"(idle_seconds={idle_seconds})"
+                        )
 
                 history_len_before_resume = processed_history_len
                 stdout = runtime.resume_super()
@@ -254,6 +291,9 @@ def _run_single_game(
                 current_engine_turn = runtime.load_engine_turn()
                 processed_history_len = len(history_after_resume)
                 processed_engine_turn = current_engine_turn
+                if _events_include_real_game_action(new_events):
+                    last_real_game_action_at_monotonic = time.monotonic()
+                    runtime.clear_idle_keepalive_marker()
 
                 post_state = runtime.load_state()
                 post_completed = int(post_state.get("levels_completed", 0)) if post_state else 0

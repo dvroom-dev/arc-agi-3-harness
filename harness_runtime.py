@@ -190,6 +190,20 @@ class HarnessRuntime:
             self.super_env["ARC_REPL_PARENT_START_TICKS"] = str(self.repl_parent_start_ticks)
         self.super_env["PATH"] = f"{self.run_bin_dir}:{os.environ.get('PATH', '')}"
 
+        self.idle_keepalive_marker_path = (
+            self.arc_state_dir / "intercepts" / "idle_keepalive.flag"
+        )
+        self.idle_keepalive_marker_path.parent.mkdir(parents=True, exist_ok=True)
+        if self.idle_keepalive_marker_path.exists():
+            try:
+                self.idle_keepalive_marker_path.unlink()
+            except Exception:
+                pass
+        self.api_idle_keepalive_base_enabled = (
+            self.operation_mode_name == "ONLINE"
+            and str(getattr(self.args, "arc_backend", "") or "").strip().lower() == "api"
+        )
+
     def open_scorecard_now(self) -> str:
         return open_scorecard_now_impl(self)
 
@@ -462,3 +476,24 @@ class HarnessRuntime:
 
     def close_scorecard_if_needed(self) -> None:
         close_scorecard_if_needed_impl(self)
+
+    def has_idle_keepalive_marker(self) -> bool:
+        return bool(self.idle_keepalive_marker_path.exists())
+
+    def idle_keepalive_enabled(self) -> bool:
+        return bool(self.api_idle_keepalive_base_enabled and self.active_scorecard_id)
+
+    def write_idle_keepalive_marker(self, *, marker: str, details: str = "") -> None:
+        payload = str(marker).strip()
+        if details:
+            payload = f"{payload} {str(details).strip()}".strip()
+        self.idle_keepalive_marker_path.parent.mkdir(parents=True, exist_ok=True)
+        self.idle_keepalive_marker_path.write_text(payload + "\n", encoding="utf-8")
+
+    def clear_idle_keepalive_marker(self) -> None:
+        if not self.idle_keepalive_marker_path.exists():
+            return
+        try:
+            self.idle_keepalive_marker_path.unlink()
+        except Exception:
+            pass
