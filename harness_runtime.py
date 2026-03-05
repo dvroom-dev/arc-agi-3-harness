@@ -447,6 +447,17 @@ class HarnessRuntime:
             return ["--prompt-file", str(prompt_file)]
         return ["--prompt", prompt_text]
 
+    def current_level_for_define(self) -> int:
+        state = self.load_state() or {}
+        try:
+            level = int(state.get("current_level", 1) or 1)
+        except Exception:
+            level = 1
+        return max(1, level)
+
+    def define_args(self) -> list[str]:
+        return ["--define", f"level_num={self.current_level_for_define()}"]
+
     def level_start_prompt_images(self, state: dict | None, *, initial: bool = False) -> list[Path]:
         return level_start_prompt_images_impl(self, state, initial=initial)
 
@@ -461,9 +472,9 @@ class HarnessRuntime:
             "--config-dir", str(self.run_config_dir),
             "--agent-dir", str(self.agent_dir),
             "--supervisor-dir", str(self.supervisor_dir),
-            "--define", f"game_id={self.active_game_id}",
             *self.provider_args(),
             *self.supervisor_args(),
+            *self.define_args(),
             "--cycle-limit", str(self.cycle_limit),
         ]
         if prompt:

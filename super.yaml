@@ -1,6 +1,7 @@
 vars:
-  game_id: UNSET_GAME_ID
+  game_id: ${env.ARC_ACTIVE_GAME_ID}
   game_dir: game_${vars.game_id}
+  level_num: "1"
 
 runtime_defaults:
   agent_provider: claude
@@ -177,6 +178,8 @@ modes:
             Deliverable for this mode:
             - Update `${vars.game_dir}/theory.md` with mechanics + evidence.
             - Produce a concise patch plan for model code in your final message or mode_payload when switching.
+            - Use `arc_repl` for real-game interaction and focus on discovering or disambiguating uncertain/new mechanics.
+            - Do not try to fully solve the level in this mode unless needed to validate a specific mechanic.
 
             Transition guidance:
             - If model code changes are clear, call `switch_mode` to `code_model` with explicit patch steps.
@@ -187,8 +190,6 @@ modes:
               - ${vars.game_dir}/theory.md
               - ${vars.game_dir}/model.py
               - ${vars.game_dir}/model_lib.py
-              - ${vars.game_dir}/play.py
-              - ${vars.game_dir}/play_lib.py
         - template: |
             <supervisor-context>
             {{supervisor.user_message}}
@@ -232,12 +233,19 @@ modes:
         - literal: |
             Active game: `${vars.game_id}`
             Edit model code only.
+            Current level context for model parity: `${vars.level_num}`
 
             Required loop:
-            1) patch model code,
-            2) run model checks (`compare_sequences`, `exec_file`, `status`),
-            3) if mismatch remains, patch again,
-            4) when parity is good, switch_mode to solve_model.
+            1) immediately run compare on all recorded sequences for current level:
+               - `python3 "${vars.game_dir}/model.py" compare_sequences --game-id "${vars.game_id}" --level "${vars.level_num}"`
+            2) patch model code,
+            3) rerun model checks (`compare_sequences`, `exec_file`, `status`), for example:
+               - `python3 "${vars.game_dir}/model.py" compare_sequences --game-id "${vars.game_id}" --level "${vars.level_num}"`
+               - `python3 "${vars.game_dir}/model.py" set_level --game-id "${vars.game_id}" ${vars.level_num}`
+               - `python3 "${vars.game_dir}/model.py" exec_file --game-id "${vars.game_id}" "${vars.game_dir}/play.py"`
+               - `python3 "${vars.game_dir}/model.py" status --game-id "${vars.game_id}"`
+            4) if mismatch remains, patch again,
+            5) when parity is good, switch_mode to solve_model.
         - files:
             scope: agent
             paths:
@@ -246,6 +254,7 @@ modes:
               - ${vars.game_dir}/model_lib.py
               - ${vars.game_dir}/play.py
               - ${vars.game_dir}/play_lib.py
+              - ${vars.game_dir}/level_${vars.level_num}/compare_results.md
         - template: |
             <supervisor-context>
             {{supervisor.user_message}}
@@ -289,16 +298,15 @@ modes:
 
             Required proof sequence before switching to solve_game:
             - `python3 "${vars.game_dir}/model.py" shutdown --game-id "${vars.game_id}"`
-            - `python3 "${vars.game_dir}/model.py" set_level --game-id "${vars.game_id}" <n>`
+            - `python3 "${vars.game_dir}/model.py" set_level --game-id "${vars.game_id}" ${vars.level_num}`
             - `python3 "${vars.game_dir}/model.py" exec_file --game-id "${vars.game_id}" "${vars.game_dir}/play.py"`
 
-            If proof fails, update play/model artifacts and retry.
+            If proof fails because model behavior is wrong, switch_mode to `code_model` with mismatch evidence.
+            Do not edit model files in solve_model.
         - files:
             scope: agent
             paths:
               - ${vars.game_dir}/theory.md
-              - ${vars.game_dir}/model.py
-              - ${vars.game_dir}/model_lib.py
               - ${vars.game_dir}/play.py
               - ${vars.game_dir}/play_lib.py
         - template: |
@@ -415,10 +423,10 @@ modes:
 mode_state_machine:
   initial_mode: explore_game
   transitions:
-    explore_game: [code_model, solve_model, solve_game, recover, explore_game]
+    explore_game: [code_model, recover, explore_game]
     code_model: [solve_model, explore_game, recover, code_model]
     solve_model: [solve_game, code_model, explore_game, recover, solve_model]
-    solve_game: [explore_game, recover, code_model, solve_model, solve_game]
+    solve_game: [explore_game, recover]
     recover: [explore_game, solve_game, solve_model, code_model, recover]
 
 tools:

@@ -162,9 +162,9 @@ def _run_single_game(
                 "--config-dir", str(runtime.run_config_dir),
                 "--agent-dir", str(runtime.agent_dir),
                 "--supervisor-dir", str(runtime.supervisor_dir),
-                "--define", f"game_id={runtime.active_game_id}",
                 *runtime.provider_args(),
                 *runtime.supervisor_args(),
+                *runtime.define_args(),
                 "--cycle-limit", str(runtime.cycle_limit),
                 "--output", str(runtime.session_file),
             ]
