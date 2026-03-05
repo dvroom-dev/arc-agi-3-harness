@@ -54,7 +54,6 @@ supervisor:
       - "In code_model, once one clean parity/proof bundle for the target level passes, require immediate switch_mode to solve_model. Additional parity-only loops after a passing bundle are drift."
       - "In code_model, if Read/shell analysis calls dominate model-file edits by more than 3:1 after implementation has started, treat as analysis drift and intervene with an explicit transition-or-edit command."
       - "In plan_model, once a new level mechanic is identified and at least one discriminating check has resolved the core unknown, block further pixel-level geometry re-derivation and require patch-plan handoff to code_model."
-      - "Prefer a single canonical level-summary extraction format in plan_model. If the agent keeps creating new ad-hoc analysis scripts for the same static state, treat as drift and steer back to canonical summary + plan artifact completion."
   supervisor_triggers:
     cadence:
       supervisor_prompt:
@@ -374,13 +373,13 @@ agent:
 
 modes:
   plan_model:
-    description: "Discover and validate mechanics with minimal real-game actions, then produce a concrete model patch plan."
+    description: "Resolve model-vs-game mismatches with minimal probing, then hand off a concrete patch delta to code_model."
     start_when:
       - "A new level has been reached that wasn't previously solved."
       - "The model behavior doesn't match the game behavior."
       - "The model has bugs."
     stop_when:
-      - "A concrete patch plan is written to `$GAME_DIR/plan_model.md`, all open unknowns are explicitly marked BLOCKING or NON-BLOCKING, and the mode_payload for code_model is prepared; switch_mode to code_model."
+      - "`$GAME_DIR/plan_model.md` is updated with: (a) observed mismatch, (b) next discriminating probe result or decision, and (c) concrete model patch delta; then switch_mode to code_model."
       - "Game level advances to a frontier UNSOLVED level. Fork a new conversation in the same mode."
       - "Game over happens or the current level regresses to a previously SOLVED level; switch to recover mode."
     tools:
@@ -410,21 +409,16 @@ modes:
             - Not allowed: editing model.py or model_lib.py in this mode.
 
             Required output artifact:
-            - Write or update `$GAME_DIR/plan_model.md` with sections:
-              1) Carryover mechanics still valid for this level
-              2) New level delta (what changed from prior solved level)
-              3) Minimal model patch plan (`model_lib.py`/`model.py` targets)
-              4) Post-code validation checklist (model parity/proof)
-              5) Open unknowns + one discriminating check for each + BLOCKING/NON-BLOCKING status
-              6) Canonical summary snapshot for current level (JSON keys only): `level`, `exit_top_left`, `player_center`, `box_bounds`, `box_target_pattern`, `hud_pattern`, `hud_fill_color`, `new_features`, `rotations_needed`, `shortest_route_estimates`
+            - Write or update `$GAME_DIR/plan_model.md` with only these required sections:
+              1) Observed mismatch (what failed, exact evidence)
+              2) Discriminating probe (single highest-value next check, or result if already run)
+              3) Model patch delta (`model.py`/`model_lib.py` edits to make next)
 
-            Loop:
-            1) choose 1-2 highest-value unknowns,
-            2) run one targeted discriminating real-game batch only if needed,
-            3) update theory.md,
-            4) update `$GAME_DIR/plan_model.md`,
-            5) verify parity against existing model behavior,
-            6) when ready, switch_mode to code_model.
+            Loop (keep short):
+            1) identify the highest-value mismatch,
+            2) if needed, run one discriminating real-game probe,
+            3) immediately update theory.md and `$GAME_DIR/plan_model.md`,
+            4) switch_mode to code_model.
 
             Transition rules:
             - If evidence is sufficient to implement model changes, call switch_mode to code_model.
@@ -438,8 +432,8 @@ modes:
             Efficiency rules:
             - Real-game actions are expensive; do not probe when history or hex/diff artifacts already answer the question.
             - Prefer reading `$GAME_DIR/level_<n>/turn_*/{before_state.hex,after_state.hex,diff.hex,meta.json}` and `turn_index.jsonl` for read-only analysis.
-            - Reuse one canonical summary extractor and keep appending/updating that summary format; do not create many one-off geometry scripts for the same unchanged state.
             - After any novel real-game evidence, pause probing and update theory + patch plan before new probes.
+            - Do not run more than one discriminating real-game probe before updating `$GAME_DIR/plan_model.md`.
             - Avoid repeated read-only checks on unchanged state.
             - If no real-game action and no artifact edit occurred since your previous conclusion, do not re-derive; either update the plan artifact or run one discriminating probe for a named unknown.
             - If a probe is needed, state: unknown -> expected differentiating outcome -> stop condition before running it.
@@ -452,13 +446,12 @@ modes:
       requirements:
         - "In plan_model, keep theory.md current with new evidence and explicit confidence updates."
         - "In plan_model, maintain `$GAME_DIR/plan_model.md` as the single source of truth for the current level patch plan."
-        - "Before switching to code_model, classify each open unknown in `$GAME_DIR/plan_model.md` as BLOCKING or NON-BLOCKING."
-        - "Before switching to code_model, provide a concrete patch plan tied to observed evidence."
-        - "Before switching to code_model, include a canonical summary snapshot in `$GAME_DIR/plan_model.md` for the current level with the required keys."
+        - "Before switching to code_model, record the observed mismatch and one discriminating probe outcome or explicit decision in `$GAME_DIR/plan_model.md`."
+        - "Before switching to code_model, provide a concrete patch delta tied to observed evidence."
       violations:
         - "Editing model.py/model_lib.py while in plan_model."
         - "Repeating materially equivalent read-only probes on unchanged state without a new unknown or discriminating test."
-        - "In plan_model, repeatedly deriving pixel-level geometry for unchanged state after core mechanic + one discriminating check are already established."
+        - "In plan_model, repeatedly deriving unchanged geometry after a core mismatch is already identified and a single discriminating probe has been run."
 
   code_model:
     description: "Implement model code from the approved plan and verify parity using model-only execution."
