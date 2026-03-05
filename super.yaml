@@ -1,7 +1,7 @@
 runtime_defaults:
   agent_provider: claude
   agent_model: claude-opus-4-6
-  agent_model_reasoning_effort: high
+  agent_model_reasoning_effort: medium
   supervisor_provider: codex
   supervisor_model: gpt-5.3-codex
   supervisor_model_reasoning_effort: high
