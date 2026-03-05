@@ -152,6 +152,7 @@ def test_setup_run_dir_seeds_expected_files(tmp_path: Path) -> None:
     assert (agent_dir / "game_ls20" / "theory.md").exists()
     assert (agent_dir / "game_ls20" / "model.py").exists()
     assert (agent_dir / "game_ls20" / "play.py").exists()
+    assert (agent_dir / "_runtime" / "arc_model_runtime" / "__init__.py").exists()
 
 
 def test_setup_run_config_dir_creates_wrappers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

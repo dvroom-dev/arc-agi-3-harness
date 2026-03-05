@@ -149,6 +149,16 @@ def setup_run_dir_impl(
     game_dir = agent_dir / f"game_{safe_game_id}"
     game_dir.mkdir(parents=True, exist_ok=True)
 
+    runtime_src = Path(__file__).resolve().parent / "arc_model_runtime"
+    if not runtime_src.exists():
+        raise RuntimeError(f"missing runtime package: {runtime_src}")
+    runtime_root = agent_dir / "_runtime"
+    runtime_dst = runtime_root / "arc_model_runtime"
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    if runtime_dst.exists():
+        shutil.rmtree(runtime_dst)
+    shutil.copytree(runtime_src, runtime_dst)
+
     # Keep a single canonical play_lib per game to avoid import/path collisions.
     play_lib_game = game_dir / "play_lib.py"
     if not play_lib_game.exists():
