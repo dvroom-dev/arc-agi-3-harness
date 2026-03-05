@@ -24,6 +24,7 @@ from .utils import (
     session_state_path,
     to_jsonable,
 )
+from .intercepts import inject_idle_hint
 
 MODEL_SESSION_SCHEMA_VERSION = 1
 
@@ -280,6 +281,7 @@ class ModelSession:
             "game_step_diff": None,
             "model_step_diff": None,
             "state_diff": None,
+            "transition_mismatch": None,
         }
         for action in actions:
             local_step = int(action.get("local_step", 0) or 0)
@@ -294,6 +296,12 @@ class ModelSession:
             game_before = read_hex_grid(before_path)
             game_after = read_hex_grid(after_path)
             model_before = np.array(compare_env.grid, dtype=np.int8, copy=True)
+            game_state_before = str(action.get("state_before", "") or "")
+            game_state_after = str(action.get("state_after", "") or "")
+            game_levels_before = int(action.get("levels_completed_before", 0) or 0)
+            game_levels_after = int(action.get("levels_completed_after", 0) or 0)
+            model_state_before = str(compare_env.state)
+            model_levels_before = int(compare_env.levels_completed)
             if model_before.shape != game_before.shape or not np.array_equal(model_before, game_before):
                 report["matched"] = False
                 report["divergence_step"] = local_step
@@ -306,7 +314,36 @@ class ModelSession:
             action_data = action.get("action_data", {}) if isinstance(action.get("action_data"), dict) else {}
             compare_env.step(action_from_name(action_name), data=action_data, reasoning=None)
             model_after = np.array(compare_env.grid, dtype=np.int8, copy=True)
+            model_state_after = str(compare_env.state)
+            model_levels_after = int(compare_env.levels_completed)
             report["actions_compared"] = int(local_step)
+            if (
+                model_state_before != game_state_before
+                or model_state_after != game_state_after
+                or model_levels_before != game_levels_before
+                or model_levels_after != game_levels_after
+            ):
+                report["matched"] = False
+                report["divergence_step"] = local_step
+                report["divergence_reason"] = "state_transition_mismatch"
+                report["transition_mismatch"] = {
+                    "game": {
+                        "state_before": game_state_before,
+                        "state_after": game_state_after,
+                        "levels_completed_before": game_levels_before,
+                        "levels_completed_after": game_levels_after,
+                    },
+                    "model": {
+                        "state_before": model_state_before,
+                        "state_after": model_state_after,
+                        "levels_completed_before": model_levels_before,
+                        "levels_completed_after": model_levels_after,
+                    },
+                }
+                report["game_step_diff"] = diff_payload(game_before, game_after)
+                report["model_step_diff"] = diff_payload(model_before, model_after)
+                report["state_diff"] = diff_payload(game_after, model_after)
+                break
             if model_after.shape != game_after.shape or not np.array_equal(model_after, game_after):
                 report["matched"] = False
                 report["divergence_step"] = local_step
@@ -330,6 +367,7 @@ class ModelSession:
             ("Game Step Diff", report.get("game_step_diff")),
             ("Model Step Diff", report.get("model_step_diff")),
             ("State Diff (Game After vs Model After)", report.get("state_diff")),
+            ("Transition Mismatch", report.get("transition_mismatch")),
         ):
             if not value:
                 continue
@@ -403,29 +441,39 @@ def run_model_cli(hooks: ModelHooks, *, game_dir: Path, argv: list[str] | None =
     args = _build_parser().parse_args(argv)
     session = ModelSession(game_id=getattr(args, "game_id", "game"), game_dir=game_dir, hooks=hooks)
     if args.action == "status":
-        print(json.dumps(session.do_status(), indent=2))
+        payload = session.do_status()
+        inject_idle_hint(payload, action_name="status")
+        print(json.dumps(payload, indent=2))
         return 0
     if args.action == "reset_level":
-        print(json.dumps(session.do_reset_level(), indent=2))
+        payload = session.do_reset_level()
+        inject_idle_hint(payload, action_name="reset_level")
+        print(json.dumps(payload, indent=2))
         return 0
     if args.action == "set_level":
         payload = session.do_set_level(int(args.level))
+        inject_idle_hint(payload, action_name="set_level")
         print(json.dumps(payload, indent=2))
         return 0 if payload.get("ok") else 1
     if args.action == "compare_sequences":
         payload, code = session.do_compare_sequences(level=args.level, sequence_id=args.sequence)
+        inject_idle_hint(payload, action_name="compare_sequences")
         print(json.dumps(payload, indent=2))
         return code
     if args.action == "exec":
         payload, code = session.do_exec(sys.stdin.read())
+        inject_idle_hint(payload, action_name="exec")
         print(json.dumps(payload, indent=2))
         return code
     if args.action == "exec_file":
         payload, code = session.do_exec_file(Path(args.script_path))
+        inject_idle_hint(payload, action_name="exec_file")
         print(json.dumps(payload, indent=2))
         return code
     if args.action == "shutdown":
-        print(json.dumps(session.do_shutdown(), indent=2))
+        payload = session.do_shutdown()
+        inject_idle_hint(payload, action_name="shutdown")
+        print(json.dumps(payload, indent=2))
         return 0
     print(json.dumps({"ok": False, "error": {"type": "unknown_action", "message": str(args.action)}}))
     return 1

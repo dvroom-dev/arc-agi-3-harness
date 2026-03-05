@@ -68,6 +68,171 @@ from arc_repl_paths import (
 )
 SCHEMA_VERSION = "arc_repl.v1"
 SOCKET_WAIT_TIMEOUT_S = 90.0
+IDLE_KEEPALIVE_INTERCEPT_MARKER = "__ARC_INTERCEPT_IDLE_KEEPALIVE__"
+LEVEL_COMPLETE_MODEL_MISMATCH_MARKER = "__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__"
+COMPARE_RESULTS_BEGIN_MARKER = "__ARC_COMPARE_RESULTS_BEGIN__"
+COMPARE_RESULTS_END_MARKER = "__ARC_COMPARE_RESULTS_END__"
+IDLE_KEEPALIVE_SECONDS = 12 * 60
+
+
+def _idle_stamp_path(cwd: Path) -> Path:
+    arc_state_dir = Path(str(os.getenv("ARC_STATE_DIR", "") or "")).expanduser()
+    if not str(arc_state_dir).strip():
+        arc_state_dir = _arc_dir(cwd)
+    arc_state_dir.mkdir(parents=True, exist_ok=True)
+    return arc_state_dir / "last_real_game_action_at.txt"
+
+
+def _mark_real_game_action(cwd: Path) -> None:
+    try:
+        _idle_stamp_path(cwd).write_text(f"{time.monotonic():.6f}\n", encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _idle_keepalive_needed(cwd: Path) -> tuple[bool, int]:
+    if not str(os.getenv("ARC_SCORECARD_ID", "") or "").strip():
+        return False, 0
+    path = _idle_stamp_path(cwd)
+    now = time.monotonic()
+    if not path.exists():
+        try:
+            path.write_text(f"{now:.6f}\n", encoding="utf-8")
+        except Exception:
+            pass
+        return False, 0
+    try:
+        stamp = float(path.read_text(encoding="utf-8").strip())
+    except Exception:
+        stamp = now
+    idle_seconds = max(0, int(now - stamp))
+    return idle_seconds >= IDLE_KEEPALIVE_SECONDS, idle_seconds
+
+
+def _result_has_real_game_action(action: str, result: object) -> bool:
+    if not isinstance(result, dict):
+        return False
+    action_name = str(action or "").strip().lower()
+    if action_name == "reset_level":
+        return bool(result.get("ok")) and not bool(result.get("reset_noop", False))
+    if action_name == "exec":
+        try:
+            return int(result.get("steps_executed", 0) or 0) > 0
+        except Exception:
+            return False
+    return False
+
+
+def _latest_sequence_id_for_level(level_dir: Path) -> str | None:
+    seq_root = level_dir / "sequences"
+    if not seq_root.exists():
+        return None
+    seq_files = sorted(seq_root.glob("seq_*.json"))
+    if not seq_files:
+        return None
+    return seq_files[-1].stem
+
+
+def _run_level_completion_compare(cwd: Path, result: object) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    if not bool(result.get("ok")):
+        return None
+    if str(result.get("state", "")).strip().upper() == "WIN":
+        return None
+    try:
+        levels_gained = int(result.get("levels_gained_in_call", 0) or 0)
+    except Exception:
+        levels_gained = 0
+    if levels_gained <= 0:
+        return None
+    try:
+        completed_level = int(result.get("levels_completed", 0) or 0)
+    except Exception:
+        completed_level = 0
+    if completed_level <= 0:
+        return None
+
+    model_py = cwd / "model.py"
+    if not model_py.exists():
+        return None
+    level_dir = cwd / f"level_{completed_level}"
+    if not level_dir.exists():
+        return None
+    sequence_id = _latest_sequence_id_for_level(level_dir)
+    if not sequence_id:
+        return None
+
+    game_id = str(result.get("game_id", "") or os.getenv("ARC_ACTIVE_GAME_ID", "")).strip() or "game"
+    cmd = [
+        sys.executable,
+        str(model_py),
+        "compare_sequences",
+        "--game-id",
+        game_id,
+        "--level",
+        str(completed_level),
+        "--sequence",
+        sequence_id,
+    ]
+    proc = subprocess.run(
+        cmd,
+        cwd=str(cwd),
+        text=True,
+        capture_output=True,
+    )
+    compare_stdout = str(proc.stdout or "")
+    compare_stderr = str(proc.stderr or "")
+    parsed_payload: dict | None = None
+    try:
+        parsed = json.loads(compare_stdout) if compare_stdout.strip() else None
+        if isinstance(parsed, dict):
+            parsed_payload = parsed
+    except Exception:
+        parsed_payload = None
+
+    compare_ok = bool(parsed_payload.get("ok")) if isinstance(parsed_payload, dict) else False
+    all_match = bool(parsed_payload.get("all_match")) if isinstance(parsed_payload, dict) else False
+    mismatch = (proc.returncode != 0) or (not compare_ok) or (not all_match)
+    if not mismatch:
+        return None
+
+    compare_file = level_dir / "compare_results.md"
+    compare_file.parent.mkdir(parents=True, exist_ok=True)
+    report_lines = [
+        f"# Compare Results (Level {completed_level})",
+        "",
+        f"- sequence_id: {sequence_id}",
+        f"- command: {' '.join(cmd)}",
+        f"- return_code: {int(proc.returncode)}",
+        f"- compare_ok: {str(compare_ok).lower()}",
+        f"- all_match: {str(all_match).lower()}",
+        "",
+        "## stdout",
+        "```text",
+        compare_stdout.rstrip(),
+        "```",
+        "",
+        "## stderr",
+        "```text",
+        compare_stderr.rstrip(),
+        "```",
+    ]
+    compare_text = "\n".join(report_lines).rstrip() + "\n"
+    compare_file.write_text(compare_text, encoding="utf-8")
+    try:
+        compare_rel = str(compare_file.relative_to(cwd))
+    except Exception:
+        compare_rel = str(compare_file)
+    return (
+        f"# {LEVEL_COMPLETE_MODEL_MISMATCH_MARKER} level={completed_level} "
+        f"sequence={sequence_id} compare_file={compare_rel}\n"
+        f"# {COMPARE_RESULTS_BEGIN_MARKER}\n"
+        f"{compare_text}"
+        f"# {COMPARE_RESULTS_END_MARKER}\n"
+    )
+
+
 def _load_history(cwd: Path, game_id: str) -> dict:
     return _load_history_impl(cwd, game_id, _make_id_candidates)
 _session_dir = lambda cwd, conversation_id: session_dir(_arc_dir(cwd), conversation_id)
@@ -449,6 +614,22 @@ def main() -> int:
             repl.setdefault("conversation_id", conversation_id)
             repl["session_created"] = bool(session_created or repl.get("session_created"))
             result["repl"] = repl
+        real_game_action = _result_has_real_game_action(action, result)
+        if real_game_action:
+            _mark_real_game_action(cwd)
+        idle_keepalive_needed, idle_seconds = _idle_keepalive_needed(cwd)
+        idle_intercept_line = None
+        if (not real_game_action) and idle_keepalive_needed:
+            idle_intercept_line = (
+                f"{IDLE_KEEPALIVE_INTERCEPT_MARKER} "
+                f"idle_seconds={idle_seconds} "
+                f"action={action}"
+            )
+        level_compare_block = (
+            _run_level_completion_compare(cwd, result)
+            if str(action).strip().lower() == "exec"
+            else None
+        )
         if action == "exec":
             if not isinstance(result, dict):
                 if result is not None:
@@ -461,6 +642,12 @@ def main() -> int:
                 sys.stdout.write(script_stdout)
                 if not script_stdout.endswith("\n"):
                     sys.stdout.write("\n")
+            if level_compare_block:
+                sys.stdout.write(level_compare_block)
+                if not level_compare_block.endswith("\n"):
+                    sys.stdout.write("\n")
+            if idle_intercept_line:
+                sys.stdout.write(f"# {idle_intercept_line}\n")
             if not bool(result.get("ok")):
                 script_error = str(result.get("script_error", "") or "").strip()
                 if script_error:
@@ -477,12 +664,14 @@ def main() -> int:
                             if not msg.endswith("\n"):
                                 sys.stderr.write("\n")
                         if details:
-                            sys.stderr.write(details)
-                            if not details.endswith("\n"):
-                                sys.stderr.write("\n")
+                                sys.stderr.write(details)
+                                if not details.endswith("\n"):
+                                    sys.stderr.write("\n")
                 return 1
             return 0
 
+        if isinstance(result, dict) and idle_intercept_line:
+            result["intercept_hint"] = idle_intercept_line
         _emit_json(result)
         return 0 if bool(result.get("ok")) else 1
     except Exception as exc:
