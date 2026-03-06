@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -18,18 +19,21 @@ def _copy_model_templates(game_dir: Path) -> None:
     game_dir.mkdir(parents=True, exist_ok=True)
     for name in ("model.py", "model_lib.py", "play_lib.py", "play.py"):
         shutil.copy2(src_dir / name, game_dir / name)
-    runtime_dst = game_dir.parent / "_runtime" / "arc_model_runtime"
+    runtime_dst = game_dir.parent / "config" / "tools" / "arc_model_runtime"
     runtime_dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(runtime_src, runtime_dst)
 
 
 def _run_model(game_dir: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["ARC_CONFIG_DIR"] = str((game_dir.parent / "config").resolve())
     return subprocess.run(
         [sys.executable, str(game_dir / "model.py"), *args],
         cwd=game_dir,
         text=True,
         capture_output=True,
         check=False,
+        env=env,
     )
 
 

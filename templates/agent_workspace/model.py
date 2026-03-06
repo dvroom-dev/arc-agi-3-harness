@@ -9,16 +9,22 @@ Keep this file small:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 import sys
 
 from arcengine import GameAction
 
-# Runtime is copied by harness into agent/_runtime/arc_model_runtime.
+# Runtime is supplied by harness in run config tools.
 GAME_DIR = Path(__file__).resolve().parent
-RUNTIME_DIR = GAME_DIR.parent / "_runtime"
-if str(RUNTIME_DIR) not in sys.path:
-    sys.path.insert(0, str(RUNTIME_DIR))
+CONFIG_DIR = Path(str(os.getenv("ARC_CONFIG_DIR", "") or "")).expanduser()
+if not str(CONFIG_DIR).strip():
+    raise RuntimeError("ARC_CONFIG_DIR is required for model runtime imports.")
+RUNTIME_PARENT = CONFIG_DIR / "tools"
+if not RUNTIME_PARENT.exists():
+    raise RuntimeError(f"model runtime path missing: {RUNTIME_PARENT}")
+if str(RUNTIME_PARENT) not in sys.path:
+    sys.path.insert(0, str(RUNTIME_PARENT))
 
 from arc_model_runtime import ModelHooks, run_model_cli  # noqa: E402
 
@@ -75,4 +81,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
