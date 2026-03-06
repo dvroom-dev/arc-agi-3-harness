@@ -5,7 +5,6 @@ import time
 import traceback
 from argparse import Namespace
 from datetime import datetime, timezone
-from pathlib import Path
 
 from harness_explore import run_input_exploration_from_reset
 from harness_repl_health import collect_repl_health, format_repl_crash_diagnostics
@@ -17,7 +16,6 @@ from harness_runner_args import (
 )
 from harness_runner_regression import (
     _classify_level_drop,
-    _find_step_level_regression,
 )
 from harness_runtime import HarnessRuntime
 from harness_scorecard_helpers import (
@@ -39,6 +37,36 @@ def _run_single_game(
 ) -> None:
     IDLE_KEEPALIVE_TRIGGER_SECONDS = 12 * 60
     IDLE_KEEPALIVE_MARKER = "__ARC_INTERCEPT_IDLE_KEEPALIVE__"
+
+    def _marker_kv(payload: str | None) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for token in str(payload or "").strip().split():
+            if "=" not in token:
+                continue
+            key, value = token.split("=", 1)
+            out[key.strip()] = value.strip()
+        return out
+
+    def _log_keepalive_resolution(marker_payload: str | None, *, reason: str) -> None:
+        marker_text = str(marker_payload or "").strip()
+        if not marker_text:
+            return
+        fields = _marker_kv(marker_text)
+        queued_at_unix = fields.get("queued_at_unix")
+        latency_seconds: int | None = None
+        if queued_at_unix:
+            try:
+                latency_seconds = max(0, int(time.time() - float(queued_at_unix)))
+            except Exception:
+                latency_seconds = None
+        idle_seconds_at_queue = fields.get("idle_seconds")
+        runtime.log(
+            "[harness] keepalive resolved: "
+            f"reason={reason} "
+            f"latency_seconds={latency_seconds if latency_seconds is not None else 'NA'} "
+            f"idle_seconds_at_queue={idle_seconds_at_queue or 'NA'} "
+            f"marker=\"{marker_text}\""
+        )
 
     def _events_include_real_game_action(events: list[dict]) -> bool:
         for event in events:
@@ -140,7 +168,6 @@ def _run_single_game(
                 "--supervisor-dir", str(runtime.supervisor_dir),
                 *runtime.provider_args(),
                 *runtime.supervisor_args(),
-                *runtime.define_args(),
                 "--cycle-limit", str(runtime.cycle_limit),
                 "--output", str(runtime.session_file),
             ]
@@ -170,7 +197,6 @@ def _run_single_game(
 
             history_events_after_new = runtime.load_history_events()
             processed_history_len = len(history_events_after_new)
-            processed_engine_turn = runtime.load_engine_turn()
 
             while True:
                 if args.max_turns is not None and super_turn > args.max_turns:
@@ -229,6 +255,10 @@ def _run_single_game(
                         and not bool(reset_result.get("reset_noop", False))
                     ):
                         last_real_game_action_at_monotonic = time.monotonic()
+                        _log_keepalive_resolution(
+                            runtime.read_idle_keepalive_marker(),
+                            reason="game_over_auto_reset",
+                        )
                         runtime.clear_idle_keepalive_marker()
                     state = runtime.load_state()
 
@@ -238,16 +268,19 @@ def _run_single_game(
                         idle_seconds >= IDLE_KEEPALIVE_TRIGGER_SECONDS
                         and not runtime.has_idle_keepalive_marker()
                     ):
+                        queued_at_unix = int(time.time())
                         runtime.write_idle_keepalive_marker(
                             marker=IDLE_KEEPALIVE_MARKER,
                             details=(
                                 f"idle_seconds={idle_seconds} "
-                                f"level={int(state.get('current_level', 0) if state else 0)}"
+                                f"level={int(state.get('current_level', 0) if state else 0)} "
+                                f"source=harness "
+                                f"queued_at_unix={queued_at_unix}"
                             ),
                         )
                         runtime.log(
                             "[harness] queued idle keepalive intercept marker "
-                            f"(idle_seconds={idle_seconds})"
+                            f"(idle_seconds={idle_seconds}, queued_at_unix={queued_at_unix})"
                         )
 
                 history_len_before_resume = processed_history_len
@@ -264,11 +297,13 @@ def _run_single_game(
                     if history_len_before_resume <= len(history_after_resume)
                     else history_after_resume
                 )
-                current_engine_turn = runtime.load_engine_turn()
                 processed_history_len = len(history_after_resume)
-                processed_engine_turn = current_engine_turn
                 if _events_include_real_game_action(new_events):
                     last_real_game_action_at_monotonic = time.monotonic()
+                    _log_keepalive_resolution(
+                        runtime.read_idle_keepalive_marker(),
+                        reason="history_real_game_action",
+                    )
                     runtime.clear_idle_keepalive_marker()
 
                 post_state = runtime.load_state()

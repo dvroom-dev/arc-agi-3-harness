@@ -50,7 +50,8 @@ from arc_repl_diagnostics import (
     has_prior_session_artifacts,
 )
 from arc_repl_intercepts import (
-    consume_idle_keepalive_marker as _consume_idle_keepalive_marker_impl,
+    clear_idle_keepalive_marker as _clear_idle_keepalive_marker_impl,
+    idle_keepalive_marker_for_call as _idle_keepalive_marker_for_call_impl,
     reset_level_intercept_line as _reset_level_intercept_line,
     result_has_real_game_action as _result_has_real_game_action,
     run_level_completion_compare as _run_level_completion_compare,
@@ -80,11 +81,23 @@ SCHEMA_VERSION = "arc_repl.v1"
 SOCKET_WAIT_TIMEOUT_S = 90.0
 
 
-def _consume_idle_keepalive_marker(cwd: Path) -> str | None:
+def _idle_keepalive_marker_for_call(cwd: Path, *, action: str, result: object) -> str | None:
     arc_state_dir = Path(str(os.getenv("ARC_STATE_DIR", "") or "")).expanduser()
     if not str(arc_state_dir).strip():
         arc_state_dir = _arc_dir(cwd)
-    return _consume_idle_keepalive_marker_impl(cwd, arc_state_dir)
+    return _idle_keepalive_marker_for_call_impl(
+        cwd=cwd,
+        arc_state_dir=arc_state_dir,
+        action=action,
+        result=result,
+    )
+
+
+def _clear_idle_keepalive_marker(cwd: Path) -> None:
+    arc_state_dir = Path(str(os.getenv("ARC_STATE_DIR", "") or "")).expanduser()
+    if not str(arc_state_dir).strip():
+        arc_state_dir = _arc_dir(cwd)
+    _clear_idle_keepalive_marker_impl(cwd, arc_state_dir)
 
 
 def _load_history(cwd: Path, game_id: str) -> dict:
@@ -412,8 +425,10 @@ def main() -> int:
             result["repl"] = repl
         real_game_action = _result_has_real_game_action(action, result)
         idle_intercept_line = None
-        if not real_game_action:
-            idle_marker = _consume_idle_keepalive_marker(cwd)
+        if real_game_action:
+            _clear_idle_keepalive_marker(cwd)
+        else:
+            idle_marker = _idle_keepalive_marker_for_call(cwd, action=action, result=result)
             if idle_marker:
                 idle_intercept_line = f"{idle_marker} action={action}".strip()
         reset_intercept_line = _reset_level_intercept_line(action, result)

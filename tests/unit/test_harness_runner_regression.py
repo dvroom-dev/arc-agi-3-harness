@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from harness_runner import _classify_level_drop, _find_step_level_regression
+from harness_runner_regression import _classify_level_drop, _find_step_level_regression
 
 
 def test_find_step_level_regression_detects_drop() -> None:

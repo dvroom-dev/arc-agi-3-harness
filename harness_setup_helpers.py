@@ -200,6 +200,7 @@ def setup_run_config_dir_impl(
         "arc_repl.py",
         "arc_repl_cli.py",
         "arc_repl_daemon.py",
+        "arc_level.py",
     ]
     optional_tools = [
         "arc_repl_paths.py",
@@ -240,6 +241,16 @@ exec \"{py}\" \"${{CONFIG_DIR}}/tools/arc_repl_cli.py\" \"$@\"
     arc_repl_path = bin_dir / "arc_repl"
     arc_repl_path.write_text(arc_repl_wrapper)
     arc_repl_path.chmod(0o755)
+
+    arc_level_wrapper = f"""#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR=\"$(cd \"$(dirname \"${{BASH_SOURCE[0]}}\")\" && pwd)\"
+CONFIG_DIR=\"$(cd \"${{SCRIPT_DIR}}/..\" && pwd)\"
+exec \"{py}\" \"${{CONFIG_DIR}}/tools/arc_level.py\" \"$@\"
+"""
+    arc_level_path = bin_dir / "arc_level"
+    arc_level_path.write_text(arc_level_wrapper)
+    arc_level_path.chmod(0o755)
 
     src_prompts_dir = project_root / "prompts"
     if not src_prompts_dir.exists():

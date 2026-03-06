@@ -18,10 +18,9 @@ from harness_runtime_monitor import (
 )
 from harness_runtime_env import (
     clear_idle_keepalive_marker_impl,
-    current_level_for_define_impl,
-    define_args_impl,
     has_idle_keepalive_marker_impl,
     idle_keepalive_enabled_impl,
+    read_idle_keepalive_marker_impl,
     provider_args_impl,
     refresh_dynamic_super_env_impl,
     supervisor_args_impl,
@@ -193,6 +192,7 @@ class HarnessRuntime:
 
         self.super_env = dict(os.environ)
         self.super_env["ARC_OPERATION_MODE"] = self.operation_mode_name
+        self.super_env["ARC_BACKEND"] = str(getattr(self.args, "arc_backend", "") or "")
         self.super_env["ARC_BASE_URL"] = self.arc_base_url
         self.super_env.setdefault("ARC_ENVIRONMENTS_DIR", str(self.arc_env_dir))
         self.super_env["ARC_STATE_DIR"] = str(self.arc_state_dir)
@@ -212,7 +212,6 @@ class HarnessRuntime:
         if self.repl_parent_start_ticks is not None:
             self.super_env["ARC_REPL_PARENT_START_TICKS"] = str(self.repl_parent_start_ticks)
         self.super_env["PATH"] = f"{self.run_bin_dir}:{os.environ.get('PATH', '')}"
-        self.super_env["ARC_LEVEL_NUM"] = str(self.current_level_for_define())
 
         self.idle_keepalive_marker_path = (
             self.arc_state_dir / "intercepts" / "idle_keepalive.flag"
@@ -300,6 +299,7 @@ class HarnessRuntime:
         ]
         child_env = dict(os.environ)
         child_env["ARC_OPERATION_MODE"] = str(self.args.operation_mode).strip().upper()
+        child_env["ARC_BACKEND"] = str(getattr(self.args, "arc_backend", "") or "")
         child_env["ARC_BASE_URL"] = self.arc_base_url
         child_env.setdefault("ARC_ENVIRONMENTS_DIR", str(self.arc_env_dir))
         child_env["ARC_STATE_DIR"] = str(self.arc_state_dir)
@@ -443,15 +443,9 @@ class HarnessRuntime:
             image_paths=image_paths,
         )
 
-    def current_level_for_define(self) -> int:
-        return current_level_for_define_impl(self)
-
     def refresh_dynamic_super_env(self) -> None:
         self.update_prompt_game_vars()
         refresh_dynamic_super_env_impl(self)
-
-    def define_args(self) -> list[str]:
-        return define_args_impl(self)
 
     def level_start_prompt_images(self, state: dict | None, *, initial: bool = False) -> list[Path]:
         return level_start_prompt_images_impl(self, state, initial=initial)
@@ -468,7 +462,6 @@ class HarnessRuntime:
             "--supervisor-dir", str(self.supervisor_dir),
             *self.provider_args(),
             *self.supervisor_args(),
-            *self.define_args(),
             "--cycle-limit", str(self.cycle_limit),
         ]
         if prompt:
@@ -484,6 +477,9 @@ class HarnessRuntime:
 
     def has_idle_keepalive_marker(self) -> bool:
         return has_idle_keepalive_marker_impl(self)
+
+    def read_idle_keepalive_marker(self) -> str | None:
+        return read_idle_keepalive_marker_impl(self)
 
     def idle_keepalive_enabled(self) -> bool:
         return idle_keepalive_enabled_impl(self)

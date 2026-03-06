@@ -9,15 +9,6 @@ def supervisor_args_impl(runtime) -> list[str]:
     return ["--no-supervisor"] if runtime.args.no_supervisor else []
 
 
-def current_level_for_define_impl(runtime) -> int:
-    state = runtime.load_state() or {}
-    try:
-        level = int(state.get("current_level", 1) or 1)
-    except Exception:
-        level = 1
-    return max(1, level)
-
-
 def refresh_dynamic_super_env_impl(runtime) -> None:
     runtime.super_env["ARC_CONVERSATION_ID"] = runtime.active_conversation_id
     runtime.super_env["ARC_ACTIVE_GAME_ID"] = runtime.active_game_id
@@ -25,16 +16,20 @@ def refresh_dynamic_super_env_impl(runtime) -> None:
     runtime.super_env["ARC_PROMPT_GAME_SLUG"] = runtime.prompt_game_slug
     runtime.super_env["ARC_PROMPT_GAME_DIR"] = runtime.prompt_game_dir
     runtime.super_env["ARC_REPL_SESSION_KEY"] = runtime.active_repl_session_key
-    runtime.super_env["ARC_LEVEL_NUM"] = str(current_level_for_define_impl(runtime))
-
-
-def define_args_impl(runtime) -> list[str]:
-    level_num = str(runtime.super_env.get("ARC_LEVEL_NUM", current_level_for_define_impl(runtime)))
-    return ["--define", f"level_num={level_num}"]
 
 
 def has_idle_keepalive_marker_impl(runtime) -> bool:
     return bool(runtime.idle_keepalive_marker_path.exists())
+
+
+def read_idle_keepalive_marker_impl(runtime) -> str | None:
+    if not runtime.idle_keepalive_marker_path.exists():
+        return None
+    try:
+        payload = runtime.idle_keepalive_marker_path.read_text(encoding="utf-8").strip()
+    except Exception:
+        return None
+    return payload or None
 
 
 def idle_keepalive_enabled_impl(runtime) -> bool:
