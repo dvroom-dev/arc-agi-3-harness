@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import os
 import re
 from pathlib import Path
 
@@ -34,9 +36,39 @@ def read_hex_grid(path: Path) -> np.ndarray:
     return grid_from_hex_rows(rows)
 
 
+def _state_artifacts_root_for_active_game() -> Path | None:
+    state_dir = str(os.getenv("ARC_STATE_DIR", "") or "").strip()
+    game_id = str(os.getenv("ARC_ACTIVE_GAME_ID", "") or "").strip()
+    if not state_dir or not game_id:
+        return None
+    safe = sanitize_game_id(game_id)
+    return Path(state_dir).expanduser() / "game_artifacts" / f"game_{safe}"
+
+
+def _level_current_matches(level_current: Path, level: int) -> bool:
+    meta_candidates = [level_current / "meta.json", level_current / "initial_state.meta.json"]
+    for meta_path in meta_candidates:
+        if not meta_path.exists():
+            continue
+        try:
+            payload = json.loads(meta_path.read_text())
+        except Exception:
+            continue
+        try:
+            parsed = int(payload.get("level"))
+        except Exception:
+            continue
+        if parsed == int(level):
+            return True
+    return False
+
+
 def _iter_level_directories(game_dir: Path) -> list[Path]:
     dirs: dict[int, Path] = {}
     roots = [game_dir, game_dir / "levels"]
+    state_root = _state_artifacts_root_for_active_game()
+    if state_root is not None:
+        roots.extend([state_root, state_root / "levels"])
     for root in roots:
         if not root.exists() or not root.is_dir():
             continue
@@ -48,6 +80,12 @@ def _iter_level_directories(game_dir: Path) -> list[Path]:
                 continue
             lvl = int(match.group(1))
             dirs.setdefault(lvl, child)
+    level_current = game_dir / "level_current"
+    if level_current.exists() and level_current.is_dir():
+        for lvl in sorted(dirs):
+            if _level_current_matches(level_current, lvl):
+                dirs[lvl] = level_current
+                break
     return [dirs[k] for k in sorted(dirs)]
 
 
@@ -68,9 +106,16 @@ def discover_level_initial_states(game_dir: Path) -> dict[int, np.ndarray]:
 def resolve_level_dir(game_dir: Path, level: int) -> Path | None:
     target_name = f"level_{int(level)}"
     candidates = [game_dir / target_name, game_dir / "levels" / target_name]
+    state_root = _state_artifacts_root_for_active_game()
+    if state_root is not None:
+        candidates.extend([state_root / target_name, state_root / "levels" / target_name])
     for candidate in candidates:
         if candidate.exists() and candidate.is_dir():
             return candidate
+    level_current = game_dir / "level_current"
+    if level_current.exists() and level_current.is_dir():
+        if _level_current_matches(level_current, int(level)):
+            return level_current
     return None
 
 
@@ -143,4 +188,3 @@ def action_from_name(name: str) -> GameAction:
         return getattr(GameAction, action_name)
     except Exception as exc:
         raise RuntimeError(f"unknown action name in sequence: {action_name!r}") from exc
-

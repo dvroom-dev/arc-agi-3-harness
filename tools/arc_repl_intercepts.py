@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -172,6 +173,17 @@ def latest_sequence_id_for_level(level_dir: Path) -> str | None:
     return seq_files[-1].stem
 
 
+def _safe_slug(value: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "").strip()).strip("._") or "game"
+
+
+def _artifacts_game_dir(*, cwd: Path, game_id: str) -> Path:
+    state_dir = str(os.getenv("ARC_STATE_DIR", "") or "").strip()
+    if not state_dir:
+        return cwd
+    return Path(state_dir).expanduser() / "game_artifacts" / f"game_{_safe_slug(game_id)}"
+
+
 def run_level_completion_compare(cwd: Path, result: object) -> str | None:
     if not isinstance(result, dict):
         return None
@@ -195,14 +207,15 @@ def run_level_completion_compare(cwd: Path, result: object) -> str | None:
     model_py = cwd / "model.py"
     if not model_py.exists():
         return None
-    level_dir = cwd / f"level_{completed_level}"
+    game_id = str(result.get("game_id", "") or os.getenv("ARC_ACTIVE_GAME_ID", "")).strip() or "game"
+    artifacts_dir = _artifacts_game_dir(cwd=cwd, game_id=game_id)
+    level_dir = artifacts_dir / f"level_{completed_level}"
     if not level_dir.exists():
         return None
     sequence_id = latest_sequence_id_for_level(level_dir)
     if not sequence_id:
         return None
 
-    game_id = str(result.get("game_id", "") or os.getenv("ARC_ACTIVE_GAME_ID", "")).strip() or "game"
     cmd = [
         sys.executable,
         str(model_py),
@@ -260,7 +273,7 @@ def run_level_completion_compare(cwd: Path, result: object) -> str | None:
     compare_text = "\n".join(report_lines).rstrip() + "\n"
     compare_file.write_text(compare_text, encoding="utf-8")
     try:
-        compare_rel = str(compare_file.relative_to(cwd))
+        compare_rel = str(compare_file.relative_to(artifacts_dir))
     except Exception:
         compare_rel = str(compare_file)
     return (

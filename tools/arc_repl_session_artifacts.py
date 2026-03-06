@@ -94,6 +94,75 @@ def _safe_dir_name(value: str) -> str:
     return safe or "game"
 
 
+def _canonical_game_artifacts_dir(session) -> Path:
+    safe_game = _safe_dir_name(str(session.game_id))
+    root = session.arc_dir / "game_artifacts" / f"game_{safe_game}"
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _remove_path(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink() or path.is_file():
+        try:
+            path.unlink()
+        except Exception:
+            pass
+        return
+    shutil.rmtree(path, ignore_errors=True)
+
+
+def _materialize_level_current_view(
+    *,
+    session,
+    agent_game_dir: Path,
+    artifacts_game_dir: Path,
+    current_level: int,
+) -> None:
+    src = artifacts_game_dir / f"level_{int(current_level)}"
+    if not src.exists() or not src.is_dir():
+        return
+
+    agent_game_dir.mkdir(parents=True, exist_ok=True)
+    level_current = agent_game_dir / "level_current"
+    temp = agent_game_dir / ".level_current.tmp"
+    _remove_path(temp)
+    shutil.copytree(src, temp)
+    (temp / "meta.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "arc_repl.level_current.v1",
+                "game_id": str(session.game_id),
+                "level": int(current_level),
+                "source": str(src),
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _remove_path(level_current)
+    temp.rename(level_current)
+
+    for child in agent_game_dir.iterdir():
+        if child.name == "level_current":
+            continue
+        if child.name.startswith("level_"):
+            _remove_path(child)
+
+    compat_level = agent_game_dir / f"level_{int(current_level)}"
+    _remove_path(compat_level)
+    try:
+        compat_level.symlink_to(level_current.name, target_is_directory=True)
+    except Exception:
+        shutil.copytree(level_current, compat_level)
+
+    stale_turn_index = agent_game_dir / "turn_index.jsonl"
+    if stale_turn_index.exists():
+        _remove_path(stale_turn_index)
+
+
 def _grid_hex_rows(grid: np.ndarray) -> list[str]:
     return ["".join(f"{int(v):X}" for v in row) for row in grid]
 
@@ -127,14 +196,14 @@ def _write_level_turn_files(
     final_pixels: np.ndarray,
     trace_path: Path,
 ) -> None:
-    # Keep artifact location stable for the agent: always under the game workspace.
-    game_dir = session.play_lib_file.parent
+    agent_game_dir = session.play_lib_file.parent
+    artifacts_game_dir = _canonical_game_artifacts_dir(session)
     level_number = (
         int(levels_before_action) + 1
         if isinstance(levels_before_action, int)
         else int(session.frame.levels_completed) + 1
     )
-    level_dir = game_dir / f"level_{level_number}"
+    level_dir = artifacts_game_dir / f"level_{level_number}"
     turn_dir = level_dir / f"turn_{int(session.turn):04d}"
     turn_dir.mkdir(parents=True, exist_ok=True)
 
@@ -142,6 +211,7 @@ def _write_level_turn_files(
     after_grid = np.array(final_pixels, copy=True)
     _write_hex_grid(turn_dir / "before_state.hex", before_grid)
     _write_hex_grid(turn_dir / "after_state.hex", after_grid)
+    _write_hex_grid(level_dir / "current_state.hex", after_grid)
 
     aggregate_diff = session.deps.build_aggregate_diff_record(
         pre_turn_pixels=pre_pixels,
@@ -170,7 +240,8 @@ def _write_level_turn_files(
     meta = {
         "schema_version": "arc_repl.level_turn_artifact.v1",
         "game_id": str(session.game_id),
-        "game_dir": str(game_dir),
+        "game_dir": str(agent_game_dir),
+        "artifacts_dir": str(artifacts_game_dir),
         "action_label": str(action_label),
         "tool_turn": int(session.turn),
         "level_before": level_number,
@@ -200,7 +271,7 @@ def _write_level_turn_files(
 
     # Per-level append-only index, plus game-wide index for quick scan.
     level_index = level_dir / "turn_index.jsonl"
-    game_index = game_dir / "turn_index.jsonl"
+    game_index = artifacts_game_dir / "turn_index.jsonl"
     entry = {
         "tool_turn": int(session.turn),
         "level": level_number,
@@ -216,7 +287,14 @@ def _write_level_turn_files(
         with idx.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=True) + "\n")
 
-    _sync_level_sequences(session=session, game_dir=game_dir)
+    _sync_level_sequences(session=session, game_dir=artifacts_game_dir)
+    current_level = int(session.frame.levels_completed) + 1
+    _materialize_level_current_view(
+        session=session,
+        agent_game_dir=agent_game_dir,
+        artifacts_game_dir=artifacts_game_dir,
+        current_level=current_level,
+    )
 
 
 def _grid_from_hex_rows(rows: list[str]) -> np.ndarray:
@@ -309,6 +387,13 @@ def _sync_level_sequences(*, session, game_dir: Path) -> None:
 
         if level_before not in first_before_rows_by_level and state_before_rows:
             first_before_rows_by_level[level_before] = state_before_rows
+        if (
+            level_after != level_before
+            and level_after not in first_before_rows_by_level
+            and state_after_rows
+        ):
+            # A transition action often lands on the next level's initial state.
+            first_before_rows_by_level[level_after] = state_after_rows
 
         local_step = len(active["actions"]) + 1
         active["actions"].append(

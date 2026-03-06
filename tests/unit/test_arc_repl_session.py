@@ -340,7 +340,8 @@ def test_repl_writes_level_turn_files(monkeypatch, tmp_path: Path) -> None:
     )
 
     game_dir = tmp_path / "game_ls20"
-    level_dir = game_dir / "level_1"
+    artifacts_game_dir = tmp_path / "arc" / "game_artifacts" / "game_ls20-cb3b57cc"
+    level_dir = artifacts_game_dir / "level_1"
     turn_1 = level_dir / "turn_0001"
     turn_2 = level_dir / "turn_0002"
 
@@ -354,7 +355,7 @@ def test_repl_writes_level_turn_files(monkeypatch, tmp_path: Path) -> None:
         assert meta["tool_turn"] in {1, 2}
 
     level_index = level_dir / "turn_index.jsonl"
-    game_index = game_dir / "turn_index.jsonl"
+    game_index = artifacts_game_dir / "turn_index.jsonl"
     assert level_index.exists()
     assert game_index.exists()
     level_entries = [json.loads(line) for line in level_index.read_text().splitlines() if line.strip()]
@@ -377,9 +378,17 @@ def test_repl_writes_level_turn_files(monkeypatch, tmp_path: Path) -> None:
     assert (level_dir / files["meta_json"]).exists()
 
     assert (level_dir / "initial_state.hex").exists()
+    assert (level_dir / "current_state.hex").exists()
     init_meta = json.loads((level_dir / "initial_state.meta.json").read_text())
     assert init_meta["schema_version"] == "arc_repl.level_initial_state.v1"
     assert init_meta["level"] == 1
+
+    level_current = game_dir / "level_current"
+    assert level_current.exists()
+    assert (level_current / "current_state.hex").exists()
+    current_meta = json.loads((level_current / "meta.json").read_text())
+    assert current_meta["schema_version"] == "arc_repl.level_current.v1"
+    assert current_meta["level"] == 1
 
 
 def test_repl_sequence_artifacts_split_on_reset(monkeypatch, tmp_path: Path) -> None:
@@ -402,7 +411,7 @@ def test_repl_sequence_artifacts_split_on_reset(monkeypatch, tmp_path: Path) -> 
         session_created=False,
     )
 
-    level_dir = tmp_path / "game_ls20" / "level_1"
+    level_dir = tmp_path / "arc" / "game_artifacts" / "game_ls20-cb3b57cc" / "level_1"
     seq_1 = json.loads((level_dir / "sequences" / "seq_0001.json").read_text())
     seq_2 = json.loads((level_dir / "sequences" / "seq_0002.json").read_text())
     assert seq_1["end_reason"] == "reset_level"
