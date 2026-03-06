@@ -2,7 +2,6 @@ vars:
   game_id: ${env.ARC_PROMPT_GAME_ID}
   game_slug: ${env.ARC_PROMPT_GAME_SLUG}
   game_dir: ${env.ARC_PROMPT_GAME_DIR}
-  level_num: ${env.ARC_LEVEL_NUM}
 
 runtime_defaults:
   agent_provider: claude
@@ -32,9 +31,11 @@ supervisor:
       - "For rule enforcement decisions, cite concrete evidence pointers (turn/tool/output/file)."
       - "If evidence is ambiguous, request one minimal discriminating check instead of broad re-analysis."
       - "When a tool interception marker is present, prioritize handling it immediately."
-      - "If intercept marker is __ARC_INTERCEPT_IDLE_KEEPALIVE__, urgently route to explore_game and instruct exactly one real-game action now, then return to the prior mode using switch_mode at the next opportunity."
+      - "Keepalive interrupt protocol (`__ARC_INTERCEPT_IDLE_KEEPALIVE__`): capture `prior_mode` as the mode active when marker is detected; route to `explore_game` for exactly one real-game action; then on the next supervisor pass, return to `prior_mode` via `resume_mode_head` once that one action is evidenced."
+      - "During keepalive interrupt handling, do not ask for broad analysis or file churn; require a single valid `arc_repl` game action and concise evidence only."
       - "If intercept marker is __ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__, route to code_model with compare results and require model parity repair before solve_model/solve_game."
       - "If intercept marker is __ARC_INTERCEPT_RESET_LEVEL__, evaluate whether reset usage is appropriate for the current mode and recent evidence, then decide whether to continue or intervene with corrective guidance."
+      - "In `code_model`, if compare output is unchanged across repeated runs and no new mismatch evidence is produced, direct a mode switch to `explore_game` for one minimal discriminating real-game probe (do not keep re-checking the same compare output)."
   tool_interception:
     rules:
       - name: idle-keepalive
@@ -47,6 +48,11 @@ supervisor:
         tool: bash
         match_type: contains
         pattern: __ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__
+      - name: compare-clean
+        when: response
+        tool: bash
+        match_type: contains
+        pattern: __ARC_INTERCEPT_COMPARE_CLEAN__
       - name: reset-level
         when: response
         tool: bash
@@ -62,19 +68,35 @@ supervisor:
 
               Priority order:
               1) If marker is `__ARC_INTERCEPT_IDLE_KEEPALIVE__`:
+                 - Capture `prior_mode` as the mode active when this marker was detected.
                  - If current mode is not `explore_game`, use `resume_mode_head` to mode `explore_game`.
                  - Inject an urgent user command to run exactly one real-game action now via `arc_repl`.
-                 - In that same command, require switching back to the prior mode right after that action.
+                 - Include a machine-readable line in that command:
+                   `KEEPALIVE_RETURN_MODE=<prior_mode>`
                  - Do not ask for broad analysis in this interrupt.
+                 - On the next supervisor pass:
+                   - If one real-game action is evidenced after that keepalive command, use `resume_mode_head` to `KEEPALIVE_RETURN_MODE`.
+                   - If not yet evidenced, re-issue the same one-action keepalive command and continue.
+                 - Intercept guidance must be command-wrapped:
+                   - If sending `payload.message`, set `payload.message_template=intercept_command` (never `custom`).
+                   - If using `mode_payload.user_message` (fork/resume path), manually wrap message in:
+                     `<supervisor-command trigger="agent_tool_intercept"> ... </supervisor-command>`.
               2) If marker is `__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__`:
                  - Fork a new `code_model` conversation.
                  - Put the compare output/details from the intercepted tool response into `mode_payload.user_message`.
                  - Instruct the agent to patch model code, rerun compare, and repeat until parity matches.
-              3) If marker is `__ARC_INTERCEPT_RESET_LEVEL__`:
+              3) If marker is `__ARC_INTERCEPT_COMPARE_CLEAN__`:
+                 - If current mode is `code_model` or `solve_model`, use `resume_mode_head` to `explore_game`.
+                 - Inject a concise supervisor command:
+                   - model parity for recorded sequences is clean,
+                   - stop model-only churn,
+                   - take the minimal real-game probe needed for new causal evidence,
+                   - then switch_mode as appropriate.
+              4) If marker is `__ARC_INTERCEPT_RESET_LEVEL__`:
                  - Judge whether the reset is appropriate for the current mode and evidence state.
                  - If appropriate, continue with a concise note.
                  - If not appropriate, inject a corrective supervisor command with concrete next action and mode alignment.
-              4) Otherwise continue.
+              5) Otherwise continue.
       message_templates:
         - name: intercept_command
           description: "Wrap interception guidance in a supervisor command envelope."
@@ -128,6 +150,8 @@ agent:
           - In `solve_game` and `recover`, prioritize `arc_repl exec_file "${vars.game_dir}/play.py"` for deterministic execution.
           - Use `arc_repl reset_level` (not `env.reset()` / `GameAction.RESET`).
           - Do not use private/underscored internals.
+          - If a supervisor command includes `KEEPALIVE_RETURN_MODE=<mode>`, treat it as an interrupt:
+            execute exactly one valid real-game action via `arc_repl`, report concise evidence, and stop.
 
           # Objective
           - Minimize real-game actions.
@@ -180,6 +204,7 @@ modes:
             Goal: discover/confirm mechanics using minimal real-game actions, then hand off a concrete model patch plan.
             Prefer artifact-first reasoning from existing hex/diff/sequence files before taking new game actions.
             After each novel real-game signal, update theory/plan before taking additional game actions.
+            Do not leave explore_game until newly observed or uncertain frontier features each have at least one targeted real-game probe with causal evidence.
     user_message:
       operation: append
       parts:
@@ -192,6 +217,7 @@ modes:
             - Produce a concise patch plan for model code in your final message or mode_payload when switching.
             - Use `arc_repl` for real-game interaction and focus on discovering or disambiguating uncertain/new mechanics.
             - Do not try to fully solve the level in this mode unless needed to validate a specific mechanic.
+            - Before switching out of explore_game on a frontier level, ensure each newly observed or uncertain feature has at least one targeted real-game action probe recorded with evidence.
 
             Transition guidance:
             - If model code changes are clear, call `switch_mode` to `code_model` with explicit patch steps.
@@ -211,8 +237,10 @@ modes:
       requirements:
         - "In explore_game, keep `${vars.game_dir}/theory.md` synchronized with new causal evidence."
         - "When switching to code_model, include explicit patch targets (files/functions) and expected parity checks."
+        - "Do not switch out of explore_game on a frontier level until each newly observed/uncertain feature has at least one targeted real-game action probe with evidence recorded in `${vars.game_dir}/theory.md`."
       violations:
         - "Editing model code repeatedly without first identifying what game evidence is missing or mismatched."
+        - "Switching out of explore_game without targeted real-game probes for newly observed or uncertain frontier features."
 
   code_model:
     description: "Implement/repair model code to match observed game behavior."
@@ -239,25 +267,34 @@ modes:
             Goal: patch `${vars.game_dir}/model.py` and `${vars.game_dir}/model_lib.py` until they match real-game evidence.
             Do not use `arc_repl` in this mode.
             Keep `${vars.game_dir}/model.py` thin and move reusable mechanics/helpers into `${vars.game_dir}/model_lib.py`.
+            Runtime/harness internals are out of scope: do not read or edit any file under paths containing `/_runtime/` or `/config/tools/`.
     user_message:
       operation: append
       parts:
         - literal: |
             Active game: `${vars.game_id}`
             Edit model code only.
-            Current level context for model parity: `${vars.level_num}`
+            Allowed code focus for this mode: `${vars.game_dir}/model.py`, `${vars.game_dir}/model_lib.py`, `${vars.game_dir}/play.py`, `${vars.game_dir}/play_lib.py`, `${vars.game_dir}/theory.md`, and level artifacts under `${vars.game_dir}/level_*`.
+            Do not inspect runtime implementation files (`_runtime`, harness internals, tool implementations).
+            Do not trust static level context in this prompt.
+            Determine current level at runtime each turn:
+            - `LEVEL="$(arc_level --field current_level)"`
+            - `echo "runtime level=$LEVEL"`
 
             Required loop:
             1) immediately run compare on all recorded sequences for current level:
-               - `python3 ${vars.game_dir}/model.py compare_sequences --game-id "${vars.game_id}" --level "${vars.level_num}"`
+               - `python3 ${vars.game_dir}/model.py compare_sequences --game-id "${vars.game_id}" --level "$LEVEL"`
             2) patch model code,
             3) rerun model checks (`compare_sequences`, `exec_file`, `status`), for example:
-               - `python3 ${vars.game_dir}/model.py compare_sequences --game-id "${vars.game_id}" --level "${vars.level_num}"`
-               - `python3 ${vars.game_dir}/model.py set_level --game-id "${vars.game_id}" ${vars.level_num}`
+               - `python3 ${vars.game_dir}/model.py compare_sequences --game-id "${vars.game_id}" --level "$LEVEL"`
+               - `python3 ${vars.game_dir}/model.py set_level --game-id "${vars.game_id}" "$LEVEL"`
                - `python3 ${vars.game_dir}/model.py exec_file --game-id "${vars.game_id}" ${vars.game_dir}/play.py`
                - `python3 ${vars.game_dir}/model.py status --game-id "${vars.game_id}"`
             4) if mismatch remains, patch again,
             5) when parity is good, switch_mode to solve_model.
+            6) if compare shows no new information:
+               - If `all_match: true` (or no mismatch reports), do not keep validating; switch_mode to `solve_model`.
+               - If mismatch output is unchanged across repeated compares, stop re-running compare and switch_mode to `explore_game` for one minimal discriminating real-game probe.
         - files:
             scope: agent
             paths:
@@ -266,7 +303,6 @@ modes:
               - ${vars.game_dir}/model_lib.py
               - ${vars.game_dir}/play.py
               - ${vars.game_dir}/play_lib.py
-              - ${vars.game_dir}/level_${vars.level_num}/compare_results.md
         - template: |
             <supervisor-context>
             {{supervisor.user_message}}
@@ -277,6 +313,7 @@ modes:
         - "End each code_model turn with either model-file edits or a switch_mode call."
       violations:
         - "Using `arc_repl` or taking real-game actions in code_model."
+        - "Reading or editing runtime/harness internals (any path containing `/_runtime/` or `/config/tools/`) in code_model."
 
   solve_model:
     description: "Produce and verify deterministic model-side solutions in play.py/play_lib.py."
@@ -307,13 +344,17 @@ modes:
       parts:
         - literal: |
             Active game: `${vars.game_id}`
+            Determine current level at runtime each turn:
+            - `LEVEL="$(arc_level --field current_level)"`
+            - `echo "runtime level=$LEVEL"`
 
             Required proof sequence before switching to solve_game:
             - `python3 ${vars.game_dir}/model.py shutdown --game-id "${vars.game_id}"`
-            - `python3 ${vars.game_dir}/model.py set_level --game-id "${vars.game_id}" ${vars.level_num}`
+            - `python3 ${vars.game_dir}/model.py set_level --game-id "${vars.game_id}" "$LEVEL"`
             - `python3 ${vars.game_dir}/model.py exec_file --game-id "${vars.game_id}" ${vars.game_dir}/play.py`
 
             If proof fails because model behavior is wrong, switch_mode to `code_model` with mismatch evidence.
+            If `code_model` has already reported stable compare output with no new mismatch information, do not loop in solve_model; switch_mode to `explore_game` for one minimal real-game discriminating check.
             Do not edit model files in solve_model.
         - files:
             scope: agent
