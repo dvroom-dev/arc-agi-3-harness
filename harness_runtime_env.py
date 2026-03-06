@@ -22,6 +22,8 @@ def refresh_dynamic_super_env_impl(runtime) -> None:
     runtime.super_env["ARC_CONVERSATION_ID"] = runtime.active_conversation_id
     runtime.super_env["ARC_ACTIVE_GAME_ID"] = runtime.active_game_id
     runtime.super_env["ARC_PROMPT_GAME_ID"] = runtime.prompt_game_id
+    runtime.super_env["ARC_PROMPT_GAME_SLUG"] = runtime.prompt_game_slug
+    runtime.super_env["ARC_PROMPT_GAME_DIR"] = runtime.prompt_game_dir
     runtime.super_env["ARC_REPL_SESSION_KEY"] = runtime.active_repl_session_key
     runtime.super_env["ARC_LEVEL_NUM"] = str(current_level_for_define_impl(runtime))
 

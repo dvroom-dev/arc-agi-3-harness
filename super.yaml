@@ -1,6 +1,7 @@
 vars:
   game_id: ${env.ARC_PROMPT_GAME_ID}
-  game_dir: game_${vars.game_id}
+  game_slug: ${env.ARC_PROMPT_GAME_SLUG}
+  game_dir: ${env.ARC_PROMPT_GAME_DIR}
   level_num: ${env.ARC_LEVEL_NUM}
 
 runtime_defaults:
@@ -110,20 +111,21 @@ agent:
           - GAME_OVER can reset progress; track causes and prevention theories.
 
           # Workspace and paths
-          - Your current working directory is the active game workspace root (`.`).
-          - Use exact paths under `./` for all reads/writes.
+          - Your current working directory is the run workspace root (`.`).
+          - The active game workspace is `${vars.game_dir}`.
+          - Start each mode by running `pwd` then `cd "${vars.game_dir}"` and keep commands scoped there.
           - Required files:
-            - `./theory.md`
-            - `./model.py`
-            - `./model_lib.py`
-            - `./play.py`
-            - `./play_lib.py`
+            - `${vars.game_dir}/theory.md`
+            - `${vars.game_dir}/model.py`
+            - `${vars.game_dir}/model_lib.py`
+            - `${vars.game_dir}/play.py`
+            - `${vars.game_dir}/play_lib.py`
 
           # Tool policy
           - `arc_repl` acts on the real game.
           - `model.py` acts on your model/simulator.
           - In `code_model`, do not use `arc_repl`.
-          - In `solve_game` and `recover`, prioritize `arc_repl exec_file "./play.py"` for deterministic execution.
+          - In `solve_game` and `recover`, prioritize `arc_repl exec_file "${vars.game_dir}/play.py"` for deterministic execution.
           - Use `arc_repl reset_level` (not `env.reset()` / `GameAction.RESET`).
           - Do not use private/underscored internals.
 
@@ -144,9 +146,9 @@ agent:
   rules:
     operation: append
     requirements:
-      - "When new causal evidence is learned from real-game actions, update `./theory.md`."
-      - "If GAME_OVER occurs, write at least one evidence-backed GAME_OVER theory in `./theory.md`."
-      - "When a frontier level is solved, ensure `./play.py` contains a deterministic branch for replaying that level."
+      - "When new causal evidence is learned from real-game actions, update `${vars.game_dir}/theory.md`."
+      - "If GAME_OVER occurs, write at least one evidence-backed GAME_OVER theory in `${vars.game_dir}/theory.md`."
+      - "When a frontier level is solved, ensure `${vars.game_dir}/play.py` contains a deterministic branch for replaying that level."
     violations:
       - "Using exhaustive exploratory search over unknown state/action space (e.g., broad BFS/DFS) to discover solutions."
 
@@ -183,10 +185,10 @@ modes:
       parts:
         - literal: |
             Active game: `${vars.game_id}`
-            Active workspace: `.` (game root; run `pwd && ls -la .` if uncertain)
+            Active workspace root: `.`; active game directory: `${vars.game_dir}`.
 
             Deliverable for this mode:
-            - Update `./theory.md` with mechanics + evidence.
+            - Update `${vars.game_dir}/theory.md` with mechanics + evidence.
             - Produce a concise patch plan for model code in your final message or mode_payload when switching.
             - Use `arc_repl` for real-game interaction and focus on discovering or disambiguating uncertain/new mechanics.
             - Do not try to fully solve the level in this mode unless needed to validate a specific mechanic.
@@ -197,9 +199,9 @@ modes:
         - files:
             scope: agent
             paths:
-              - ./theory.md
-              - ./model.py
-              - ./model_lib.py
+              - ${vars.game_dir}/theory.md
+              - ${vars.game_dir}/model.py
+              - ${vars.game_dir}/model_lib.py
         - template: |
             <supervisor-context>
             {{supervisor.user_message}}
@@ -207,7 +209,7 @@ modes:
     agent_rules:
       operation: append
       requirements:
-        - "In explore_game, keep `./theory.md` synchronized with new causal evidence."
+        - "In explore_game, keep `${vars.game_dir}/theory.md` synchronized with new causal evidence."
         - "When switching to code_model, include explicit patch targets (files/functions) and expected parity checks."
       violations:
         - "Editing model code repeatedly without first identifying what game evidence is missing or mismatched."
@@ -234,9 +236,9 @@ modes:
       parts:
         - literal: |
             Mode: code_model.
-            Goal: patch `./model.py` and `./model_lib.py` until they match real-game evidence.
+            Goal: patch `${vars.game_dir}/model.py` and `${vars.game_dir}/model_lib.py` until they match real-game evidence.
             Do not use `arc_repl` in this mode.
-            Keep `./model.py` thin and move reusable mechanics/helpers into `./model_lib.py`.
+            Keep `${vars.game_dir}/model.py` thin and move reusable mechanics/helpers into `${vars.game_dir}/model_lib.py`.
     user_message:
       operation: append
       parts:
@@ -247,24 +249,24 @@ modes:
 
             Required loop:
             1) immediately run compare on all recorded sequences for current level:
-               - `python3 ./model.py compare_sequences --game-id "${vars.game_id}" --level "${vars.level_num}"`
+               - `python3 ${vars.game_dir}/model.py compare_sequences --game-id "${vars.game_id}" --level "${vars.level_num}"`
             2) patch model code,
             3) rerun model checks (`compare_sequences`, `exec_file`, `status`), for example:
-               - `python3 ./model.py compare_sequences --game-id "${vars.game_id}" --level "${vars.level_num}"`
-               - `python3 ./model.py set_level --game-id "${vars.game_id}" ${vars.level_num}`
-               - `python3 ./model.py exec_file --game-id "${vars.game_id}" ./play.py`
-               - `python3 ./model.py status --game-id "${vars.game_id}"`
+               - `python3 ${vars.game_dir}/model.py compare_sequences --game-id "${vars.game_id}" --level "${vars.level_num}"`
+               - `python3 ${vars.game_dir}/model.py set_level --game-id "${vars.game_id}" ${vars.level_num}`
+               - `python3 ${vars.game_dir}/model.py exec_file --game-id "${vars.game_id}" ${vars.game_dir}/play.py`
+               - `python3 ${vars.game_dir}/model.py status --game-id "${vars.game_id}"`
             4) if mismatch remains, patch again,
             5) when parity is good, switch_mode to solve_model.
         - files:
             scope: agent
             paths:
-              - ./theory.md
-              - ./model.py
-              - ./model_lib.py
-              - ./play.py
-              - ./play_lib.py
-              - ./level_${vars.level_num}/compare_results.md
+              - ${vars.game_dir}/theory.md
+              - ${vars.game_dir}/model.py
+              - ${vars.game_dir}/model_lib.py
+              - ${vars.game_dir}/play.py
+              - ${vars.game_dir}/play_lib.py
+              - ${vars.game_dir}/level_${vars.level_num}/compare_results.md
         - template: |
             <supervisor-context>
             {{supervisor.user_message}}
@@ -298,7 +300,7 @@ modes:
       parts:
         - literal: |
             Mode: solve_model.
-            Goal: make `./play.py` solve current level from start in the model.
+            Goal: make `${vars.game_dir}/play.py` solve current level from start in the model.
             Use model-only commands; do not run real-game actions here.
     user_message:
       operation: append
@@ -307,18 +309,18 @@ modes:
             Active game: `${vars.game_id}`
 
             Required proof sequence before switching to solve_game:
-            - `python3 ./model.py shutdown --game-id "${vars.game_id}"`
-            - `python3 ./model.py set_level --game-id "${vars.game_id}" ${vars.level_num}`
-            - `python3 ./model.py exec_file --game-id "${vars.game_id}" ./play.py`
+            - `python3 ${vars.game_dir}/model.py shutdown --game-id "${vars.game_id}"`
+            - `python3 ${vars.game_dir}/model.py set_level --game-id "${vars.game_id}" ${vars.level_num}`
+            - `python3 ${vars.game_dir}/model.py exec_file --game-id "${vars.game_id}" ${vars.game_dir}/play.py`
 
             If proof fails because model behavior is wrong, switch_mode to `code_model` with mismatch evidence.
             Do not edit model files in solve_model.
         - files:
             scope: agent
             paths:
-              - ./theory.md
-              - ./play.py
-              - ./play_lib.py
+              - ${vars.game_dir}/theory.md
+              - ${vars.game_dir}/play.py
+              - ${vars.game_dir}/play_lib.py
         - template: |
             <supervisor-context>
             {{supervisor.user_message}}
@@ -326,7 +328,7 @@ modes:
     agent_rules:
       operation: append
       requirements:
-        - "When model proof succeeds, mark the level SOLVED in `./theory.md` with concise evidence."
+        - "When model proof succeeds, mark the level SOLVED in `${vars.game_dir}/theory.md` with concise evidence."
       violations:
         - "Running real-game actions in solve_model."
 
@@ -353,7 +355,7 @@ modes:
         - literal: |
             Mode: solve_game.
             Goal: execute deterministic real-game solution efficiently.
-            Prefer replaying `./play.py` over ad-hoc exploration.
+            Prefer replaying `${vars.game_dir}/play.py` over ad-hoc exploration.
     user_message:
       operation: append
       parts:
@@ -361,16 +363,16 @@ modes:
             Active game: `${vars.game_id}`
             Run deterministic game execution:
             - `arc_repl status --game-id "${vars.game_id}"`
-            - `arc_repl exec_file --game-id "${vars.game_id}" ./play.py`
+            - `arc_repl exec_file --game-id "${vars.game_id}" ${vars.game_dir}/play.py`
             - `arc_repl status --game-id "${vars.game_id}"`
 
             If frontier level does not complete, switch_mode back to explore_game with mismatch evidence.
         - files:
             scope: agent
             paths:
-              - ./theory.md
-              - ./play.py
-              - ./play_lib.py
+              - ${vars.game_dir}/theory.md
+              - ${vars.game_dir}/play.py
+              - ${vars.game_dir}/play_lib.py
         - template: |
             <supervisor-context>
             {{supervisor.user_message}}
@@ -378,7 +380,7 @@ modes:
     agent_rules:
       operation: append
       requirements:
-        - "When a new frontier level is completed, ensure `./play.py` replay branch is present and `./theory.md` is updated."
+        - "When a new frontier level is completed, ensure `${vars.game_dir}/play.py` replay branch is present and `${vars.game_dir}/theory.md` is updated."
       violations:
         - "Multiple repeated deterministic retries in solve_game without model/theory updates."
 
@@ -411,14 +413,14 @@ modes:
       parts:
         - literal: |
             Active game: `${vars.game_id}`
-            Replay known solutions from `./play.py` using deterministic runs until reaching frontier unsolved level.
+            Replay known solutions from `${vars.game_dir}/play.py` using deterministic runs until reaching frontier unsolved level.
             After frontier is reached, switch_mode to explore_game.
         - files:
             scope: agent
             paths:
-              - ./theory.md
-              - ./play.py
-              - ./play_lib.py
+              - ${vars.game_dir}/theory.md
+              - ${vars.game_dir}/play.py
+              - ${vars.game_dir}/play_lib.py
         - template: |
             <supervisor-context>
             {{supervisor.user_message}}
@@ -426,7 +428,7 @@ modes:
     agent_rules:
       operation: append
       requirements:
-        - "Use known solver branches in `./play.py` for replay before inventing new routes."
+        - "Use known solver branches in `${vars.game_dir}/play.py` for replay before inventing new routes."
       violations:
         - "Doing broad exploratory probing in recover mode."
 

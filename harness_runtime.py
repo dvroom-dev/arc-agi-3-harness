@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from harness_runtime_monitor import (
     format_state_summary as format_state_summary_impl,
     load_engine_turn as load_engine_turn_impl,
@@ -34,6 +33,11 @@ from harness_runtime_cleanup import (
 )
 from harness_runtime_conversation import load_conversation_id_impl
 from harness_runtime_images import level_start_prompt_images_impl
+from harness_runtime_prompting import (
+    load_current_pixels_impl,
+    prompt_args_impl,
+    update_prompt_game_vars_impl,
+)
 from harness_runtime_scorecard import open_scorecard_now_impl
 from harness_scorecard_helpers import (
     build_scorecard_client,
@@ -168,12 +172,15 @@ class HarnessRuntime:
 
         self.active_game_id = str(args.game_id).strip()
         self.prompt_game_id = str(args.game_id).strip()
+        self.prompt_game_slug = ""
+        self.prompt_game_dir = ""
         self.repl_session_key = f"{self.session_name}__{(re.sub(r'[^A-Za-z0-9_.-]+', '_', self.active_game_id).strip('._') or 'game')}"
         self.active_repl_session_key = self.repl_session_key
         self.active_conversation_id = "harness_bootstrap"
         self.active_actual_conversation_id: str | None = None
         self.conversation_aliases: dict[str, str] = {}
         self.last_repl_daemon_pid: int | None = None
+        self.update_prompt_game_vars()
 
         self.prompt_file_counter = 0
         self.enable_level_start_images = False
@@ -199,6 +206,8 @@ class HarnessRuntime:
         self.super_env["ARC_REPL_SESSION_KEY"] = self.active_repl_session_key
         self.super_env["ARC_ACTIVE_GAME_ID"] = self.active_game_id
         self.super_env["ARC_PROMPT_GAME_ID"] = self.prompt_game_id
+        self.super_env["ARC_PROMPT_GAME_SLUG"] = self.prompt_game_slug
+        self.super_env["ARC_PROMPT_GAME_DIR"] = self.prompt_game_dir
         self.super_env["ARC_REPL_PARENT_PID"] = str(self.repl_parent_pid)
         if self.repl_parent_start_ticks is not None:
             self.super_env["ARC_REPL_PARENT_START_TICKS"] = str(self.repl_parent_start_ticks)
@@ -219,11 +228,9 @@ class HarnessRuntime:
             and str(getattr(self.args, "arc_backend", "") or "").strip().lower() == "api"
         )
 
-    def open_scorecard_now(self) -> str:
-        return open_scorecard_now_impl(self)
+    def open_scorecard_now(self) -> str: return open_scorecard_now_impl(self)
 
-    def log(self, msg: str) -> None:
-        print(msg, file=self.deps.sys.stderr, flush=True)
+    def log(self, msg: str) -> None: print(msg, file=self.deps.sys.stderr, flush=True)
 
     def _build_scorecard_client(self):
         return build_scorecard_client(
@@ -234,23 +241,17 @@ class HarnessRuntime:
             scorecard_cookies_json=self.scorecard_cookies_json,
         )
 
-    def provider_args(self) -> list[str]:
-        return provider_args_impl(self)
+    def provider_args(self) -> list[str]: return provider_args_impl(self)
 
-    def supervisor_args(self) -> list[str]:
-        return supervisor_args_impl(self)
+    def supervisor_args(self) -> list[str]: return supervisor_args_impl(self)
 
-    def load_state(self) -> dict | None:
-        return load_state_json_impl(self.state_json)
+    def load_state(self) -> dict | None: return load_state_json_impl(self.state_json)
 
-    def _load_history_payload(self) -> dict[str, Any]:
-        return load_history_payload_impl(self.history_json)
+    def _load_history_payload(self) -> dict[str, Any]: return load_history_payload_impl(self.history_json)
 
-    def load_engine_turn(self) -> int:
-        return load_engine_turn_impl(self.history_json)
+    def load_engine_turn(self) -> int: return load_engine_turn_impl(self.history_json)
 
-    def load_history_events(self) -> list[dict[str, Any]]:
-        return load_history_events_impl(self.history_json)
+    def load_history_events(self) -> list[dict[str, Any]]: return load_history_events_impl(self.history_json)
 
     def resolve_raw_events_path(self) -> Path | None:
         return resolve_raw_events_path_impl(
@@ -362,6 +363,7 @@ class HarnessRuntime:
                     resolved_game_id = str(parsed.get("game_id", "")).strip()
                     if resolved_game_id:
                         self.active_game_id = resolved_game_id
+                        self.update_prompt_game_vars()
                         self.super_env["ARC_ACTIVE_GAME_ID"] = self.active_game_id
                     repl_meta = parsed.get("repl")
                     if isinstance(repl_meta, dict):
@@ -424,14 +426,8 @@ class HarnessRuntime:
         self.active_actual_conversation_id = parsed
         self.active_conversation_id = alias
 
-    def load_current_pixels(self) -> np.ndarray | None:
-        grid_path = self.arc_state_dir / "current_grid.npy"
-        if not grid_path.exists():
-            return None
-        try:
-            return np.load(grid_path)
-        except Exception as exc:
-            raise RuntimeError(f"Failed to load current grid file: {grid_path}: {exc}") from exc
+    def load_current_pixels(self):
+        return load_current_pixels_impl(self)
 
     def prompt_args(
         self,
@@ -440,17 +436,18 @@ class HarnessRuntime:
         prompt_kind: str,
         image_paths: list[Path] | None = None,
     ) -> list[str]:
-        if image_paths:
-            self.prompt_file_counter += 1
-            prompt_file = self.session_dir / f"{prompt_kind}.prompt.{self.prompt_file_counter:04d}.yaml"
-            self.deps.write_prompt_file(prompt_file, prompt_text, image_paths=image_paths)
-            return ["--prompt-file", str(prompt_file)]
-        return ["--prompt", prompt_text]
+        return prompt_args_impl(
+            self,
+            prompt_text,
+            prompt_kind=prompt_kind,
+            image_paths=image_paths,
+        )
 
     def current_level_for_define(self) -> int:
         return current_level_for_define_impl(self)
 
     def refresh_dynamic_super_env(self) -> None:
+        self.update_prompt_game_vars()
         refresh_dynamic_super_env_impl(self)
 
     def define_args(self) -> list[str]:
@@ -496,3 +493,6 @@ class HarnessRuntime:
 
     def clear_idle_keepalive_marker(self) -> None:
         clear_idle_keepalive_marker_impl(self)
+
+    def update_prompt_game_vars(self) -> None:
+        update_prompt_game_vars_impl(self)
