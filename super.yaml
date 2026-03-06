@@ -267,15 +267,15 @@ modes:
             Goal: patch `${vars.game_dir}/model.py` and `${vars.game_dir}/model_lib.py` until they match real-game evidence.
             Do not use `arc_repl` in this mode.
             Keep `${vars.game_dir}/model.py` thin and move reusable mechanics/helpers into `${vars.game_dir}/model_lib.py`.
-            Runtime/harness internals are out of scope: do not read or edit any file under paths containing `/_runtime/` or `/config/tools/`.
+            Runtime/harness internals are out of scope: do not read or edit any file under `/config/tools/`.
     user_message:
       operation: append
       parts:
         - literal: |
             Active game: `${vars.game_id}`
             Edit model code only.
-            Allowed code focus for this mode: `${vars.game_dir}/model.py`, `${vars.game_dir}/model_lib.py`, `${vars.game_dir}/play.py`, `${vars.game_dir}/play_lib.py`, `${vars.game_dir}/theory.md`, and level artifacts under `${vars.game_dir}/level_*`.
-            Do not inspect runtime implementation files (`_runtime`, harness internals, tool implementations).
+            Allowed code focus for this mode: `${vars.game_dir}/model.py`, `${vars.game_dir}/model_lib.py`, `${vars.game_dir}/play.py`, `${vars.game_dir}/play_lib.py`, `${vars.game_dir}/theory.md`, and `${vars.game_dir}/level_current/**`.
+            Do not inspect runtime implementation files (harness internals, tool implementations).
             Do not trust static level context in this prompt.
             Determine current level at runtime each turn:
             - `LEVEL="$(arc_level --field current_level)"`
@@ -313,7 +313,7 @@ modes:
         - "End each code_model turn with either model-file edits or a switch_mode call."
       violations:
         - "Using `arc_repl` or taking real-game actions in code_model."
-        - "Reading or editing runtime/harness internals (any path containing `/_runtime/` or `/config/tools/`) in code_model."
+        - "Reading or editing runtime/harness internals (any path containing `/config/tools/`) in code_model."
 
   solve_model:
     description: "Produce and verify deterministic model-side solutions in play.py/play_lib.py."

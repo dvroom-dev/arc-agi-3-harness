@@ -14,7 +14,7 @@ def update_prompt_game_vars_impl(runtime) -> None:
     if not safe_slug:
         safe_slug = "game"
     runtime.prompt_game_slug = safe_slug
-    runtime.prompt_game_dir = f"game_{safe_slug}"
+    runtime.prompt_game_dir = str((runtime.agent_dir / f"game_{safe_slug}").resolve())
 
 
 def load_current_pixels_impl(runtime) -> np.ndarray | None:
