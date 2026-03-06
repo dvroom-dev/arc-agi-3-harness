@@ -196,6 +196,7 @@ class HarnessRuntime:
         self.super_env["ARC_BASE_URL"] = self.arc_base_url
         self.super_env.setdefault("ARC_ENVIRONMENTS_DIR", str(self.arc_env_dir))
         self.super_env["ARC_STATE_DIR"] = str(self.arc_state_dir)
+        self.super_env["ARC_CONFIG_DIR"] = str(self.run_config_dir)
         self.super_env["ONLY_RESET_LEVELS"] = "true"
         if self.arc_api_key:
             self.super_env["ARC_API_KEY"] = self.arc_api_key
@@ -303,6 +304,7 @@ class HarnessRuntime:
         child_env["ARC_BASE_URL"] = self.arc_base_url
         child_env.setdefault("ARC_ENVIRONMENTS_DIR", str(self.arc_env_dir))
         child_env["ARC_STATE_DIR"] = str(self.arc_state_dir)
+        child_env["ARC_CONFIG_DIR"] = str(self.run_config_dir)
         child_env["ONLY_RESET_LEVELS"] = "true"
         if self.arc_api_key:
             child_env["ARC_API_KEY"] = self.arc_api_key
@@ -322,7 +324,7 @@ class HarnessRuntime:
             input=json.dumps(request),
             text=True,
             capture_output=True,
-            cwd=str(self.agent_dir),
+            cwd=str(self.active_agent_dir()),
             env=child_env,
         )
         if proc.stderr.strip():
@@ -452,13 +454,14 @@ class HarnessRuntime:
 
     def resume_super(self, prompt: str | None = None, *, image_paths: list[Path] | None = None) -> str:
         self.refresh_dynamic_super_env()
+        self.log(f"[harness] super agent-dir: {self.active_agent_dir()}")
         resume_args: list[str] = [
             "resume",
             str(self.session_file),
             "--config", str(self.super_config),
             "--workspace", str(self.run_dir),
             "--config-dir", str(self.run_config_dir),
-            "--agent-dir", str(self.agent_dir),
+            "--agent-dir", str(self.active_agent_dir()),
             "--supervisor-dir", str(self.supervisor_dir),
             *self.provider_args(),
             *self.supervisor_args(),
@@ -492,3 +495,9 @@ class HarnessRuntime:
 
     def update_prompt_game_vars(self) -> None:
         update_prompt_game_vars_impl(self)
+
+    def active_agent_dir(self) -> Path:
+        """Return the current game-scoped agent directory for super --agent-dir."""
+        if self.prompt_game_dir:
+            return Path(self.prompt_game_dir)
+        return self.agent_dir

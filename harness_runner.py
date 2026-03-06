@@ -159,12 +159,13 @@ def _run_single_game(
         def _start_super_new(*, phase_label: str, start_mode: str | None = None) -> None:
             runtime.log(f"[harness] starting super new ({phase_label})...")
             runtime.refresh_dynamic_super_env()
+            runtime.log(f"[harness] super agent-dir: {runtime.active_agent_dir()}")
             cmd = [
                 "new",
                 "--config", str(runtime.super_config),
                 "--workspace", str(runtime.run_dir),
                 "--config-dir", str(runtime.run_config_dir),
-                "--agent-dir", str(runtime.agent_dir),
+                "--agent-dir", str(runtime.active_agent_dir()),
                 "--supervisor-dir", str(runtime.supervisor_dir),
                 *runtime.provider_args(),
                 *runtime.supervisor_args(),
