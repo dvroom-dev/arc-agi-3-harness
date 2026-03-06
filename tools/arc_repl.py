@@ -70,6 +70,7 @@ SCHEMA_VERSION = "arc_repl.v1"
 SOCKET_WAIT_TIMEOUT_S = 90.0
 IDLE_KEEPALIVE_INTERCEPT_MARKER = "__ARC_INTERCEPT_IDLE_KEEPALIVE__"
 LEVEL_COMPLETE_MODEL_MISMATCH_MARKER = "__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__"
+RESET_LEVEL_INTERCEPT_MARKER = "__ARC_INTERCEPT_RESET_LEVEL__"
 COMPARE_RESULTS_BEGIN_MARKER = "__ARC_COMPARE_RESULTS_BEGIN__"
 COMPARE_RESULTS_END_MARKER = "__ARC_COMPARE_RESULTS_END__"
 IDLE_KEEPALIVE_FLAG_REL = "intercepts/idle_keepalive.flag"
@@ -219,6 +220,22 @@ def _run_level_completion_compare(cwd: Path, result: object) -> str | None:
         f"# {COMPARE_RESULTS_BEGIN_MARKER}\n"
         f"{compare_text}"
         f"# {COMPARE_RESULTS_END_MARKER}\n"
+    )
+
+
+def _reset_level_intercept_line(action: str, result: object) -> str | None:
+    if str(action or "").strip().lower() != "reset_level":
+        return None
+    if not isinstance(result, dict):
+        return f"{RESET_LEVEL_INTERCEPT_MARKER} action=reset_level ok=false"
+    ok = str(bool(result.get("ok"))).lower()
+    reset_noop = str(bool(result.get("reset_noop", False))).lower()
+    current_level = result.get("current_level")
+    levels_completed = result.get("levels_completed")
+    return (
+        f"{RESET_LEVEL_INTERCEPT_MARKER} action=reset_level "
+        f"ok={ok} reset_noop={reset_noop} "
+        f"current_level={current_level} levels_completed={levels_completed}"
     )
 
 
@@ -609,6 +626,7 @@ def main() -> int:
             idle_marker = _consume_idle_keepalive_marker(cwd)
             if idle_marker:
                 idle_intercept_line = f"{idle_marker} action={action}".strip()
+        reset_intercept_line = _reset_level_intercept_line(action, result)
         level_compare_block = (
             _run_level_completion_compare(cwd, result)
             if str(action).strip().lower() == "exec"
@@ -654,8 +672,15 @@ def main() -> int:
                 return 1
             return 0
 
-        if isinstance(result, dict) and idle_intercept_line:
-            result["intercept_hint"] = idle_intercept_line
+        if isinstance(result, dict):
+            intercept_lines: list[str] = []
+            if reset_intercept_line:
+                intercept_lines.append(reset_intercept_line)
+            if idle_intercept_line:
+                intercept_lines.append(idle_intercept_line)
+            if intercept_lines:
+                result["intercept_hint"] = " | ".join(intercept_lines)
+                result["intercept_hints"] = intercept_lines
         _emit_json(result)
         return 0 if bool(result.get("ok")) else 1
     except Exception as exc:

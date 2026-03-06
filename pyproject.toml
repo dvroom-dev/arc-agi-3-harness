@@ -12,3 +12,6 @@ dependencies = [
 [project.scripts]
 harness = "harness:main"
 viewer = "viewer:main"
+
+[tool.pytest.ini_options]
+norecursedirs = ["runs"]

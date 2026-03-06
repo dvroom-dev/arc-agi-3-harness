@@ -155,6 +155,7 @@ class HarnessRuntime:
             )
 
         self.active_game_id = str(args.game_id).strip()
+        self.prompt_game_id = str(args.game_id).strip()
         self.repl_session_key = f"{self.session_name}__{(re.sub(r'[^A-Za-z0-9_.-]+', '_', self.active_game_id).strip('._') or 'game')}"
         self.active_repl_session_key = self.repl_session_key
         self.active_conversation_id = "harness_bootstrap"
@@ -185,10 +186,12 @@ class HarnessRuntime:
             self.super_env["ARC_SCORECARD_COOKIES"] = self.scorecard_cookies_json
         self.super_env["ARC_REPL_SESSION_KEY"] = self.active_repl_session_key
         self.super_env["ARC_ACTIVE_GAME_ID"] = self.active_game_id
+        self.super_env["ARC_PROMPT_GAME_ID"] = self.prompt_game_id
         self.super_env["ARC_REPL_PARENT_PID"] = str(self.repl_parent_pid)
         if self.repl_parent_start_ticks is not None:
             self.super_env["ARC_REPL_PARENT_START_TICKS"] = str(self.repl_parent_start_ticks)
         self.super_env["PATH"] = f"{self.run_bin_dir}:{os.environ.get('PATH', '')}"
+        self.super_env["ARC_LEVEL_NUM"] = str(self.current_level_for_define())
 
         self.idle_keepalive_marker_path = (
             self.arc_state_dir / "intercepts" / "idle_keepalive.flag"
@@ -455,15 +458,22 @@ class HarnessRuntime:
             level = 1
         return max(1, level)
 
+    def refresh_dynamic_super_env(self) -> None:
+        self.super_env["ARC_CONVERSATION_ID"] = self.active_conversation_id
+        self.super_env["ARC_ACTIVE_GAME_ID"] = self.active_game_id
+        self.super_env["ARC_PROMPT_GAME_ID"] = self.prompt_game_id
+        self.super_env["ARC_REPL_SESSION_KEY"] = self.active_repl_session_key
+        self.super_env["ARC_LEVEL_NUM"] = str(self.current_level_for_define())
+
     def define_args(self) -> list[str]:
-        return ["--define", f"level_num={self.current_level_for_define()}"]
+        level_num = str(self.super_env.get("ARC_LEVEL_NUM", self.current_level_for_define()))
+        return ["--define", f"level_num={level_num}"]
 
     def level_start_prompt_images(self, state: dict | None, *, initial: bool = False) -> list[Path]:
         return level_start_prompt_images_impl(self, state, initial=initial)
 
     def resume_super(self, prompt: str | None = None, *, image_paths: list[Path] | None = None) -> str:
-        self.super_env["ARC_CONVERSATION_ID"] = self.active_conversation_id
-        self.super_env["ARC_ACTIVE_GAME_ID"] = self.active_game_id
+        self.refresh_dynamic_super_env()
         resume_args: list[str] = [
             "resume",
             str(self.session_file),

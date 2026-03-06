@@ -154,7 +154,7 @@ def _run_single_game(
 
         def _start_super_new(*, phase_label: str, start_mode: str | None = None) -> None:
             runtime.log(f"[harness] starting super new ({phase_label})...")
-            runtime.super_env["ARC_CONVERSATION_ID"] = runtime.active_conversation_id
+            runtime.refresh_dynamic_super_env()
             cmd = [
                 "new",
                 "--config", str(runtime.super_config),
