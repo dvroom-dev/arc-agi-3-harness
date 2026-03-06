@@ -41,9 +41,19 @@ from arc_action_state import (
 )
 from arc_action_state import _load_history as _load_history_impl
 from arc_repl_daemon import run_daemon
+from arc_repl_daemon_client import (
+    spawn_daemon as spawn_daemon_impl,
+    wait_for_daemon as wait_for_daemon_impl,
+)
 from arc_repl_diagnostics import (
     daemon_unavailable_diagnostics,
     has_prior_session_artifacts,
+)
+from arc_repl_intercepts import (
+    consume_idle_keepalive_marker as _consume_idle_keepalive_marker_impl,
+    reset_level_intercept_line as _reset_level_intercept_line,
+    result_has_real_game_action as _result_has_real_game_action,
+    run_level_completion_compare as _run_level_completion_compare,
 )
 from arc_repl_session_core import (
     BaseReplSession,
@@ -68,175 +78,13 @@ from arc_repl_paths import (
 )
 SCHEMA_VERSION = "arc_repl.v1"
 SOCKET_WAIT_TIMEOUT_S = 90.0
-IDLE_KEEPALIVE_INTERCEPT_MARKER = "__ARC_INTERCEPT_IDLE_KEEPALIVE__"
-LEVEL_COMPLETE_MODEL_MISMATCH_MARKER = "__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__"
-RESET_LEVEL_INTERCEPT_MARKER = "__ARC_INTERCEPT_RESET_LEVEL__"
-COMPARE_RESULTS_BEGIN_MARKER = "__ARC_COMPARE_RESULTS_BEGIN__"
-COMPARE_RESULTS_END_MARKER = "__ARC_COMPARE_RESULTS_END__"
-IDLE_KEEPALIVE_FLAG_REL = "intercepts/idle_keepalive.flag"
-
-
-def _idle_keepalive_flag_path(cwd: Path) -> Path:
-    arc_state_dir = Path(str(os.getenv("ARC_STATE_DIR", "") or "")).expanduser()
-    if not str(arc_state_dir).strip():
-        arc_state_dir = _arc_dir(cwd)
-    arc_state_dir.mkdir(parents=True, exist_ok=True)
-    return arc_state_dir / IDLE_KEEPALIVE_FLAG_REL
 
 
 def _consume_idle_keepalive_marker(cwd: Path) -> str | None:
-    path = _idle_keepalive_flag_path(cwd)
-    if not path.exists():
-        return None
-    try:
-        payload = path.read_text(encoding="utf-8").strip()
-    except Exception:
-        payload = ""
-    try:
-        path.unlink()
-    except Exception:
-        pass
-    return payload or IDLE_KEEPALIVE_INTERCEPT_MARKER
-
-
-def _result_has_real_game_action(action: str, result: object) -> bool:
-    if not isinstance(result, dict):
-        return False
-    action_name = str(action or "").strip().lower()
-    if action_name == "reset_level":
-        return bool(result.get("ok")) and not bool(result.get("reset_noop", False))
-    if action_name == "exec":
-        try:
-            return int(result.get("steps_executed", 0) or 0) > 0
-        except Exception:
-            return False
-    return False
-
-
-def _latest_sequence_id_for_level(level_dir: Path) -> str | None:
-    seq_root = level_dir / "sequences"
-    if not seq_root.exists():
-        return None
-    seq_files = sorted(seq_root.glob("seq_*.json"))
-    if not seq_files:
-        return None
-    return seq_files[-1].stem
-
-
-def _run_level_completion_compare(cwd: Path, result: object) -> str | None:
-    if not isinstance(result, dict):
-        return None
-    if not bool(result.get("ok")):
-        return None
-    if str(result.get("state", "")).strip().upper() == "WIN":
-        return None
-    try:
-        levels_gained = int(result.get("levels_gained_in_call", 0) or 0)
-    except Exception:
-        levels_gained = 0
-    if levels_gained <= 0:
-        return None
-    try:
-        completed_level = int(result.get("levels_completed", 0) or 0)
-    except Exception:
-        completed_level = 0
-    if completed_level <= 0:
-        return None
-
-    model_py = cwd / "model.py"
-    if not model_py.exists():
-        return None
-    level_dir = cwd / f"level_{completed_level}"
-    if not level_dir.exists():
-        return None
-    sequence_id = _latest_sequence_id_for_level(level_dir)
-    if not sequence_id:
-        return None
-
-    game_id = str(result.get("game_id", "") or os.getenv("ARC_ACTIVE_GAME_ID", "")).strip() or "game"
-    cmd = [
-        sys.executable,
-        str(model_py),
-        "compare_sequences",
-        "--game-id",
-        game_id,
-        "--level",
-        str(completed_level),
-        "--sequence",
-        sequence_id,
-    ]
-    proc = subprocess.run(
-        cmd,
-        cwd=str(cwd),
-        text=True,
-        capture_output=True,
-    )
-    compare_stdout = str(proc.stdout or "")
-    compare_stderr = str(proc.stderr or "")
-    parsed_payload: dict | None = None
-    try:
-        parsed = json.loads(compare_stdout) if compare_stdout.strip() else None
-        if isinstance(parsed, dict):
-            parsed_payload = parsed
-    except Exception:
-        parsed_payload = None
-
-    compare_ok = bool(parsed_payload.get("ok")) if isinstance(parsed_payload, dict) else False
-    all_match = bool(parsed_payload.get("all_match")) if isinstance(parsed_payload, dict) else False
-    mismatch = (proc.returncode != 0) or (not compare_ok) or (not all_match)
-    if not mismatch:
-        return None
-
-    compare_file = level_dir / "compare_results.md"
-    compare_file.parent.mkdir(parents=True, exist_ok=True)
-    report_lines = [
-        f"# Compare Results (Level {completed_level})",
-        "",
-        f"- sequence_id: {sequence_id}",
-        f"- command: {' '.join(cmd)}",
-        f"- return_code: {int(proc.returncode)}",
-        f"- compare_ok: {str(compare_ok).lower()}",
-        f"- all_match: {str(all_match).lower()}",
-        "",
-        "## stdout",
-        "```text",
-        compare_stdout.rstrip(),
-        "```",
-        "",
-        "## stderr",
-        "```text",
-        compare_stderr.rstrip(),
-        "```",
-    ]
-    compare_text = "\n".join(report_lines).rstrip() + "\n"
-    compare_file.write_text(compare_text, encoding="utf-8")
-    try:
-        compare_rel = str(compare_file.relative_to(cwd))
-    except Exception:
-        compare_rel = str(compare_file)
-    return (
-        f"# {LEVEL_COMPLETE_MODEL_MISMATCH_MARKER} level={completed_level} "
-        f"sequence={sequence_id} compare_file={compare_rel}\n"
-        f"# {COMPARE_RESULTS_BEGIN_MARKER}\n"
-        f"{compare_text}"
-        f"# {COMPARE_RESULTS_END_MARKER}\n"
-    )
-
-
-def _reset_level_intercept_line(action: str, result: object) -> str | None:
-    if str(action or "").strip().lower() != "reset_level":
-        return None
-    if not isinstance(result, dict):
-        return f"{RESET_LEVEL_INTERCEPT_MARKER} action=reset_level ok=false"
-    ok = str(bool(result.get("ok"))).lower()
-    reset_noop = str(bool(result.get("reset_noop", False))).lower()
-    current_level = result.get("current_level")
-    levels_completed = result.get("levels_completed")
-    return (
-        f"{RESET_LEVEL_INTERCEPT_MARKER} action=reset_level "
-        f"ok={ok} reset_noop={reset_noop} "
-        f"current_level={current_level} levels_completed={levels_completed}"
-    )
+    arc_state_dir = Path(str(os.getenv("ARC_STATE_DIR", "") or "")).expanduser()
+    if not str(arc_state_dir).strip():
+        arc_state_dir = _arc_dir(cwd)
+    return _consume_idle_keepalive_marker_impl(cwd, arc_state_dir)
 
 
 def _load_history(cwd: Path, game_id: str) -> dict:
@@ -309,85 +157,27 @@ class ReplSession(BaseReplSession):
             deps=sys.modules[__name__],
         )
 def _spawn_daemon(cwd: Path, conversation_id: str, game_id: str) -> None:
-    session_dir = _session_dir(cwd, conversation_id)
-    session_dir.mkdir(parents=True, exist_ok=True)
-    socket_path = _socket_path(cwd, conversation_id)
-    if socket_path.exists():
-        try:
-            socket_path.unlink()
-        except Exception:
-            pass
-    log_path = _daemon_log_path(cwd, conversation_id)
-    with log_path.open("a", encoding="utf-8") as logf:
-        parent_pid, parent_start_ticks = spawn_parent_identity_from_env()
-        daemon_cmd = [
-            sys.executable,
-            str(Path(__file__).resolve()),
-            "--daemon",
-            "--cwd",
-            str(cwd),
-            "--conversation-id",
-            conversation_id,
-            "--game-id",
-            game_id,
-        ]
-        if parent_pid is not None:
-            daemon_cmd.extend(["--parent-pid", str(parent_pid)])
-            if parent_start_ticks is not None:
-                daemon_cmd.extend(["--parent-start-ticks", str(parent_start_ticks)])
-        proc = subprocess.Popen(
-            daemon_cmd,
-            cwd=str(cwd),
-            env=dict(os.environ),
-            stdin=subprocess.DEVNULL,
-            stdout=logf,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
-    _pid_path(cwd, conversation_id).write_text(str(proc.pid) + "\n")
-    _append_lifecycle_event(
-        cwd,
-        conversation_id,
-        "spawned",
-        daemon_pid=int(proc.pid),
-        game_id=str(game_id),
-        parent_pid=int(os.getpid()),
-        lifecycle_parent_pid=(
-            int(parent_pid) if parent_pid is not None else None
-        ),
-        lifecycle_parent_start_ticks=(
-            int(parent_start_ticks) if parent_start_ticks is not None else None
-        ),
-        transport="file",
-        socket_path=str(socket_path),
-        log_file=str(log_path),
+    spawn_daemon_impl(
+        cwd=cwd,
+        conversation_id=conversation_id,
+        game_id=game_id,
+        session_dir_fn=_session_dir,
+        socket_path_fn=_socket_path,
+        daemon_log_path_fn=_daemon_log_path,
+        pid_path_fn=_pid_path,
+        append_lifecycle_event=_append_lifecycle_event,
+        spawn_parent_identity_from_env=spawn_parent_identity_from_env,
+        daemon_entry=Path(__file__).resolve(),
     )
 def _wait_for_daemon(cwd: Path, conversation_id: str, timeout_s: float = SOCKET_WAIT_TIMEOUT_S) -> None:
-    socket_path = _socket_path(cwd, conversation_id)
-    deadline = time.time() + timeout_s
-    while time.time() < deadline:
-        if socket_path.exists():
-            try:
-                resp = _send_ipc_request(
-                    cwd,
-                    conversation_id,
-                    {"action": "ping", "game_id": ""},
-                    timeout_s=1.0,
-                )
-                if isinstance(resp, dict) and bool(resp.get("ok")):
-                    return
-            except Exception:
-                pass
-        time.sleep(0.05)
-    _append_lifecycle_event(
-        cwd,
-        conversation_id,
-        "wait_timeout",
-        timeout_s=float(timeout_s),
-        transport="file",
-        socket_path=str(socket_path),
+    wait_for_daemon_impl(
+        cwd=cwd,
+        conversation_id=conversation_id,
+        socket_path_fn=_socket_path,
+        send_ipc_request_fn=_send_ipc_request,
+        append_lifecycle_event=_append_lifecycle_event,
+        timeout_s=timeout_s,
     )
-    raise RuntimeError(f"arc_repl daemon did not start within {timeout_s}s")
 def _send_request(cwd: Path, conversation_id: str, request: dict) -> tuple[dict, bool]:
     socket_path = _socket_path(cwd, conversation_id)
     session_created = False

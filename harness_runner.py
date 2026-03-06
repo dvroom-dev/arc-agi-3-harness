@@ -6,9 +6,15 @@ import traceback
 from argparse import Namespace
 from datetime import datetime, timezone
 from pathlib import Path
+
 from harness_explore import run_input_exploration_from_reset
-from harness_repl_health import format_repl_health_summary
 from harness_repl_health import collect_repl_health, format_repl_crash_diagnostics
+from harness_repl_health import format_repl_health_summary
+from harness_runner_args import (
+    resolve_arc_base_url,
+    resolve_game_ids,
+    session_name_for_game,
+)
 from harness_runner_regression import (
     _classify_level_drop,
     _find_step_level_regression,
@@ -20,36 +26,6 @@ from harness_scorecard_helpers import (
     run_scorecard_session_preflight,
     validate_scorecard_owner_check,
 )
-def _resolve_arc_base_url(args) -> str:
-    if args.arc_base_url and str(args.arc_base_url).strip():
-        return str(args.arc_base_url).strip()
-    if args.arc_backend == "server":
-        return "http://127.0.0.1:8000"
-    return "https://three.arcprize.org"
-def _resolve_game_ids(args) -> list[str]:
-    raw = str(getattr(args, "game_ids", "") or "").strip()
-    if not raw:
-        gid = str(args.game_id or "").strip()
-        if not gid:
-            raise RuntimeError("No game ID provided.")
-        return [gid]
-    tokens = [t.strip() for t in re.split(r"[,\s]+", raw) if t.strip()]
-    if not tokens:
-        raise RuntimeError("Failed to parse --game-ids (expected comma/space-separated IDs).")
-    unique: list[str] = []
-    seen: set[str] = set()
-    for token in tokens:
-        if token in seen:
-            continue
-        seen.add(token)
-        unique.append(token)
-    return unique
-
-def _session_name_for_game(session_base: str, game_id: str, index: int) -> str:
-    safe_game = re.sub(r"[^A-Za-z0-9_.-]+", "-", game_id).strip("-")
-    if not safe_game:
-        safe_game = f"game-{index:02d}"
-    return f"{session_base}-{index:02d}-{safe_game}"
 
 
 def _run_single_game(
@@ -437,10 +413,10 @@ def run_main(deps) -> None:
             "--score-after-solve cannot be combined with --open-scorecard/--scorecard-id. "
             "The harness will open a fresh scorecard only after unscored solve completes."
         )
-    game_ids = _resolve_game_ids(args)
+    game_ids = resolve_game_ids(args)
     if score_after_solve and len(game_ids) != 1:
         raise RuntimeError("--score-after-solve currently supports exactly one game ID.")
-    arc_base_url = _resolve_arc_base_url(args)
+    arc_base_url = resolve_arc_base_url(args)
 
     session_base = args.session_name or datetime.now().strftime("%Y%m%d_%H%M%S")
     shared_scorecard_id = str(args.scorecard_id or "").strip() or None
@@ -492,7 +468,7 @@ def run_main(deps) -> None:
             game_args = Namespace(**vars(args))
             game_args.game_id = game_id
             if len(game_ids) > 1:
-                game_args.session_name = _session_name_for_game(session_base, game_id, index)
+                game_args.session_name = session_name_for_game(session_base, game_id, index)
             if shared_scorecard_id:
                 game_args.open_scorecard = False
                 game_args.scorecard_id = shared_scorecard_id

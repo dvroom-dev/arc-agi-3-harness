@@ -17,10 +17,22 @@ from harness_runtime_monitor import (
     monitor_snapshot as monitor_snapshot_impl,
     resolve_raw_events_path as resolve_raw_events_path_impl,
 )
+from harness_runtime_env import (
+    clear_idle_keepalive_marker_impl,
+    current_level_for_define_impl,
+    define_args_impl,
+    has_idle_keepalive_marker_impl,
+    idle_keepalive_enabled_impl,
+    provider_args_impl,
+    refresh_dynamic_super_env_impl,
+    supervisor_args_impl,
+    write_idle_keepalive_marker_impl,
+)
 from harness_runtime_cleanup import (
     cleanup_repl_daemons_impl,
     close_scorecard_if_needed_impl,
 )
+from harness_runtime_conversation import load_conversation_id_impl
 from harness_runtime_images import level_start_prompt_images_impl
 from harness_runtime_scorecard import open_scorecard_now_impl
 from harness_scorecard_helpers import (
@@ -223,10 +235,10 @@ class HarnessRuntime:
         )
 
     def provider_args(self) -> list[str]:
-        return ["--provider", self.args.provider] if self.args.provider else []
+        return provider_args_impl(self)
 
     def supervisor_args(self) -> list[str]:
-        return ["--no-supervisor"] if self.args.no_supervisor else []
+        return supervisor_args_impl(self)
 
     def load_state(self) -> dict | None:
         return load_state_json_impl(self.state_json)
@@ -261,22 +273,7 @@ class HarnessRuntime:
         )
 
     def load_conversation_id(self, doc_path: Path) -> str | None:
-        if not doc_path.exists():
-            return None
-        try:
-            text = doc_path.read_text()
-        except Exception:
-            return None
-        lines = text.splitlines()
-        if not lines or lines[0].strip() != "---":
-            return None
-        for line in lines[1:80]:
-            if line.strip() == "---":
-                break
-            m = re.match(r"^\s*conversation_id\s*:\s*(.+?)\s*$", line)
-            if m:
-                return m.group(1).strip()
-        return None
+        return load_conversation_id_impl(doc_path)
 
     def format_state_summary(self, state: dict | None, *, history_turn: int | None = None) -> str:
         turn = self.load_engine_turn() if history_turn is None else int(history_turn)
@@ -451,23 +448,13 @@ class HarnessRuntime:
         return ["--prompt", prompt_text]
 
     def current_level_for_define(self) -> int:
-        state = self.load_state() or {}
-        try:
-            level = int(state.get("current_level", 1) or 1)
-        except Exception:
-            level = 1
-        return max(1, level)
+        return current_level_for_define_impl(self)
 
     def refresh_dynamic_super_env(self) -> None:
-        self.super_env["ARC_CONVERSATION_ID"] = self.active_conversation_id
-        self.super_env["ARC_ACTIVE_GAME_ID"] = self.active_game_id
-        self.super_env["ARC_PROMPT_GAME_ID"] = self.prompt_game_id
-        self.super_env["ARC_REPL_SESSION_KEY"] = self.active_repl_session_key
-        self.super_env["ARC_LEVEL_NUM"] = str(self.current_level_for_define())
+        refresh_dynamic_super_env_impl(self)
 
     def define_args(self) -> list[str]:
-        level_num = str(self.super_env.get("ARC_LEVEL_NUM", self.current_level_for_define()))
-        return ["--define", f"level_num={level_num}"]
+        return define_args_impl(self)
 
     def level_start_prompt_images(self, state: dict | None, *, initial: bool = False) -> list[Path]:
         return level_start_prompt_images_impl(self, state, initial=initial)
@@ -499,22 +486,13 @@ class HarnessRuntime:
         close_scorecard_if_needed_impl(self)
 
     def has_idle_keepalive_marker(self) -> bool:
-        return bool(self.idle_keepalive_marker_path.exists())
+        return has_idle_keepalive_marker_impl(self)
 
     def idle_keepalive_enabled(self) -> bool:
-        return bool(self.api_idle_keepalive_base_enabled and self.active_scorecard_id)
+        return idle_keepalive_enabled_impl(self)
 
     def write_idle_keepalive_marker(self, *, marker: str, details: str = "") -> None:
-        payload = str(marker).strip()
-        if details:
-            payload = f"{payload} {str(details).strip()}".strip()
-        self.idle_keepalive_marker_path.parent.mkdir(parents=True, exist_ok=True)
-        self.idle_keepalive_marker_path.write_text(payload + "\n", encoding="utf-8")
+        write_idle_keepalive_marker_impl(self, marker=marker, details=details)
 
     def clear_idle_keepalive_marker(self) -> None:
-        if not self.idle_keepalive_marker_path.exists():
-            return
-        try:
-            self.idle_keepalive_marker_path.unlink()
-        except Exception:
-            pass
+        clear_idle_keepalive_marker_impl(self)

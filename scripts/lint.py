@@ -13,6 +13,7 @@ EXCLUDED_DIRS = {
     ".git",
     ".venv",
     ".ctxs",
+    "experiments",
     "runs",
     ".pytest_cache",
     ".ruff_cache",
