@@ -1,187 +1,263 @@
 # ARC-AGI Harness: Local Agent Rules
 
-## Benchmark integrity is non-negotiable
+## Mission
 
-Treat both the solving agent and supervisor as part of the benchmarked system. They must not receive hidden game internals, reference solutions, or cross-run leakage.
+This repo and the live `super` CLI it depends on exist to run, monitor, diagnose, and improve ARC-AGI-3 benchmark runs.
 
 Hard rules:
-- Never expose game source code or environment implementation files to agent/supervisor run filesystems.
-- Never expose prior run transcripts, hidden labels, or solution artifacts to the active run.
+- Optimize for benchmark performance that generalizes across ARC-AGI-3 games, not for a single practice game.
+- Do not commit or inject game-specific solving logic, heuristics, or prompt instructions into shared harness code, shared prompts, or shared tools.
+- LS20 is a convenient smoke test and debugging target, not a design target.
+- These repos have no meaningful legacy consumers. When interfaces change, update the active code path and tests; do not keep dead compatibility shims.
+
+## Live Repos And Entry Points
+
+Use the real runtime, not stale assumptions.
+
+- Harness repo: `~/projs/arc-agi-harness`
+  - Main entrypoints: `harness.py`, `harness_runner.py`, `harness_runtime.py`, `super.yaml`
+  - Tool/runtime code: `tools/`, `arc_model_runtime/`
+- Live `super` CLI wrapper: `~/.local/bin/super`
+  - At the time of writing it execs `bun run /home/dvroom/projs/agent-studio/src/bin/run-config.ts`
+  - If `super` behavior matters, inspect the wrapper first instead of assuming which repo owns it
+- Live `super` source repo: `~/projs/agent-studio`
+  - Start with `src/bin/run-config.ts`
+  - Then inspect `src/server/stdio/supervisor/**`, `src/server/stdio/requests/**`, `src/supervisor/**`
+  - Useful docs: `docs/CLI_OUTPUT_OPTIONS.md`, `docs/FORK_STORAGE.md`, `docs/ARCHITECTURE.md`
+- `~/projs/agent-super` is useful background/reference, but it is not the live runtime unless the wrapper has been repointed
+
+## Benchmark Integrity Is Non-Negotiable
+
+Treat both the solving agent and the supervisor as part of the benchmarked system.
+
+Hard rules:
+- Never expose game source code, environment implementation files, hidden labels, reference solutions, or prior run transcripts to the active run.
 - Never place benchmark secrets in `runs/<run-id>/agent` or `runs/<run-id>/supervisor`.
-- Agent/supervisor should solve only from observable state, action interfaces, and allowed prompt context.
+- Agent/supervisor should solve only from observable state, allowed prompt context, and public tool interfaces.
+- If you are unsure whether a file leaks internals, treat it as forbidden until proven safe.
 
-## Containment checklist before/after run setup changes
-
+Containment checks:
+- Inspect `setup_run_dir_impl`, `setup_run_config_dir_impl`, and `assert_no_game_files_in_agent_dir_impl` before changing run setup behavior.
 - Confirm run-visible trees only contain intended files for that run.
-- Confirm no `environment_files`, game python sources, or copied env internals appear under run-visible trees.
-- Confirm tool interfaces expose state/actions only (no direct internal object/source access).
-- If uncertain whether a file leaks internals: treat it as forbidden until proven safe.
+- Confirm no copied environment internals or game python sources appear under run-visible trees.
+- Confirm tool interfaces expose state/actions only, not internal objects or source.
 
-## Root cause discipline
+## Prompt And Policy Source Of Truth
 
-If leakage is found, fix the setup/root cause (what gets mounted/copied into run filesystems). Do not rely on prompt warnings as primary protection.
+Hard rules:
+- Put agent/supervisor behavioral instructions in `super.yaml`, not in Python harness code.
+- Harness/runtime code may pass neutral runtime state, env vars, and artifacts; it must not smuggle policy text.
+- If a new instruction is needed, update `super.yaml` or prompt assets under `prompts/`.
+- Do not add LS20-specific or any other game-specific prompt text to shared prompts.
 
-When diagnosing solver failures, find the first turn where a wrong belief appears and trace it to the exact evidence/tool output that triggered it. Prefer action-linked movement evidence over visual salience when identifying controllable actors.
+## Runtime Map
 
-Hard rule:
-- Never stop at wrapper symptoms (for example, schema validation errors) when provider/runtime failures are possible.
-- Always trace to provider-level cause: inspect provider events, turn completion status, thread IDs, and stderr logs before concluding root cause.
-- If provider-level evidence is missing, call that out explicitly as an observability gap and propose/add instrumentation instead of guessing.
+Know where state actually lives.
 
-## Failure analysis requirements (mandatory)
+- `harness.py` delegates to `harness_runner.run_main`
+- `HarnessRuntime` creates:
+  - run workspace: `runs/<session>/`
+  - agent workspace: `runs/<session>/agent/game_<game_id>/`
+  - supervisor game state: `runs/<session>/supervisor/arc/`
+  - run-local config/tools: `runs/<session>/config/{bin,tools,prompts}/`
+  - transcript context dir: `.ctxs/<session>/`
+- The harness copies `super.yaml` into `runs/<session>/super.yaml` per run
+- The agent uses run-local wrappers from `runs/<session>/config/bin`; agent commands should not depend on project-root executables
+- Supervisor conversation state is workspace-local under `runs/<session>/.ai-supervisor/conversations/<conversation_id>/...`
+- `session.md` frontmatter is the conversation source of truth for `conversation_id`
 
-For any run failure/stall/regression/error, do not stop at symptoms.
+Important runtime behavior:
+- The harness starts a run with `super new ... --cycle-limit 1`
+- It advances one supervised cycle at a time with repeated `super resume <session.md> ...`
+- In streaming mode, the harness intentionally removes `--output` from the `super` subprocess command, streams full stdout live, and writes the transcript file itself afterward
+- Consequence: live stdout/stderr is the earliest progress signal; do not wait only for `session.md` checkpoints
 
-Required deliverables before reporting completion:
-- Symptom: what failed.
-- Proximal cause: immediate trigger.
-- Root cause: underlying design/logic flaw that enabled the failure.
-- Why safeguards failed.
-- Fix and verification evidence.
+Special flows:
+- `--score-after-solve` is a two-phase flow: solve unscored first, then open a fresh scorecard and replay from level 1
+- Diagnose discovery and scored replay separately; they are not the same failure surface
+
+## Monitoring Discipline
+
+When monitoring a run, watch the stream and the files.
+
+Hard rules:
+- In the Codex tool environment, long runs must use a persistent exec session plus polling
+- Always capture both `stdout` and `stderr`
+- Do not background a run and walk away without polling session output
+- Do not declare a stall just because `session.md` has not changed recently
+- Before starting a new run, kill stale/orphan REPL daemons from prior runs
+- If a run exits unexpectedly, collect root cause from stderr/logs/raw events before restarting
+
+Monitoring order:
+0. Watch streaming stdout/stderr from the persistent exec session for immediate progress, provider errors, tool hangs, and supervisor decisions
+1. Check `runs/<run-id>/supervisor/arc/state.json` and `runs/<run-id>/supervisor/arc/tool-engine-history.json` together
+2. Check `.ctxs/<session>/session.md` for transcript and current `conversation_id`
+3. If progress is unclear, check `runs/<run-id>/.ai-supervisor/conversations/<conversation>/raw_events/events.ndjson`
+4. Only then conclude stall/failure and classify root cause
+
+Hard rules:
+- Never report "still finding where events are recorded" or equivalent uncertainty
+- If a canonical file is missing, name the exact missing path and treat it as an observability bug
+- If transcript progress and raw events disagree, trust raw events for "is provider still doing work?" and explain the discrepancy
+
+## Timeout Budgets
+
+Operational timeouts are benchmark-critical.
+
+- ARC API game progress appears to have an idle timeout of about 30 minutes; if hit, progress may be lost
+- Scorecard inactivity has historically timed out around 15 minutes; confirm the current behavior before relying on old assumptions
+- Current harness idle keepalive trigger for real game inactivity is `12 * 60` seconds in `harness_runner.py`
+- The scorecard keepalive hack module assumes `14 * 60` seconds in `harness_scorecard_timeout_hack.py`
+
+Rules:
+- Treat idle budget and scorecard budget as first-class constraints during run design and diagnosis
+- When analyzing a long or failed run, identify exactly how close it got to these budgets and what consumed the time
+- Do not assume a timeout mitigation is active just because a helper module exists; verify callsites with `rg`
+
+## Root Cause And Performance Discipline
+
+For any failure, stall, regression, or major slowdown, do not stop at symptoms.
+
+Required deliverables:
+- Symptom: what failed
+- Proximal cause: immediate trigger
+- Root cause: underlying design/logic flaw
+- Why safeguards failed
+- Fix
+- Verification evidence
 
 Evidence standards:
-- Include concrete evidence with exact file paths and log lines for every causal claim.
-- Mark hypotheses explicitly; do not present hypotheses as facts.
-- If root cause is not proven, say `ROOT CAUSE NOT YET PROVEN`, list top hypotheses, and keep investigating with discriminating checks until proven or user stops work.
+- Every causal claim must cite exact files, artifacts, or log lines
+- Mark hypotheses explicitly
+- If root cause is not proven, say `ROOT CAUSE NOT YET PROVEN` and keep investigating or name the missing observability
+- Never stop at wrapper symptoms when provider/runtime failures are possible; inspect provider raw events, turn completion status, conversation/fork ids, and stderr before concluding root cause
 
-Hard rule:
-- Do not return control with symptom-level analysis only.
-- For regressions (level drop), identify the exact triggering action(s) and classify cause as one of: `GAME_OVER`, reset semantics, tool/harness bug, or unknown with discriminating next checks.
+For solver mistakes:
+- Find the first turn where the wrong belief appears
+- Trace it to the exact evidence, tool output, or supervisor instruction that produced that belief
+- Prefer action-linked movement evidence over visual salience when identifying controllable actors
 
-## Prompt source of truth
+For regressions:
+- Identify the exact triggering action(s)
+- Classify as `GAME_OVER`, reset semantics, tool/harness bug, or unknown with discriminating next checks
 
-Hard rule:
-- Do not add hardcoded agent/supervisor prompt instructions in harness Python code.
-- Harness should pass neutral runtime state only (for example: structured status/diffs/events), not policy text.
-- All behavioral instructions must live in `super.yaml` (mode prompts, supervisor templates, rules), not `harness_runner.py`/other harness modules.
-- If a new instruction is needed, update `super.yaml` instead of injecting freeform text from the harness.
+For performance problems:
+- Do not just say "it got slow"
+- Quantify where time went: provider latency, supervisor review time, mode-switch churn, repeated compare loops, repeated file review, replay overhead, idle gaps, scorecard operations
+- State whether the problem is primarily prompt design, harness control flow, provider/runtime behavior, or missing observability
+- Suggest fixes in the right layer: code, prompts, or both
 
-## Run logging discipline
+## Prompt-Tuning Heuristic
 
-- Always capture both `stdout` and `stderr` for harness runs and monitoring commands.
-- For background runs, use shell redirection that preserves both streams in one log file (for example: `> <logfile> 2>&1`).
-- Do not declare a run diagnosis complete unless both streams were checked for failures.
-- Always run `super new` and `super resume` in streaming mode; do not use batch-capture mode for live runs.
-- If harness logs appear stalled, inspect raw provider event streams (`raw_events/events.ndjson`) before concluding there is no progress.
+The central tradeoff in these runs is real:
 
-## Canonical monitoring files (do not guess)
+- Too little supervision: the agent moves fast, solves easy levels, then drifts or hallucinates as levels get harder
+- Too much supervision/process: the agent becomes slow, overconstrained, and less capable
 
-For each run, use only these artifacts as source of truth:
-- `<run>/supervisor/arc/state.json` for current game state.
-- `<run>/supervisor/arc/tool-engine-history.json` for executed tool events and engine turn.
-- `<ctx>/session.md` for super transcript and active conversation id.
-- `<run>/.ai-supervisor/conversations/<conversation>/raw_events/events.ndjson` for provider-stream progress when transcript appears stalled.
+Rules:
+- Evaluate prompt changes against both early-level speed and later-level stability
+- Do not judge a prompt change from one anecdote
+- Compare against prior strong runs in `runs/` and `.ctxs/` before declaring a new prompt better
+- Do not overfit shared prompts or harness behavior to LS20
 
-Monitoring order (always in this order):
-1. Check `state.json` and `tool-engine-history.json` together.
-2. Check `session.md` for conversation changes.
-3. If progress is unclear/stalled, check `raw_events/events.ndjson`.
-4. Only then conclude stall/failure and classify root cause.
+## Code Review Expectations
 
-Hard rule:
-- Never report “still finding where events are recorded” or equivalent uncertainty.
-- If a canonical file is missing, report the missing path explicitly and treat it as a harness observability bug to fix.
+This codebase needs real review, not style commentary.
 
-## Long-run process control (Codex tool environment)
+Primary review focus:
+- Behavioral bugs
+- Regression risks
+- Benchmark-integrity leaks
+- Silent fallbacks
+- Timeout and pacing hazards
+- Missing or misleading observability
+- Mismatch between `super.yaml` intent and runtime behavior
 
-In this Codex tool runtime, durable monitoring must use a persistent exec session (`session_id` + polling). Shell backgrounding may be reaped when the tool shell exits.
+Highest-risk files:
+- `harness_runner.py`
+- `harness_runtime.py` and `harness_runtime_*`
+- `harness_setup_helpers.py`
+- `tools/arc_repl_*`
+- `arc_model_runtime/*`
+- `super.yaml`
+- In `~/projs/agent-studio`: `src/bin/run-config.ts`, `src/server/stdio/supervisor/**`, `src/server/stdio/requests/**`, `src/supervisor/**`
 
-Hard rules:
-- Start long runs with a persistent exec session and keep polling it (`write_stdin`) until stop conditions are met.
-- Always launch from outside the agent filesystem root and pass explicit dirs/args; do not rely on ambient cwd.
-- Monitor continuously: poll run state files and session output on a fixed cadence (`sleep`/poll between checks).
-- If user asks for ongoing monitoring, do not return control without either:
-  - reaching the requested stop condition, or
-  - reporting a concrete blocker/error and the next recovery action.
-- On any unexpected process exit, collect root cause from stderr/logs first, then restart explicitly (new run id unless user says resume).
-- Before starting a new run, kill stale/orphan daemons from prior runs.
+Review rules:
+- Findings first, ordered by severity, with file references
+- Separate proven bugs from hypotheses
+- If a timeout/keepalive path is under review, verify whether it is on the active call path
 
-If running manually outside Codex tools (real shell on host), use the nohup pattern:
-- `nohup env ... python harness.py ... > "$LOG" 2>&1 < /dev/null &`
-- `echo $! > "$PID"; disown; ps -p "$(cat "$PID")" ...`
+## No Silent Fallbacks
 
-Canonical launch pattern (Codex tools):
-- `session = exec_command(cmd=\"python harness.py ...\", tty=true)`
-- keep returned `session_id`
-- poll with `write_stdin(session_id=<id>, chars=\"\", yield_time_ms=...)`
+Benchmark-critical features must fail loudly if broken.
 
-Canonical monitor loop (Codex tools):
-- repeat:
-- `  write_stdin(session_id=<id>, chars=\"\", yield_time_ms=10000)`
-- `  check state/history/log artifacts`
+Do not silently degrade or no-op when these fail:
+- prompt/image generation used for runtime context
+- machine/state artifact reads or writes
+- tool JSON parsing and contract validation
+- environment setup and game loading
+- scorecard ownership/validation
+- provider/runtime event logging needed for diagnosis
 
-## Legacy code policy
+Personal guardrail:
+- Do not turn a hard failure into a warning just to keep runs going
+- Prefer explicit preflight validation over permissive recovery
 
-- Delete unused legacy code aggressively when touched; do not keep dead compatibility paths around.
-- If a code path is not used by the active harness flow, remove it instead of preserving it "just in case."
-- Keep one canonical implementation per critical behavior (diff generation, state transitions, tool outputs); avoid duplicate logic across old/new paths.
-- After cleanup, run compile/tests and verify no stale references remain.
+## Supervisor Rule Design
 
-## No silent fallback policy (harness/tooling)
-
-Benchmark-critical features must fail loudly if broken. Do not silently degrade or no-op when these fail:
-- image generation used in prompts,
-- machine/state artifact reads and writes,
-- tool JSON parsing/contract validation,
-- environment setup and game loading.
-
-Allowed soft-fail behavior should be rare and explicitly marked as non-critical observability only.
-
-### Personal failure mode guardrail
-
-I have repeatedly introduced "continue on warning" fallbacks that hid real failures and wasted benchmark runs. Do not do this.
-- Never change a hard failure into a warning for scorecards, game state, or tool contracts.
-- If a check proves uncertain ownership/publication/validity, stop the run immediately with a clear error.
-- Prefer explicit preflight validation over permissive recovery paths.
-
-## Pre-commit checks
-
-- Always run lint before committing: `make lint`
-- Always run tests before committing: `make test`
-- If either fails, do not commit until fixed.
-
-## Supervisor rule design (no time-travel rules)
-
-The supervisor runs after an agent turn. It cannot undo prior actions already present in the conversation context.
+The supervisor runs after an agent turn. It cannot rewrite history that the agent already consumed.
 
 Hard rules:
-- Never define agent hard rules that require reversing or erasing already-completed actions.
-- Never require post-hoc "fixes" that depend on undoing prior tool calls/messages in the same conversation.
-- Supervisor enforcement must only target next-turn-correctable behavior.
-- If a violation is already in history and cannot be changed, treat it as non-rewritable context; provide forward guidance instead of repeated rewrite loops.
+- Never define hard rules that require undoing already-completed actions inside the same conversation
+- Prefer forward guidance and next-turn corrections
+- If a violation is already in history, treat it as non-rewritable context unless the runtime explicitly forks/resumes around it
+- When changing supervisor behavior, inspect both `super.yaml` and the live `super` runtime in `agent-studio`
 
-## Game Rules Explained
+## Legacy Code Policy
 
-Use this section to calibrate run analysis quality. It is for evaluator understanding only, not for injecting game-specific solving logic into prompts/harness behavior.
+- Delete unused legacy code aggressively when touched
+- Keep one canonical implementation per critical behavior
+- If a helper, hack, or compatibility path is unused in the active harness flow, remove it instead of preserving it
+- When changing interfaces between this repo and `agent-studio`, update both ends and relevant tests in the same pass
 
-### LS20 (public practice game) - mechanic summary
+## Run Logging And Artifacts
 
-- Core objective: transform the lower-left HUD symbol so it matches the symbol shown on the exit square (same symbol at smaller scale on exit tile).
-- Player movement: directional actions move the player block.
-- Turn/life system:
-  - A yellow turn counter decreases with movement.
-  - When it reaches zero, one red life dot is lost.
-  - Losing all red life dots causes `GAME_OVER`.
-- Level 1:
-  - Landing on the cross rotates the HUD symbol by 90 degrees.
-  - Do this once, then move to exit.
-- Level 2:
-  - Same rotation mechanic as level 1.
-  - Requires 270 degrees total rotation, so trigger cross three times (move off/on between triggers), then exit.
-  - Adds yellow refill boxes that replenish turn counter.
-- Level 3:
-  - Adds rainbow box mechanic that cycles HUD symbol color.
-  - Must satisfy both rotation requirement and color match before exiting.
-- Level 4:
-  - Adds shape-change trigger for HUD symbol shape.
-- Level 5:
-  - Combines prior mechanics (rotation, color, shape) together.
-- Level 6:
-  - Adds a second gate before the final exit that must be cleared first.
-- Level 7:
-  - Adds a visibility mask limiting view to nearby area around player.
+- Keep harness logs with combined `stdout` and `stderr`
+- Preserve per-run artifacts needed to reproduce diagnoses
+- Useful run artifacts often include:
+  - `supervisor/arc/state.json`
+  - `supervisor/arc/tool-engine-history.json`
+  - `supervisor/arc/action-history.json`
+  - `supervisor/arc/script-history/`
+  - `.ctxs/<session>/session.md`
+  - `runs/<run-id>/.ai-supervisor/conversations/<conversation>/raw_events/events.ndjson`
 
-## Post-Run Prompt TODOs
+Do not trust run names alone. Inspect the artifacts.
 
-- Instruct agent to build reusable code abstractions first (helpers in `play_lib.py`), then keep per-level `solve_*.py` scripts thin and compositional.
-- On any `GAME_OVER`, require a written causal theory of why it happened (resource exhaustion/pathing/mechanic mismatch), with concrete evidence and the minimal fix plan before retry.
+## Pre-Commit Checks
+
+- Always run `make lint` before committing
+- Always run `make test` before committing
+- If either fails, do not commit until fixed
+
+## Practical Commands
+
+- Bootstrap: `uv sync`
+- Lint: `make lint`
+- Test: `make test`
+- Typical local run: `python harness.py --game-id ls20 --session-name smoke-minimal`
+- Multi-game run: `python harness.py --game-ids "ls20 ft09 vc33" --operation-mode ONLINE --open-scorecard --session-name batch-smoke`
+- `super` help: `super --help`
+
+## Final Generalization Rule
+
+Never put game-specific anything in this project.
+
+That includes:
+- harness logic
+- shared prompts
+- supervisor rules
+- tool behavior
+- model scaffolding templates
+
+If you need game-specific notes for analysis, keep them in run-local artifacts or the current conversation, not in committed shared code or shared prompt configuration.
