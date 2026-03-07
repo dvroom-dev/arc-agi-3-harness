@@ -110,7 +110,7 @@ def test_harness_reuses_existing_scorecard_without_closing(tmp_path: Path, monke
     def fake_run_super(args_list, **kwargs):
         out = Path(args_list[args_list.index("--output") + 1])
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text("---\nconversation_id: conv-1\n---\n")
+        out.write_text("---\nconversation_id: conv-1\nfork_id: fork-1\n---\n")
         return "assistant"
 
     monkeypatch.setattr(harness, "PROJECT_ROOT", root)

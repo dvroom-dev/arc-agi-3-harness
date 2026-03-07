@@ -100,7 +100,7 @@ def test_harness_open_and_close_scorecard_mocked(tmp_path: Path, monkeypatch) ->
     def fake_run_super(args_list, **kwargs):
         out = Path(args_list[args_list.index("--output") + 1])
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text("---\nconversation_id: conv-1\n---\n")
+        out.write_text("---\nconversation_id: conv-1\nfork_id: fork-1\n---\n")
         return "assistant"
 
     monkeypatch.setattr(harness, "PROJECT_ROOT", root)
@@ -245,7 +245,7 @@ def test_harness_score_after_solve_opens_mid_run_and_uses_start_mode(
     def fake_run_super(args_list, **kwargs):
         out = Path(args_list[args_list.index("--output") + 1])
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text("---\nconversation_id: conv-1\n---\n")
+        out.write_text("---\nconversation_id: conv-1\nfork_id: fork-1\n---\n")
         if args_list and args_list[0] == "new":
             new_calls.append(list(args_list))
             arc_state_dir = Path((kwargs.get("env") or {}).get("ARC_STATE_DIR"))

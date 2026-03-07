@@ -12,7 +12,7 @@ import harness
 def _write_session_file(path: Path, conversation_id: str = "conv-1") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        f"---\nconversation_id: {conversation_id}\n---\n```chat role=assistant\nok\n```\n"
+        f"---\nconversation_id: {conversation_id}\nfork_id: fork-{conversation_id}\n---\n```chat role=assistant\nok\n```\n"
     )
 
 
@@ -109,13 +109,11 @@ def test_harness_main_handles_game_over_then_reset(tmp_path: Path, monkeypatch) 
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     def fake_run_super(args_list, **kwargs):
-        if "new" in args_list:
+        if "--output" in args_list:
             out = Path(args_list[args_list.index("--output") + 1])
-            _write_session_file(out, conversation_id="conv-1")
-            return "assistant"
-        if "resume" in args_list:
-            out = Path(args_list[args_list.index("--output") + 1])
-            _write_session_file(out, conversation_id="conv-2")
+            conversation_id = "conv-2" if "resume" in args_list else "conv-1"
+            _write_session_file(out, conversation_id=conversation_id)
+        if "new" in args_list or "resume" in args_list or "recover" in args_list:
             return "assistant"
         return ""
 
@@ -210,13 +208,11 @@ def test_harness_main_stops_on_game_over_when_auto_reset_disabled(
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
     def fake_run_super(args_list, **kwargs):
-        if "new" in args_list:
+        if "--output" in args_list:
             out = Path(args_list[args_list.index("--output") + 1])
-            _write_session_file(out, conversation_id="conv-1")
-            return "assistant"
-        if "resume" in args_list:
-            out = Path(args_list[args_list.index("--output") + 1])
-            _write_session_file(out, conversation_id="conv-2")
+            conversation_id = "conv-2" if "resume" in args_list else "conv-1"
+            _write_session_file(out, conversation_id=conversation_id)
+        if "new" in args_list or "resume" in args_list or "recover" in args_list:
             return "assistant"
         return ""
 

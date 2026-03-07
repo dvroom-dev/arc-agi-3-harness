@@ -92,7 +92,7 @@ def test_harness_runs_auto_explore_once(tmp_path: Path, monkeypatch) -> None:
     def fake_run_super(args_list, **kwargs):
         out = Path(args_list[args_list.index("--output") + 1])
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text("---\nconversation_id: conv-1\n---\n")
+        out.write_text("---\nconversation_id: conv-1\nfork_id: fork-1\n---\n")
         if args_list and args_list[0] != "resume":
             return "assistant"
         arc_state_dir = root / "runs" / "t-complete" / "supervisor" / "arc"
@@ -205,7 +205,7 @@ def test_harness_records_level_completion(tmp_path: Path, monkeypatch) -> None:
     def fake_run_super(args_list, **kwargs):
         out = Path(args_list[args_list.index("--output") + 1])
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text("---\nconversation_id: conv-1\n---\n")
+        out.write_text("---\nconversation_id: conv-1\nfork_id: fork-1\n---\n")
         if args_list and args_list[0] != "resume":
             return "assistant"
         arc_state_dir = root / "runs" / "t-complete" / "supervisor" / "arc"

@@ -1,0 +1,31 @@
+from __future__ import annotations
+
+
+def noop_super_cycle_error(
+    *,
+    stdout: str,
+    new_events: list[dict],
+    head_before_resume: dict[str, str | int | None] | None,
+    head_after_resume: dict[str, str | int | None] | None,
+) -> str | None:
+    if stdout.strip() or new_events or head_after_resume is None:
+        return None
+    if head_after_resume.get("provider_thread_id"):
+        return None
+
+    head_advanced = (
+        head_before_resume is not None
+        and head_before_resume.get("head_id") != head_after_resume.get("head_id")
+    )
+    same_doc = (
+        head_before_resume is not None
+        and head_before_resume.get("doc_hash") == head_after_resume.get("doc_hash")
+    )
+    if not head_advanced or not same_doc:
+        return None
+
+    return (
+        "super completed a no-op provider cycle: "
+        "empty assistant response, no history events, "
+        "no provider thread id, and unchanged transcript content"
+    )

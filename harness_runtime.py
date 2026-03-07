@@ -37,6 +37,13 @@ from harness_runtime_prompting import (
     update_prompt_game_vars_impl,
 )
 from harness_runtime_scorecard import open_scorecard_now_impl
+from harness_runtime_session import (
+    discover_workspace_conversation_id_impl,
+    load_conversation_head_metadata_impl,
+    recover_session_file_from_workspace_impl,
+    session_frontmatter_impl,
+    sync_active_conversation_id_from_session_impl,
+)
 from harness_scorecard_helpers import (
     build_scorecard_client,
     export_scorecard_cookies_json,
@@ -400,27 +407,21 @@ class HarnessRuntime:
 
         return parsed, stdout, proc.returncode
 
-    def sync_active_conversation_id_from_session(self) -> None:
-        parsed = self.load_conversation_id(self.session_file)
-        if not parsed:
-            return
-        alias = self.conversation_aliases.get(parsed)
-        if alias is None:
-            if (
-                self.active_actual_conversation_id is None
-                and self.active_conversation_id == "harness_bootstrap"
-            ):
-                alias = self.active_conversation_id
-            else:
-                alias = parsed
-            self.conversation_aliases[parsed] = alias
-        if parsed != self.active_actual_conversation_id:
-            self.log(
-                "[harness] conversation update: "
-                f"actual={parsed} repl_session={alias}"
-            )
-        self.active_actual_conversation_id = parsed
-        self.active_conversation_id = alias
+    def sync_active_conversation_id_from_session(self) -> None: sync_active_conversation_id_from_session_impl(self)
+
+    def session_frontmatter(self) -> dict[str, str]: return session_frontmatter_impl(self)
+
+    def discover_workspace_conversation_id(self) -> str | None: return discover_workspace_conversation_id_impl(self)
+
+    def recover_session_file_from_workspace(
+        self,
+        *,
+        reason: str,
+        force: bool = False,
+    ) -> None:
+        recover_session_file_from_workspace_impl(self, reason=reason, force=force)
+
+    def load_conversation_head_metadata(self) -> dict[str, str | int | None] | None: return load_conversation_head_metadata_impl(self)
 
     def load_current_pixels(self):
         return load_current_pixels_impl(self)
@@ -445,6 +446,7 @@ class HarnessRuntime:
 
     def resume_super(self, prompt: str | None = None, *, image_paths: list[Path] | None = None) -> str:
         self.refresh_dynamic_super_env()
+        self.recover_session_file_from_workspace(reason="pre-resume")
         self.log(f"[harness] super agent-dir: {self.active_agent_dir()}")
         resume_args: list[str] = [
             "resume",
@@ -461,7 +463,9 @@ class HarnessRuntime:
         if prompt:
             resume_args += self.prompt_args(prompt, prompt_kind="resume", image_paths=image_paths)
         resume_args += ["--output", str(self.session_file)]
-        return self.deps.run_super(resume_args, stream=True, cwd=self.run_dir, env=self.super_env)
+        stdout = self.deps.run_super(resume_args, stream=True, cwd=self.run_dir, env=self.super_env)
+        self.recover_session_file_from_workspace(reason="post-resume", force=True)
+        return stdout
 
     def cleanup_repl_daemons(self) -> None:
         cleanup_repl_daemons_impl(self)

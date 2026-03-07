@@ -136,7 +136,7 @@ def test_harness_runs_multiple_games_under_one_shared_scorecard(
     def fake_run_super(args_list, **kwargs):
         out = Path(args_list[args_list.index("--output") + 1])
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text("---\nconversation_id: conv-1\n---\n")
+        out.write_text("---\nconversation_id: conv-1\nfork_id: fork-1\n---\n")
         return "assistant"
 
     monkeypatch.setattr(harness, "PROJECT_ROOT", root)
@@ -259,7 +259,7 @@ def test_harness_multi_game_reused_scorecard_validates_per_game(
     def fake_run_super(args_list, **kwargs):
         out = Path(args_list[args_list.index("--output") + 1])
         out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text("---\nconversation_id: conv-1\n---\n")
+        out.write_text("---\nconversation_id: conv-1\nfork_id: fork-1\n---\n")
         return "assistant"
 
     monkeypatch.setattr(harness, "PROJECT_ROOT", root)

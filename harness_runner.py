@@ -8,32 +8,15 @@ from datetime import datetime, timezone
 
 from harness_explore import run_input_exploration_from_reset
 from harness_repl_health import collect_repl_health, format_repl_crash_diagnostics, format_repl_health_summary
-from harness_runner_keepalive import (
-    IDLE_KEEPALIVE_MARKER,
-    IDLE_KEEPALIVE_TRIGGER_SECONDS,
-    events_include_real_game_action,
-    log_keepalive_resolution,
-)
+from harness_runner_keepalive import IDLE_KEEPALIVE_MARKER, IDLE_KEEPALIVE_TRIGGER_SECONDS, events_include_real_game_action, log_keepalive_resolution
 from harness_runner_args import resolve_arc_base_url, resolve_game_ids, session_name_for_game
 from harness_runner_regression import _classify_level_drop
+from harness_runner_super_cycle import noop_super_cycle_error
 from harness_runtime import HarnessRuntime
-from harness_scorecard_helpers import (
-    close_shared_scorecard,
-    open_shared_scorecard,
-    run_scorecard_session_preflight,
-    validate_scorecard_owner_check,
-)
+from harness_scorecard_helpers import close_shared_scorecard, open_shared_scorecard, run_scorecard_session_preflight, validate_scorecard_owner_check
 
 
-def _run_single_game(
-    deps,
-    args,
-    *,
-    operation_mode_name: str,
-    arc_base_url: str,
-    game_index: int,
-    total_games: int,
-) -> None:
+def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str, game_index: int, total_games: int) -> None:
     runtime = HarnessRuntime(
         deps,
         args,
@@ -139,6 +122,7 @@ def _run_single_game(
                 cwd=runtime.run_dir,
                 env=runtime.super_env,
             )
+            runtime.recover_session_file_from_workspace(reason="post-new", force=True)
             runtime.sync_active_conversation_id_from_session()
             monitor = runtime.monitor_snapshot()
             runtime.log(
@@ -245,6 +229,7 @@ def _run_single_game(
                         )
 
                 history_len_before_resume = processed_history_len
+                head_before_resume = runtime.load_conversation_head_metadata()
                 stdout = runtime.resume_super()
                 runtime.sync_active_conversation_id_from_session()
                 if not stdout.strip():
@@ -258,7 +243,16 @@ def _run_single_game(
                     if history_len_before_resume <= len(history_after_resume)
                     else history_after_resume
                 )
+                head_after_resume = runtime.load_conversation_head_metadata()
                 processed_history_len = len(history_after_resume)
+                noop_error = noop_super_cycle_error(
+                    stdout=stdout,
+                    new_events=new_events,
+                    head_before_resume=head_before_resume,
+                    head_after_resume=head_after_resume,
+                )
+                if noop_error:
+                    raise RuntimeError(noop_error)
                 if events_include_real_game_action(new_events):
                     last_real_game_action_at_monotonic = time.monotonic()
                     log_keepalive_resolution(
