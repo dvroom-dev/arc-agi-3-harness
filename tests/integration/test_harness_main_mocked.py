@@ -24,8 +24,10 @@ def test_harness_main_smoke_no_llm_calls(tmp_path: Path, monkeypatch) -> None:
     (root / "tools").mkdir(parents=True)
     (root / "prompts").mkdir(parents=True)
     (root / "runs").mkdir(parents=True)
+    (root / "arc_model_runtime").mkdir(parents=True)
     (root / "super.yaml").write_text("runtime_defaults: {}\n")
-    for f in ("arc_repl.py", "arc_repl_cli.py", "arc_repl_daemon.py"):
+    (root / "arc_model_runtime" / "__init__.py").write_text("# runtime\n")
+    for f in ("arc_repl.py", "arc_repl_cli.py", "arc_repl_daemon.py", "arc_level.py"):
         (root / "tools" / f).write_text("#!/usr/bin/env python3\n")
     (root / "prompts" / "new_game_auto_explore.py").write_text("print('x')\n")
 
@@ -93,8 +95,10 @@ def test_harness_sets_only_reset_levels_in_child_and_super_envs(
     (root / "tools").mkdir(parents=True)
     (root / "prompts").mkdir(parents=True)
     (root / "runs").mkdir(parents=True)
+    (root / "arc_model_runtime").mkdir(parents=True)
     (root / "super.yaml").write_text("runtime_defaults: {}\n")
-    for f in ("arc_repl.py", "arc_repl_cli.py", "arc_repl_daemon.py"):
+    (root / "arc_model_runtime" / "__init__.py").write_text("# runtime\n")
+    for f in ("arc_repl.py", "arc_repl_cli.py", "arc_repl_daemon.py", "arc_level.py"):
         (root / "tools" / f).write_text("#!/usr/bin/env python3\n")
     (root / "prompts" / "new_game_auto_explore.py").write_text("print('x')\n")
 

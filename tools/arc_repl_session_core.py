@@ -1,16 +1,17 @@
 from __future__ import annotations
-from dataclasses import dataclass
-import json
-import os
-import re
+import json, os, re
 from pathlib import Path
 from typing import Any
 import numpy as np
 from arcengine import GameAction
 try:
     from arc_repl_action_history import ActionHistoryStore
+    from arc_repl_session_compat import (
+        build_frame_snapshot,
+        install_env_compat_bindings,
+    )
     from arc_repl_session_artifacts import steps_since_level_start, write_state_artifacts
-    from arc_repl_session_exec import _StopScript, execute_exec_turn  # noqa: F401
+    from arc_repl_session_exec import execute_exec_turn  # noqa: F401
     from arc_repl_session_grid import (
         _chunk_for_bbox,
         _coerce_grid,
@@ -19,30 +20,18 @@ try:
     )
 except Exception:
     from tools.arc_repl_action_history import ActionHistoryStore
+    from tools.arc_repl_session_compat import (
+        build_frame_snapshot,
+        install_env_compat_bindings,
+    )
     from tools.arc_repl_session_artifacts import steps_since_level_start, write_state_artifacts
-    from tools.arc_repl_session_exec import _StopScript, execute_exec_turn  # noqa: F401
+    from tools.arc_repl_session_exec import execute_exec_turn  # noqa: F401
     from tools.arc_repl_session_grid import (
         _chunk_for_bbox,
         _coerce_grid,
         _grid_from_hex_rows,  # noqa: F401
         _same_game_lineage,
     )
-
-
-@dataclass
-class FrameSnapshot:
-    """Simple script-facing snapshot of the current frame/grid state."""
-
-    grid: np.ndarray
-    state: str
-    current_level: int
-    levels_completed: int
-    win_levels: int
-    guid: str | None
-    available_actions: list[int]
-    full_reset: bool
-
-
 class BaseReplSession:
     def __init__(
         self,
@@ -102,38 +91,13 @@ class BaseReplSession:
             "GameAction": GameAction,
             "GA": GameAction,
             "get_state": self._state_payload,
-            "get_frame": self._frame_snapshot,
+            "get_frame": lambda: build_frame_snapshot(self),
             "diff": self.diff,
         }
-        self._install_env_compat_bindings()
+        install_env_compat_bindings(self)
         self.history_functions_enabled = False
         self.set_history_helpers_enabled(bool(enable_history_functions))
         self._refresh_play_lib(force=True)
-
-    def _frame_snapshot(self) -> FrameSnapshot:
-        return FrameSnapshot(
-            grid=np.array(self.pixels, copy=True),
-            state=str(self.frame.state.value),
-            current_level=int(self.frame.levels_completed) + 1,
-            levels_completed=int(self.frame.levels_completed),
-            win_levels=int(self.frame.win_levels),
-            guid=getattr(self.frame, "guid", None),
-            available_actions=[
-                int(a) for a in getattr(self.frame, "available_actions", [])
-            ],
-            full_reset=bool(getattr(self.frame, "full_reset", False)),
-        )
-
-    def _install_env_compat_bindings(self) -> None:
-        """Expose stable read helpers for script compatibility."""
-        try:
-            setattr(self.env, "read", self._state_payload)
-        except Exception:
-            pass
-        try:
-            setattr(self.env, "get_frame", self._frame_snapshot)
-        except Exception:
-            pass
     def _same_game_lineage(self, requested_game_id: str) -> bool:
         return _same_game_lineage(
             self.game_id,

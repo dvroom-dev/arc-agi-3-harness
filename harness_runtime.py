@@ -31,7 +31,6 @@ from harness_runtime_cleanup import (
     close_scorecard_if_needed_impl,
 )
 from harness_runtime_conversation import load_conversation_id_impl
-from harness_runtime_images import level_start_prompt_images_impl
 from harness_runtime_prompting import (
     load_current_pixels_impl,
     prompt_args_impl,
@@ -182,11 +181,6 @@ class HarnessRuntime:
         self.update_prompt_game_vars()
 
         self.prompt_file_counter = 0
-        self.enable_level_start_images = False
-        self.last_prompted_image_level: int | None = None
-        self.level_start_images_dir = self.supervisor_dir / "arc" / "level-start-images"
-        self.level_start_images_dir.mkdir(parents=True, exist_ok=True)
-        self.current_level_start_image = self.supervisor_dir / "arc" / "current-level-start.png"
         self.repl_parent_pid = int(os.getpid())
         self.repl_parent_start_ticks = read_proc_start_ticks(self.repl_parent_pid)
 
@@ -448,9 +442,6 @@ class HarnessRuntime:
     def refresh_dynamic_super_env(self) -> None:
         self.update_prompt_game_vars()
         refresh_dynamic_super_env_impl(self)
-
-    def level_start_prompt_images(self, state: dict | None, *, initial: bool = False) -> list[Path]:
-        return level_start_prompt_images_impl(self, state, initial=initial)
 
     def resume_super(self, prompt: str | None = None, *, image_paths: list[Path] | None = None) -> str:
         self.refresh_dynamic_super_env()

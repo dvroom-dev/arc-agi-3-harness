@@ -58,7 +58,6 @@ from arc_repl_intercepts import (
 )
 from arc_repl_session_core import (
     BaseReplSession,
-    _StopScript,
     _chunk_for_bbox,
     _coerce_grid,
     _grid_from_hex_rows,
@@ -79,8 +78,6 @@ from arc_repl_paths import (
 )
 SCHEMA_VERSION = "arc_repl.v1"
 SOCKET_WAIT_TIMEOUT_S = 90.0
-
-
 def _idle_keepalive_marker_for_call(cwd: Path, *, action: str, result: object) -> str | None:
     arc_state_dir = Path(str(os.getenv("ARC_STATE_DIR", "") or "")).expanduser()
     if not str(arc_state_dir).strip():
@@ -91,17 +88,14 @@ def _idle_keepalive_marker_for_call(cwd: Path, *, action: str, result: object) -
         action=action,
         result=result,
     )
-
-
 def _clear_idle_keepalive_marker(cwd: Path) -> None:
     arc_state_dir = Path(str(os.getenv("ARC_STATE_DIR", "") or "")).expanduser()
     if not str(arc_state_dir).strip():
         arc_state_dir = _arc_dir(cwd)
     _clear_idle_keepalive_marker_impl(cwd, arc_state_dir)
-
-
 def _load_history(cwd: Path, game_id: str) -> dict:
     return _load_history_impl(cwd, game_id, _make_id_candidates)
+def _conversation_id() -> str: return conversation_id_from_env()
 _session_dir = lambda cwd, conversation_id: session_dir(_arc_dir(cwd), conversation_id)
 _socket_path = lambda cwd, conversation_id: socket_path(_arc_dir(cwd), conversation_id)
 _pid_path = lambda cwd, conversation_id: pid_path(_arc_dir(cwd), conversation_id)
@@ -148,9 +142,7 @@ def _emit_json(payload: dict) -> None:
     sys.stdout.write(json.dumps(payload, indent=2))
     if not sys.stdout.isatty():
         sys.stdout.write("\n")
-def _conversation_id() -> str: return conversation_id_from_env()
-def _session_key() -> str:
-    return session_key_from_env()
+def _session_key() -> str: return session_key_from_env()
 def _same_game_lineage(existing_game_id: str, requested_game_id: str) -> bool:
     return _same_game_lineage_impl(existing_game_id, requested_game_id, _make_id_candidates)
 class ReplSession(BaseReplSession):

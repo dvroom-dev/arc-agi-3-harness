@@ -7,16 +7,15 @@ from argparse import Namespace
 from datetime import datetime, timezone
 
 from harness_explore import run_input_exploration_from_reset
-from harness_repl_health import collect_repl_health, format_repl_crash_diagnostics
-from harness_repl_health import format_repl_health_summary
-from harness_runner_args import (
-    resolve_arc_base_url,
-    resolve_game_ids,
-    session_name_for_game,
+from harness_repl_health import collect_repl_health, format_repl_crash_diagnostics, format_repl_health_summary
+from harness_runner_keepalive import (
+    IDLE_KEEPALIVE_MARKER,
+    IDLE_KEEPALIVE_TRIGGER_SECONDS,
+    events_include_real_game_action,
+    log_keepalive_resolution,
 )
-from harness_runner_regression import (
-    _classify_level_drop,
-)
+from harness_runner_args import resolve_arc_base_url, resolve_game_ids, session_name_for_game
+from harness_runner_regression import _classify_level_drop
 from harness_runtime import HarnessRuntime
 from harness_scorecard_helpers import (
     close_shared_scorecard,
@@ -35,46 +34,6 @@ def _run_single_game(
     game_index: int,
     total_games: int,
 ) -> None:
-    IDLE_KEEPALIVE_TRIGGER_SECONDS = 12 * 60
-    IDLE_KEEPALIVE_MARKER = "__ARC_INTERCEPT_IDLE_KEEPALIVE__"
-
-    def _marker_kv(payload: str | None) -> dict[str, str]:
-        out: dict[str, str] = {}
-        for token in str(payload or "").strip().split():
-            if "=" not in token:
-                continue
-            key, value = token.split("=", 1)
-            out[key.strip()] = value.strip()
-        return out
-
-    def _log_keepalive_resolution(marker_payload: str | None, *, reason: str) -> None:
-        marker_text = str(marker_payload or "").strip()
-        if not marker_text:
-            return
-        fields = _marker_kv(marker_text)
-        queued_at_unix = fields.get("queued_at_unix")
-        latency_seconds: int | None = None
-        if queued_at_unix:
-            try:
-                latency_seconds = max(0, int(time.time() - float(queued_at_unix)))
-            except Exception:
-                latency_seconds = None
-        idle_seconds_at_queue = fields.get("idle_seconds")
-        runtime.log(
-            "[harness] keepalive resolved: "
-            f"reason={reason} "
-            f"latency_seconds={latency_seconds if latency_seconds is not None else 'NA'} "
-            f"idle_seconds_at_queue={idle_seconds_at_queue or 'NA'} "
-            f"marker=\"{marker_text}\""
-        )
-
-    def _events_include_real_game_action(events: list[dict]) -> bool:
-        for event in events:
-            kind = str(event.get("kind", "")).strip().lower()
-            if kind in {"step", "reset"}:
-                return True
-        return False
-
     runtime = HarnessRuntime(
         deps,
         args,
@@ -256,7 +215,8 @@ def _run_single_game(
                         and not bool(reset_result.get("reset_noop", False))
                     ):
                         last_real_game_action_at_monotonic = time.monotonic()
-                        _log_keepalive_resolution(
+                        log_keepalive_resolution(
+                            runtime,
                             runtime.read_idle_keepalive_marker(),
                             reason="game_over_auto_reset",
                         )
@@ -299,9 +259,10 @@ def _run_single_game(
                     else history_after_resume
                 )
                 processed_history_len = len(history_after_resume)
-                if _events_include_real_game_action(new_events):
+                if events_include_real_game_action(new_events):
                     last_real_game_action_at_monotonic = time.monotonic()
-                    _log_keepalive_resolution(
+                    log_keepalive_resolution(
+                        runtime,
                         runtime.read_idle_keepalive_marker(),
                         reason="history_real_game_action",
                     )

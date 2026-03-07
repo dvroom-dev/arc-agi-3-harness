@@ -15,8 +15,10 @@ def test_harness_open_and_close_scorecard_mocked(tmp_path: Path, monkeypatch) ->
     (root / "tools").mkdir(parents=True)
     (root / "prompts").mkdir(parents=True)
     (root / "runs").mkdir(parents=True)
+    (root / "arc_model_runtime").mkdir(parents=True)
     (root / "super.yaml").write_text("runtime_defaults: {}\n")
-    for f in ("arc_repl.py", "arc_repl_cli.py", "arc_repl_daemon.py"):
+    (root / "arc_model_runtime" / "__init__.py").write_text("# runtime\n")
+    for f in ("arc_repl.py", "arc_repl_cli.py", "arc_repl_daemon.py", "arc_level.py"):
         (root / "tools" / f).write_text("#!/usr/bin/env python3\n")
     (root / "prompts" / "new_game_auto_explore.py").write_text("print('x')\n")
 
@@ -126,8 +128,10 @@ def test_harness_score_after_solve_opens_mid_run_and_uses_start_mode(
     (root / "tools").mkdir(parents=True)
     (root / "prompts").mkdir(parents=True)
     (root / "runs").mkdir(parents=True)
+    (root / "arc_model_runtime").mkdir(parents=True)
     (root / "super.yaml").write_text("runtime_defaults: {}\n")
-    for f in ("arc_repl.py", "arc_repl_cli.py", "arc_repl_daemon.py"):
+    (root / "arc_model_runtime" / "__init__.py").write_text("# runtime\n")
+    for f in ("arc_repl.py", "arc_repl_cli.py", "arc_repl_daemon.py", "arc_level.py"):
         (root / "tools" / f).write_text("#!/usr/bin/env python3\n")
     (root / "prompts" / "new_game_auto_explore.py").write_text("print('x')\n")
 

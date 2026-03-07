@@ -10,11 +10,19 @@ from pathlib import Path
 import numpy as np
 
 try:
+    from arc_repl_session_compat import (
+        build_frame_snapshot,
+        install_env_compat_bindings,
+    )
     from arc_repl_session_artifacts import (
         save_level_completion_records,
         write_state_artifacts,
     )
 except Exception:
+    from tools.arc_repl_session_compat import (
+        build_frame_snapshot,
+        install_env_compat_bindings,
+    )
     from tools.arc_repl_session_artifacts import (
         save_level_completion_records,
         write_state_artifacts,
@@ -215,9 +223,9 @@ def execute_exec_turn(
     session.env.step = logging_step
     session.globals["env"] = session.env
     session.globals["current"] = session.env
-    session.globals["get_frame"] = session._frame_snapshot
+    session.globals["get_frame"] = lambda: build_frame_snapshot(session)
     try:
-        session._install_env_compat_bindings()
+        install_env_compat_bindings(session)
     except Exception:
         pass
 
