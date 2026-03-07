@@ -1,4 +1,5 @@
 .venv/
+node_modules/
 __pycache__/
 *.pyc
 *.pyo
@@ -12,6 +13,7 @@ experiments/
 environment_files/
 .env
 *.log
+.ui-run-launcher.json
 
 # Local benchmark scratch/config variants
 super-minimal.yaml
