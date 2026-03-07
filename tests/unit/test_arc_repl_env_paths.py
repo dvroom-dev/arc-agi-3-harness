@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import requests.utils
 
-import arc_action
+import arc_repl_env
 
 
 def _frame(state="NOT_FINISHED", levels_completed=0):
@@ -20,18 +20,18 @@ def _frame(state="NOT_FINISHED", levels_completed=0):
 
 def test_resolve_operation_mode(monkeypatch) -> None:
     monkeypatch.setenv("ARC_OPERATION_MODE", "ONLINE")
-    assert arc_action._resolve_operation_mode().name == "ONLINE"
+    assert arc_repl_env._resolve_operation_mode().name == "ONLINE"
     monkeypatch.setenv("ARC_OPERATION_MODE", "BAD")
     with pytest.raises(RuntimeError):
-        arc_action._resolve_operation_mode()
+        arc_repl_env._resolve_operation_mode()
 
 
 def test_resolve_environments_dir(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("ARC_ENVIRONMENTS_DIR", str(tmp_path))
-    assert arc_action._resolve_environments_dir() == tmp_path
+    assert arc_repl_env._resolve_environments_dir() == tmp_path
     monkeypatch.setenv("ARC_ENVIRONMENTS_DIR", str(tmp_path / "missing"))
     with pytest.raises(RuntimeError):
-        arc_action._resolve_environments_dir()
+        arc_repl_env._resolve_environments_dir()
 
 
 def test_make_env_uses_candidates(monkeypatch) -> None:
@@ -48,8 +48,8 @@ def test_make_env_uses_candidates(monkeypatch) -> None:
             return None
 
     monkeypatch.setenv("ARC_OPERATION_MODE", "NORMAL")
-    monkeypatch.setattr(arc_action.arc_agi, "Arcade", FakeArcade)
-    env = arc_action._make_env("ls20-cb3b57cc")
+    monkeypatch.setattr(arc_repl_env.arc_agi, "Arcade", FakeArcade)
+    env = arc_repl_env._make_env("ls20-cb3b57cc")
     assert env is not None
     assert made == ["ls20-cb3b57cc", "ls20"]
 
@@ -66,7 +66,7 @@ def test_reset_env_with_retry_eventual_success() -> None:
             return _frame()
 
     env = Env()
-    frame = arc_action._reset_env_with_retry(env, context="for test", attempts=4)
+    frame = arc_repl_env._reset_env_with_retry(env, context="for test", attempts=4)
     assert frame is not None
     assert env.calls == 3
 
@@ -80,7 +80,7 @@ def test_reset_env_with_retry_surfaces_diagnostics() -> None:
 
     env = Env()
     with pytest.raises(RuntimeError, match=r"env\.reset\(\) returned None.*diagnostics="):
-        arc_action._reset_env_with_retry(env, context="for test", attempts=2)
+        arc_repl_env._reset_env_with_retry(env, context="for test", attempts=2)
 
 
 def test_make_env_applies_scorecard_cookies(monkeypatch) -> None:
@@ -99,8 +99,8 @@ def test_make_env_applies_scorecard_cookies(monkeypatch) -> None:
     monkeypatch.setenv("ARC_OPERATION_MODE", "NORMAL")
     monkeypatch.setenv("ARC_SCORECARD_ID", "sc-123")
     monkeypatch.setenv("ARC_SCORECARD_COOKIES", '{"GAMESESSION":"cookie-123"}')
-    monkeypatch.setattr(arc_action.arc_agi, "Arcade", FakeArcade)
-    _ = arc_action._make_env("ls20")
+    monkeypatch.setattr(arc_repl_env.arc_agi, "Arcade", FakeArcade)
+    _ = arc_repl_env._make_env("ls20")
     assert created
     cookies = requests.utils.dict_from_cookiejar(created[0]._session.cookies)
     assert cookies.get("GAMESESSION") == "cookie-123"
@@ -108,14 +108,14 @@ def test_make_env_applies_scorecard_cookies(monkeypatch) -> None:
 
 def test_get_pixels_uses_frame_data() -> None:
     frame = _frame()
-    pixels = arc_action._get_pixels(None, frame)
+    pixels = arc_repl_env._get_pixels(None, frame)
     assert pixels.shape == (2, 2)
 
 
 def test_get_pixels_returns_owned_copy_from_frame() -> None:
     source = np.array([[1, 2], [3, 4]], dtype=np.int8)
     frame = SimpleNamespace(frame=[source])
-    pixels = arc_action._get_pixels(None, frame)
+    pixels = arc_repl_env._get_pixels(None, frame)
     assert pixels.shape == (2, 2)
     assert np.array_equal(pixels, source)
     assert not np.shares_memory(pixels, source)

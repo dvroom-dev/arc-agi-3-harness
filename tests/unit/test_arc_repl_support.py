@@ -9,7 +9,9 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import arc_action
+import arc_repl_diffs
+import arc_repl_env
+import arc_repl_state
 
 
 def _frame(**overrides):
@@ -31,24 +33,24 @@ def _frame(**overrides):
 
 
 def test_make_id_candidates() -> None:
-    assert arc_action._make_id_candidates("ls20-cb3b57cc") == ["ls20-cb3b57cc", "ls20"]
-    assert arc_action._make_id_candidates("ls20") == ["ls20"]
-    assert arc_action._make_id_candidates("") == []
+    assert arc_repl_env._make_id_candidates("ls20-cb3b57cc") == ["ls20-cb3b57cc", "ls20"]
+    assert arc_repl_env._make_id_candidates("ls20") == ["ls20"]
+    assert arc_repl_env._make_id_candidates("") == []
 
 
 def test_change_helpers() -> None:
     before = np.array([[0, 1], [2, 3]], dtype=np.int8)
     after = np.array([[0, 2], [2, 3]], dtype=np.int8)
-    changes = arc_action._iter_cell_changes(before, after)
+    changes = arc_repl_diffs._iter_cell_changes(before, after)
     assert changes == [(0, 1, 1, 2)]
-    assert arc_action._change_bbox(changes) == {
+    assert arc_repl_diffs._change_bbox(changes) == {
         "min_row": 0,
         "max_row": 0,
         "min_col": 1,
         "max_col": 1,
     }
-    assert arc_action._change_bbox([]) is None
-    assert arc_action._changes_sample(changes) == [
+    assert arc_repl_diffs._change_bbox([]) is None
+    assert arc_repl_diffs._changes_sample(changes) == [
         {"row": 0, "col": 1, "before": "1", "after": "2"}
     ]
 
@@ -56,9 +58,9 @@ def test_change_helpers() -> None:
 def test_format_diff_and_change_records() -> None:
     before = np.array([[0, 1]], dtype=np.int8)
     after = np.array([[0, 10]], dtype=np.int8)
-    text = arc_action.format_diff_minimal(before, after)
+    text = arc_repl_diffs.format_diff_minimal(before, after)
     assert "(0,1): 1->A" in text
-    rec = arc_action.format_change_records([{"row": 0, "col": 1, "before": "1", "after": "A"}])
+    rec = arc_repl_diffs.format_change_records([{"row": 0, "col": 1, "before": "1", "after": "A"}])
     assert "(0,1): 1->A" in rec
 
 
@@ -66,7 +68,7 @@ def test_step_and_aggregate_diff_records() -> None:
     pre = np.array([[0, 0], [0, 0]], dtype=np.int8)
     s1 = np.array([[1, 0], [0, 0]], dtype=np.int8)
     s2 = np.array([[1, 2], [0, 0]], dtype=np.int8)
-    step_records = arc_action.build_step_diff_records(
+    step_records = arc_repl_diffs.build_step_diff_records(
         pre,
         [("a1", s1), ("a2", s2)],
         step_results=[{"levels_gained_in_step": 0}, {"levels_gained_in_step": 1}],
@@ -74,7 +76,7 @@ def test_step_and_aggregate_diff_records() -> None:
     assert step_records[0]["changed_pixels"] == 1
     assert step_records[1]["suppressed_cross_level_diff"] is True
 
-    agg = arc_action.build_aggregate_diff_record(
+    agg = arc_repl_diffs.build_aggregate_diff_record(
         pre,
         s2,
         step_snapshots=[("a1", s1), ("a2", s2)],
@@ -85,7 +87,7 @@ def test_step_and_aggregate_diff_records() -> None:
 
 
 def test_frame_action_metadata() -> None:
-    meta = arc_action.frame_action_metadata(_frame())
+    meta = arc_repl_diffs.frame_action_metadata(_frame())
     assert meta["action_input_name"] == "ACTION1"
     assert meta["action_input_id"] == 1
 
@@ -96,23 +98,23 @@ def test_state_and_history_file_helpers(tmp_path: Path, monkeypatch: pytest.Monk
     cwd = tmp_path / "wd"
     cwd.mkdir()
 
-    arc_dir = arc_action._arc_dir(cwd)
+    arc_dir = arc_repl_state._arc_dir(cwd)
     assert arc_dir.exists()
 
-    lc = arc_action._ensure_level_completions_file(cwd)
+    lc = arc_repl_state._ensure_level_completions_file(cwd)
     assert lc.exists()
-    al = arc_action._ensure_play_lib_file(cwd)
+    al = arc_repl_state._ensure_play_lib_file(cwd)
     assert al.exists()
     assert al == cwd / "game_ls20" / "play_lib.py"
 
     history = {"game_id": "ls20", "events": [], "turn": 3}
-    arc_action._save_history(cwd, history)
-    loaded = arc_action._load_history(cwd, "ls20")
+    arc_repl_state._save_history(cwd, history)
+    loaded = arc_repl_state._load_history(cwd, "ls20", arc_repl_env._make_id_candidates)
     assert loaded["turn"] == 3
 
 
 def test_error_payload_without_details() -> None:
-    err = arc_action._error_payload(
+    err = arc_repl_state._error_payload(
         action="status",
         requested_game_id="ls20",
         message="x",
@@ -130,9 +132,9 @@ def test_completion_window_and_append_record(tmp_path: Path, monkeypatch: pytest
         {"kind": "step", "action": "ACTION1", "levels_completed": 0},
         {"kind": "step", "action": "ACTION2", "levels_completed": 1},
     ]
-    windows = arc_action._completion_action_windows_by_level(events)
+    windows = arc_repl_state._completion_action_windows_by_level(events)
     assert windows[1] == ["ACTION1", "ACTION2"]
-    arc_action._append_level_completion(
+    arc_repl_state._append_level_completion(
         path=path,
         completed_level=1,
         actions=windows[1],
@@ -141,7 +143,7 @@ def test_completion_window_and_append_record(tmp_path: Path, monkeypatch: pytest
     )
     text = path.read_text()
     assert "## Level 1 Completion" in text
-    assert arc_action._read_max_recorded_completion_level(path) == 1
+    assert arc_repl_state._read_max_recorded_completion_level(path) == 1
 
 
 def test_default_game_id_and_action_name_mapping(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -149,17 +151,17 @@ def test_default_game_id_and_action_name_mapping(tmp_path: Path, monkeypatch: py
     arc_dir = tmp_path / "arc"
     arc_dir.mkdir()
     (arc_dir / "state.json").write_text(json.dumps({"game_id": "ls20-cb3b57cc"}))
-    assert arc_action._default_game_id(tmp_path) == "ls20-cb3b57cc"
-    assert arc_action._action_from_event_name("ACTION1").name == "ACTION1"
-    assert arc_action._action_from_event_name("1").name == "ACTION1"
+    assert arc_repl_state._default_game_id(tmp_path) == "ls20-cb3b57cc"
+    assert arc_repl_env._action_from_event_name("ACTION1").name == "ACTION1"
+    assert arc_repl_env._action_from_event_name("1").name == "ACTION1"
 
 
 def test_read_args_and_error_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     stdin = io.TextIOWrapper(io.BytesIO(b'{"action":"status"}'), encoding="utf-8")
     monkeypatch.setattr(sys, "stdin", stdin)
-    parsed = arc_action._read_args()
+    parsed = arc_repl_state._read_args()
     assert parsed["action"] == "status"
-    err = arc_action._error_payload(
+    err = arc_repl_state._error_payload(
         action="status",
         requested_game_id="ls20",
         message="x",
@@ -173,7 +175,7 @@ def test_write_state_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("ARC_STATE_DIR", str(tmp_path / "arc"))
     frame = _frame(frame=[np.zeros((64, 64), dtype=np.int8)])
     pixels = np.zeros((64, 64), dtype=np.int8)
-    arc_action.write_machine_state(
+    arc_repl_diffs.write_machine_state(
         tmp_path / "arc",
         frame,
         pixels,
@@ -181,7 +183,7 @@ def test_write_state_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         last_action="status",
         step_snapshots=[],
     )
-    arc_action.write_game_state(
+    arc_repl_diffs.write_game_state(
         tmp_path / "arc" / "game-state.md",
         frame,
         pixels,

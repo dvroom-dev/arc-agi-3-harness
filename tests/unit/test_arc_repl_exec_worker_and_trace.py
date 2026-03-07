@@ -5,7 +5,8 @@ from types import SimpleNamespace
 
 import numpy as np
 
-import arc_action
+import arc_repl_exec
+import arc_repl_diffs
 
 
 class FakeConn:
@@ -44,7 +45,7 @@ class FakeConn:
 def test_script_worker_main_happy_path() -> None:
     conn = FakeConn()
     script = "env.step(GameAction.ACTION1)\nprint(env.state().get('state'))\n"
-    arc_action._script_worker_main(conn, script, "", "<script>")
+    arc_repl_exec._script_worker_main(conn, script, "", "<script>")
     assert conn.closed is True
     assert any(msg.get("op") == "done" for msg in conn.sent)
 
@@ -52,7 +53,7 @@ def test_script_worker_main_happy_path() -> None:
 def test_script_worker_main_handles_script_error() -> None:
     conn = FakeConn()
     script = "raise Exception('boom')\n"
-    arc_action._script_worker_main(conn, script, "", "<script>")
+    arc_repl_exec._script_worker_main(conn, script, "", "<script>")
     done = [m for m in conn.sent if m.get("op") == "done"][-1]
     assert "Traceback" in done.get("error", "")
 
@@ -62,7 +63,7 @@ def test_write_turn_trace_includes_diff_and_note(tmp_path: Path) -> None:
     pre = np.zeros((2, 2), dtype=np.int8)
     s1 = np.array([[1, 0], [0, 0]], dtype=np.int8)
     s2 = np.array([[1, 2], [0, 0]], dtype=np.int8)
-    path = arc_action._write_turn_trace(
+    path = arc_repl_exec._write_turn_trace(
         arc_dir=arc_dir,
         turn=1,
         action_name="run_script",
@@ -92,7 +93,7 @@ def test_write_game_state_with_step_diffs(tmp_path: Path) -> None:
     pre = np.zeros((2, 2), dtype=np.int8)
     post = np.array([[1, 0], [0, 0]], dtype=np.int8)
     out = tmp_path / "game-state.md"
-    arc_action.write_game_state(
+    arc_repl_diffs.write_game_state(
         out,
         frame,
         post,
@@ -107,4 +108,3 @@ def test_write_game_state_with_step_diffs(tmp_path: Path) -> None:
     text = out.read_text()
     assert "Step Diffs" in text
     assert "Aggregate Diff" in text
-

@@ -15,7 +15,7 @@ from arcengine import GameAction
 from arcengine.enums import FrameDataRaw
 
 try:
-    from arc_action_diffs import (
+    from arc_repl_diffs import (
         _change_bbox,
         _changes_sample,
         _iter_cell_changes,
@@ -24,7 +24,7 @@ try:
         format_change_records,
     )
 except Exception:
-    from tools.arc_action_diffs import (
+    from tools.arc_repl_diffs import (
         _change_bbox,
         _changes_sample,
         _iter_cell_changes,

@@ -195,18 +195,20 @@ def setup_run_config_dir_impl(
     optional_tools = [
         "arc_repl_paths.py",
         "proc_utils.py",
-        "arc_action_diffs.py",
-        "arc_action_env.py",
-        "arc_action_exec.py",
-        "arc_action_state.py",
+        "arc_repl_diffs.py",
+        "arc_repl_env.py",
+        "arc_repl_exec.py",
+        "arc_repl_state.py",
         "arc_repl_action_history.py",
         "arc_repl_daemon_client.py",
         "arc_repl_diagnostics.py",
         "arc_repl_intercepts.py",
         "arc_repl_session_artifacts.py",
+        "arc_repl_session_compat.py",
         "arc_repl_session_core.py",
         "arc_repl_session_exec.py",
         "arc_repl_session_grid.py",
+        "arc_repl_session_sequences.py",
     ]
 
     for filename in required_tools:

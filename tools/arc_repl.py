@@ -9,7 +9,7 @@ import sys
 import time
 import traceback
 from pathlib import Path
-from arc_action_diffs import (
+from arc_repl_diffs import (
     _change_bbox,
     _iter_cell_changes,
     build_aggregate_diff_record,
@@ -19,7 +19,7 @@ from arc_action_diffs import (
     write_game_state,
     write_machine_state,
 )
-from arc_action_env import (
+from arc_repl_env import (
     _action_from_event_name,
     _get_pixels,
     _last_step_failure_details,
@@ -27,8 +27,8 @@ from arc_action_env import (
     _make_id_candidates,
     _reset_env_with_retry,
 )
-from arc_action_exec import _write_turn_trace
-from arc_action_state import (
+from arc_repl_exec import _write_turn_trace
+from arc_repl_state import (
     _append_level_completion,
     _arc_dir,
     _completion_action_windows_by_level,
@@ -39,7 +39,7 @@ from arc_action_state import (
     _read_max_recorded_completion_level,
     _save_history,
 )
-from arc_action_state import _load_history as _load_history_impl
+from arc_repl_state import _load_history as _load_history_impl
 from arc_repl_daemon import run_daemon
 from arc_repl_daemon_client import (
     spawn_daemon as spawn_daemon_impl,

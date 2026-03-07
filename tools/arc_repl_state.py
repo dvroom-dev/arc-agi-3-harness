@@ -58,7 +58,7 @@ def _error_payload(
     details: str | None = None,
 ) -> dict:
     payload = {
-        "schema_version": "arc_action.v2",
+        "schema_version": "arc_repl.v1",
         "ok": False,
         "action": action,
         "requested_game_id": requested_game_id or "",

@@ -4,17 +4,7 @@ import json
 
 import pytest
 
-import arc_action_cli
 import arc_repl_cli
-
-
-def test_arc_action_cli_parse_error_emits_json(capsys) -> None:
-    parser = arc_action_cli.JsonArgumentParser(prog="arc_action")
-    with pytest.raises(SystemExit):
-        parser.error("bad args")
-    out = json.loads(capsys.readouterr().out)
-    assert out["ok"] is False
-    assert out["error"]["type"] == "cli_parse_error"
 
 
 def test_arc_repl_cli_parse_error_emits_json(capsys) -> None:
@@ -24,4 +14,3 @@ def test_arc_repl_cli_parse_error_emits_json(capsys) -> None:
     out = json.loads(capsys.readouterr().out)
     assert out["ok"] is False
     assert out["error"]["type"] == "cli_parse_error"
-
