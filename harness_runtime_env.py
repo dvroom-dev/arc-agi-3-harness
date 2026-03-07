@@ -33,7 +33,7 @@ def read_idle_keepalive_marker_impl(runtime) -> str | None:
 
 
 def idle_keepalive_enabled_impl(runtime) -> bool:
-    return bool(runtime.api_idle_keepalive_base_enabled and runtime.active_scorecard_id)
+    return bool(runtime.api_idle_keepalive_base_enabled)
 
 
 def write_idle_keepalive_marker_impl(runtime, *, marker: str, details: str = "") -> None:

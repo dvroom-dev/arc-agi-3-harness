@@ -107,7 +107,6 @@ Operational timeouts are benchmark-critical.
 - ARC API game progress appears to have an idle timeout of about 30 minutes; if hit, progress may be lost
 - Scorecard inactivity has historically timed out around 15 minutes; confirm the current behavior before relying on old assumptions
 - Current harness idle keepalive trigger for real game inactivity is `12 * 60` seconds in `harness_runner.py`
-- The scorecard keepalive hack module assumes `14 * 60` seconds in `harness_scorecard_timeout_hack.py`
 
 Rules:
 - Treat idle budget and scorecard budget as first-class constraints during run design and diagnosis

@@ -33,8 +33,6 @@ def _peek_idle_keepalive_flag() -> str | None:
 def _idle_keepalive_enabled_from_env() -> bool:
     if str(os.getenv("ARC_OPERATION_MODE", "") or "").strip().upper() != "ONLINE":
         return False
-    if not str(os.getenv("ARC_SCORECARD_ID", "") or "").strip():
-        return False
     backend = str(os.getenv("ARC_BACKEND", "") or "").strip().lower()
     if backend:
         return backend == "api"

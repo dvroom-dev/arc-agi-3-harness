@@ -34,7 +34,6 @@ def test_arc_repl_idle_marker_is_sticky_and_cleared(monkeypatch, tmp_path: Path)
 
     monkeypatch.setenv("ARC_OPERATION_MODE", "ONLINE")
     monkeypatch.setenv("ARC_BACKEND", "api")
-    monkeypatch.setenv("ARC_SCORECARD_ID", "score-123")
     monkeypatch.setenv("ARC_BASE_URL", "https://three.arcprize.org")
 
     result = {
@@ -68,7 +67,7 @@ def test_arc_repl_idle_marker_is_sticky_and_cleared(monkeypatch, tmp_path: Path)
     assert arc_repl_intercepts.read_idle_keepalive_marker(tmp_path, arc_state_dir) is None
 
 
-def test_arc_repl_idle_marker_disabled_outside_online_scored(monkeypatch, tmp_path: Path) -> None:
+def test_arc_repl_idle_marker_disabled_outside_online_api(monkeypatch, tmp_path: Path) -> None:
     arc_state_dir = tmp_path / "arc"
     action_history = arc_state_dir / "action-history.json"
     old_ts = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
@@ -76,7 +75,6 @@ def test_arc_repl_idle_marker_disabled_outside_online_scored(monkeypatch, tmp_pa
 
     monkeypatch.setenv("ARC_OPERATION_MODE", "OFFLINE")
     monkeypatch.setenv("ARC_BACKEND", "api")
-    monkeypatch.setenv("ARC_SCORECARD_ID", "score-123")
     monkeypatch.setenv("ARC_BASE_URL", "https://three.arcprize.org")
 
     marker = arc_repl_intercepts.idle_keepalive_marker_for_call(
@@ -88,6 +86,27 @@ def test_arc_repl_idle_marker_disabled_outside_online_scored(monkeypatch, tmp_pa
     assert marker is None
 
 
+def test_arc_repl_idle_marker_enabled_without_scorecard(monkeypatch, tmp_path: Path) -> None:
+    arc_state_dir = tmp_path / "arc"
+    action_history = arc_state_dir / "action-history.json"
+    old_ts = (datetime.now(timezone.utc) - timedelta(minutes=20)).isoformat()
+    _write_action_history(action_history, recorded_at_utc=old_ts)
+
+    monkeypatch.setenv("ARC_OPERATION_MODE", "ONLINE")
+    monkeypatch.setenv("ARC_BACKEND", "api")
+    monkeypatch.delenv("ARC_SCORECARD_ID", raising=False)
+    monkeypatch.setenv("ARC_BASE_URL", "https://three.arcprize.org")
+
+    marker = arc_repl_intercepts.idle_keepalive_marker_for_call(
+        cwd=tmp_path,
+        arc_state_dir=arc_state_dir,
+        action="status",
+        result={"current_level": 2, "action_history_file": str(action_history)},
+    )
+    assert marker is not None
+    assert "__ARC_INTERCEPT_IDLE_KEEPALIVE__" in marker
+
+
 def test_model_runtime_injects_keepalive_from_same_history_signal(monkeypatch, tmp_path: Path) -> None:
     arc_state_dir = tmp_path / "arc"
     action_history = arc_state_dir / "action-history.json"
@@ -97,7 +116,6 @@ def test_model_runtime_injects_keepalive_from_same_history_signal(monkeypatch, t
     monkeypatch.setenv("ARC_STATE_DIR", str(arc_state_dir))
     monkeypatch.setenv("ARC_OPERATION_MODE", "ONLINE")
     monkeypatch.setenv("ARC_BACKEND", "api")
-    monkeypatch.setenv("ARC_SCORECARD_ID", "score-123")
     monkeypatch.setenv("ARC_BASE_URL", "https://three.arcprize.org")
 
     payload: dict[str, object] = {"ok": True, "action": "status", "current_level": 4}
