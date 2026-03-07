@@ -41,3 +41,20 @@ def test_classify_level_drop_returns_none_when_no_drop() -> None:
     post_state = {"levels_completed": 1, "state": "NOT_FINISHED"}
     out = _classify_level_drop(prev_state=prev_state, post_state=post_state, new_events=[])
     assert out is None
+
+
+def test_classify_level_drop_flags_drop_below_recorded_frontier() -> None:
+    # Handles delayed detection where prev/post snapshot are already regressed,
+    # but we know we previously reached a higher solved frontier.
+    prev_state = {"levels_completed": 0, "state": "NOT_FINISHED"}
+    post_state = {"levels_completed": 0, "state": "NOT_FINISHED"}
+    out = _classify_level_drop(
+        prev_state=prev_state,
+        post_state=post_state,
+        new_events=[],
+        last_recorded_completed_level=3,
+    )
+    assert out is not None
+    assert out["kind"] == "unconfirmed_level_drop_without_game_over"
+    assert out["from_levels_completed"] == 3
+    assert out["to_levels_completed"] == 0

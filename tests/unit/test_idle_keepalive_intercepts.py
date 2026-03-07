@@ -129,3 +129,83 @@ def test_model_runtime_injects_compare_clean_marker(monkeypatch, tmp_path: Path)
     assert "__ARC_INTERCEPT_COMPARE_CLEAN__" in hint
     assert isinstance(hints, list)
     assert "__ARC_INTERCEPT_COMPARE_CLEAN__" in hints
+
+
+def test_latest_sequence_id_for_level_skips_reset_and_regression(tmp_path: Path) -> None:
+    level_dir = tmp_path / "level_3"
+    seq_root = level_dir / "sequences"
+    seq_root.mkdir(parents=True, exist_ok=True)
+
+    (seq_root / "seq_0001.json").write_text(
+        json.dumps(
+            {
+                "sequence_id": "seq_0001",
+                "end_reason": "reset_level",
+                "actions": [
+                    {
+                        "levels_completed_before": 2,
+                        "levels_completed_after": 2,
+                    }
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (seq_root / "seq_0002.json").write_text(
+        json.dumps(
+            {
+                "sequence_id": "seq_0002",
+                "end_reason": "level_change",
+                "actions": [
+                    {
+                        "levels_completed_before": 2,
+                        "levels_completed_after": 1,
+                    }
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    (seq_root / "seq_0003.json").write_text(
+        json.dumps(
+            {
+                "sequence_id": "seq_0003",
+                "end_reason": "level_change",
+                "actions": [
+                    {
+                        "levels_completed_before": 2,
+                        "levels_completed_after": 3,
+                    }
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    assert arc_repl_intercepts.latest_sequence_id_for_level(level_dir) == "seq_0003"
+
+
+def test_latest_sequence_id_for_level_returns_none_when_no_eligible(tmp_path: Path) -> None:
+    level_dir = tmp_path / "level_4"
+    seq_root = level_dir / "sequences"
+    seq_root.mkdir(parents=True, exist_ok=True)
+    (seq_root / "seq_0001.json").write_text(
+        json.dumps(
+            {
+                "sequence_id": "seq_0001",
+                "end_reason": "reset_level",
+                "actions": [
+                    {
+                        "levels_completed_before": 3,
+                        "levels_completed_after": 3,
+                    }
+                ],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    assert arc_repl_intercepts.latest_sequence_id_for_level(level_dir) is None

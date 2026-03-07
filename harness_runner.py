@@ -313,6 +313,7 @@ def _run_single_game(
                     prev_state=state,
                     post_state=post_state,
                     new_events=new_events,
+                    last_recorded_completed_level=last_recorded_completed_level,
                 )
                 if drop and drop.get("kind") != "drop_after_game_over":
                     runtime.log(

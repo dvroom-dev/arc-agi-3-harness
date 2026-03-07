@@ -264,6 +264,47 @@ class ModelSession:
         payload["action"] = "exec_file"
         return payload, code
 
+    def _sequence_has_level_regression(self, payload: dict) -> bool:
+        actions = list(payload.get("actions", []) or [])
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            before = action.get("levels_completed_before")
+            after = action.get("levels_completed_after")
+            try:
+                before_i = int(before)
+                after_i = int(after)
+            except Exception:
+                continue
+            if after_i < before_i:
+                return True
+        return False
+
+    def _sequence_eligibility(
+        self,
+        *,
+        target_level: int,
+        payload: dict,
+        include_reset_ended: bool,
+        include_level_regressions: bool,
+    ) -> tuple[bool, str]:
+        try:
+            payload_level = int(payload.get("level", target_level) or target_level)
+        except Exception:
+            payload_level = int(target_level)
+        if payload_level != int(target_level):
+            return False, "wrong_level"
+        actions = list(payload.get("actions", []) or [])
+        if not actions:
+            return False, "no_actions"
+        end_reason = str(payload.get("end_reason", "")).strip().lower()
+        if end_reason == "reset_level" and not include_reset_ended:
+            return False, "reset_ended"
+        has_regression = self._sequence_has_level_regression(payload)
+        if has_regression and not include_level_regressions:
+            return False, "level_regression"
+        return True, "ok"
+
     def _compare_one_sequence(self, *, level: int, level_dir: Path, payload: dict) -> dict:
         compare_env = ModelEnv(self.env.game_id, self.game_dir, self.hooks)
         compare_env.levels_completed = int(level) - 1
@@ -374,7 +415,14 @@ class ModelSession:
             lines.extend(["", f"## {section}", "```json", json.dumps(value, indent=2), "```"])
         return "\n".join(lines).rstrip() + "\n"
 
-    def do_compare_sequences(self, *, level: int | None, sequence_id: str | None) -> tuple[dict, int]:
+    def do_compare_sequences(
+        self,
+        *,
+        level: int | None,
+        sequence_id: str | None,
+        include_reset_ended: bool = False,
+        include_level_regressions: bool = False,
+    ) -> tuple[dict, int]:
         target_level = int(level) if level is not None else int(self.env.current_level)
         level_dir = resolve_level_dir(self.game_dir, target_level)
         if level_dir is None:
@@ -385,16 +433,70 @@ class ModelSession:
         seq_files = [seq_root / f"{sequence_id}.json"] if sequence_id else sorted(seq_root.glob("seq_*.json"))
         if not seq_files or not all(p.exists() for p in seq_files):
             return self._error("compare_sequences", "missing_sequence", f"sequence not found under: {seq_root}"), 1
+        skipped_sequences: list[dict[str, Any]] = []
+        eligible_payloads: list[tuple[Path, dict]] = []
+        for seq_file in seq_files:
+            try:
+                payload = json.loads(seq_file.read_text())
+            except Exception as exc:
+                skipped_sequences.append(
+                    {
+                        "sequence_file": str(seq_file.name),
+                        "reason": "invalid_sequence_json",
+                        "error": str(exc),
+                    }
+                )
+                continue
+            if not isinstance(payload, dict):
+                skipped_sequences.append(
+                    {
+                        "sequence_file": str(seq_file.name),
+                        "reason": "invalid_sequence_payload",
+                    }
+                )
+                continue
+            eligible, reason = self._sequence_eligibility(
+                target_level=target_level,
+                payload=payload,
+                include_reset_ended=include_reset_ended,
+                include_level_regressions=include_level_regressions,
+            )
+            if not eligible:
+                skipped_sequences.append(
+                    {
+                        "sequence_id": str(payload.get("sequence_id", seq_file.stem)),
+                        "sequence_file": str(seq_file.name),
+                        "end_reason": str(payload.get("end_reason", "")),
+                        "reason": reason,
+                    }
+                )
+                continue
+            eligible_payloads.append((seq_file, payload))
+        if not eligible_payloads:
+            details = (
+                f"no eligible sequences under {seq_root} "
+                f"(requested={len(seq_files)} skipped={len(skipped_sequences)})"
+            )
+            err, code = self._error("compare_sequences", "no_eligible_sequences", details), 1
+            err["level"] = int(target_level)
+            err["requested_sequences"] = int(len(seq_files))
+            err["eligible_sequences"] = 0
+            err["skipped_sequences"] = skipped_sequences
+            err["include_reset_ended"] = bool(include_reset_ended)
+            err["include_level_regressions"] = bool(include_level_regressions)
+            return err, code
         compare_root = level_dir / "sequence_compare"
         compare_root.mkdir(parents=True, exist_ok=True)
         reports: list[dict] = []
         diverged = 0
-        for seq_file in seq_files:
-            payload = json.loads(seq_file.read_text())
+        for seq_file, payload in eligible_payloads:
             report = self._compare_one_sequence(level=target_level, level_dir=level_dir, payload=payload)
             report_file = compare_root / f"{report['sequence_id']}.md"
             report_file.write_text(self._report_md(report))
-            report["report_file"] = str(report_file.relative_to(self.game_dir))
+            try:
+                report["report_file"] = str(report_file.relative_to(self.game_dir))
+            except ValueError:
+                report["report_file"] = str(report_file)
             reports.append(report)
             if not bool(report.get("matched", False)):
                 diverged += 1
@@ -403,9 +505,14 @@ class ModelSession:
             "ok": True,
             "action": "compare_sequences",
             "level": int(target_level),
+            "requested_sequences": int(len(seq_files)),
+            "eligible_sequences": int(len(eligible_payloads)),
+            "skipped_sequences": skipped_sequences,
             "compared_sequences": int(len(reports)),
             "diverged_sequences": int(diverged),
             "all_match": bool(diverged == 0),
+            "include_reset_ended": bool(include_reset_ended),
+            "include_level_regressions": bool(include_level_regressions),
             "reports": reports,
             **self.get_state(),
         }, 0
@@ -429,6 +536,16 @@ def _build_parser() -> argparse.ArgumentParser:
     compare_cmd.add_argument("--game-id", default="game")
     compare_cmd.add_argument("--level", type=int, default=None)
     compare_cmd.add_argument("--sequence", default=None)
+    compare_cmd.add_argument(
+        "--include-reset-ended",
+        action="store_true",
+        help="include sequences that ended via reset_level",
+    )
+    compare_cmd.add_argument(
+        "--include-level-regressions",
+        action="store_true",
+        help="include sequences that contain levels_completed regression events",
+    )
     file_cmd = sub.add_parser("exec_file")
     file_cmd.add_argument("--game-id", default="game")
     file_cmd.add_argument("script_path")
@@ -456,7 +573,12 @@ def run_model_cli(hooks: ModelHooks, *, game_dir: Path, argv: list[str] | None =
         print(json.dumps(payload, indent=2))
         return 0 if payload.get("ok") else 1
     if args.action == "compare_sequences":
-        payload, code = session.do_compare_sequences(level=args.level, sequence_id=args.sequence)
+        payload, code = session.do_compare_sequences(
+            level=args.level,
+            sequence_id=args.sequence,
+            include_reset_ended=bool(args.include_reset_ended),
+            include_level_regressions=bool(args.include_level_regressions),
+        )
         inject_idle_hint(payload, action_name="compare_sequences")
         print(json.dumps(payload, indent=2))
         return code

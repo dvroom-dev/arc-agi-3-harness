@@ -143,13 +143,33 @@ def test_repl_session_status_reset_exec(monkeypatch, tmp_path: Path) -> None:
 
     result = session.do_exec(
         "ls20",
-        "print('hello')\nenv.step(GameAction.ACTION1)\nenv.step(GameAction.ACTION2)\n",
+        (
+            "print('hello')\n"
+            "s = env.read()\n"
+            "f = get_frame()\n"
+            "print('lvl', s['current_level'])\n"
+            "print('shape', f.grid.shape)\n"
+            "env.step(GameAction.ACTION1)\n"
+            "env.step(GameAction.ACTION2)\n"
+        ),
         session_created=False,
     )
     assert result["action"] == "exec"
     assert result["ok"] is True
     assert result["steps_executed"] >= 1
     assert result["state"] in {"NOT_FINISHED", "WIN"}
+
+
+def test_repl_compat_helpers_available(monkeypatch, tmp_path: Path) -> None:
+    _patch_session_dependencies(monkeypatch, tmp_path)
+    session = arc_repl.ReplSession(
+        cwd=tmp_path,
+        conversation_id="conv-1",
+        requested_game_id="ls20",
+    )
+    assert "get_frame" in session.globals
+    assert hasattr(session.env, "read")
+    assert hasattr(session.env, "get_frame")
 
 
 def test_repl_history_helpers_can_be_enabled(monkeypatch, tmp_path: Path) -> None:

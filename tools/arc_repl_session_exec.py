@@ -215,6 +215,11 @@ def execute_exec_turn(
     session.env.step = logging_step
     session.globals["env"] = session.env
     session.globals["current"] = session.env
+    session.globals["get_frame"] = session._frame_snapshot
+    try:
+        session._install_env_compat_bindings()
+    except Exception:
+        pass
 
     script_file_abs: str | None = None
     script_dir: str | None = None

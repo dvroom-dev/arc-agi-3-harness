@@ -34,20 +34,25 @@ def _classify_level_drop(
     prev_state: dict | None,
     post_state: dict | None,
     new_events: list[dict],
+    last_recorded_completed_level: int = 0,
 ) -> dict | None:
     """Classify a level drop; returns None when no hard-stop is needed."""
     prev_levels = _as_int((prev_state or {}).get("levels_completed", 0), 0)
     post_levels = _as_int((post_state or {}).get("levels_completed", prev_levels), prev_levels)
-    if post_levels >= prev_levels:
-        return None
 
     post_state_name = str((post_state or {}).get("state", "")).strip().upper()
     if post_state_name == "GAME_OVER":
+        if post_levels >= prev_levels:
+            return None
         return {
             "kind": "drop_after_game_over",
             "from_levels_completed": prev_levels,
             "to_levels_completed": post_levels,
         }
+
+    recorded_frontier = max(prev_levels, _as_int(last_recorded_completed_level, 0))
+    if post_levels >= recorded_frontier:
+        return None
 
     confirmed = _find_step_level_regression(
         levels_before_resume=prev_levels,
@@ -61,6 +66,6 @@ def _classify_level_drop(
 
     return {
         "kind": "unconfirmed_level_drop_without_game_over",
-        "from_levels_completed": prev_levels,
+        "from_levels_completed": recorded_frontier,
         "to_levels_completed": post_levels,
     }

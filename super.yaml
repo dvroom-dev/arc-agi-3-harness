@@ -25,6 +25,10 @@ supervisor:
     operation: append
     values:
       - "Mode intent: explore_game discovers mechanics with minimal real-game actions; code_model updates model code; solve_model verifies model solutions; solve_game executes real-game solutions; recover replays solved levels after regression."
+      - "On every supervisor pass, review `model.py` and `model_lib.py` for concrete bugs/logic errors (state transition mistakes, invalid feature detectors, stale assumptions, inconsistent action effects, missing failure guards)."
+      - "If model-file bugs are found, require the agent to fix them before further solve progression."
+      - "When model bugs are found outside `code_model`, route to `code_model` (resume or fork as appropriate) with explicit fix targets and required verification."
+      - "Do not allow `solve_model`/`solve_game` progression while unresolved model-file bugs are known."
       - "Prefer continue unless there is a clear, evidence-backed correction to make."
       - "When switching to explore_game, prefer resume_mode_head over fork_new_conversation so exploration context is preserved. Only fork a new explore_game conversation after a game-state discontinuity (reset_level, level_complete, game_complete, game_over)."
       - "For rule enforcement decisions, cite concrete evidence pointers (turn/tool/output/file)."

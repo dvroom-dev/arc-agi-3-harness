@@ -170,7 +170,45 @@ def latest_sequence_id_for_level(level_dir: Path) -> str | None:
     seq_files = sorted(seq_root.glob("seq_*.json"))
     if not seq_files:
         return None
-    return seq_files[-1].stem
+    completion_candidate: str | None = None
+    fallback_candidate: str | None = None
+    for path in reversed(seq_files):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        end_reason = str(payload.get("end_reason", "")).strip().lower()
+        if end_reason == "reset_level":
+            continue
+        actions = list(payload.get("actions", []) or [])
+        if not actions:
+            continue
+        has_regression = False
+        has_completion_transition = False
+        for action in actions:
+            if not isinstance(action, dict):
+                continue
+            try:
+                before = int(action.get("levels_completed_before", 0) or 0)
+                after = int(action.get("levels_completed_after", before) or before)
+            except Exception:
+                continue
+            if after < before:
+                has_regression = True
+                break
+            if after > before:
+                has_completion_transition = True
+        if has_regression:
+            continue
+        seq_id = str(payload.get("sequence_id", path.stem)).strip() or path.stem
+        if has_completion_transition:
+            completion_candidate = seq_id
+            break
+        if fallback_candidate is None:
+            fallback_candidate = seq_id
+    return completion_candidate or fallback_candidate
 
 
 def _safe_slug(value: str) -> str:
@@ -245,7 +283,13 @@ def run_level_completion_compare(cwd: Path, result: object) -> str | None:
 
     compare_ok = bool(parsed_payload.get("ok")) if isinstance(parsed_payload, dict) else False
     all_match = bool(parsed_payload.get("all_match")) if isinstance(parsed_payload, dict) else False
-    mismatch = (proc.returncode != 0) or (not compare_ok) or (not all_match)
+    compared_sequences = 0
+    if isinstance(parsed_payload, dict):
+        try:
+            compared_sequences = int(parsed_payload.get("compared_sequences", 0) or 0)
+        except Exception:
+            compared_sequences = 0
+    mismatch = (proc.returncode != 0) or (not compare_ok) or (not all_match) or (compared_sequences <= 0)
     if not mismatch:
         return None
 
@@ -259,6 +303,7 @@ def run_level_completion_compare(cwd: Path, result: object) -> str | None:
         f"- return_code: {int(proc.returncode)}",
         f"- compare_ok: {str(compare_ok).lower()}",
         f"- all_match: {str(all_match).lower()}",
+        f"- compared_sequences: {int(compared_sequences)}",
         "",
         "## stdout",
         "```text",
