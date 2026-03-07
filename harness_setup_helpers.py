@@ -268,22 +268,27 @@ exec \"{py}\" \"${{CONFIG_DIR}}/tools/arc_level.py\" \"$@\"
 
 
 def assert_no_game_files_in_agent_dir_impl(agent_dir: Path) -> None:
-    """Fail fast if game/environment source appears in the agent filesystem."""
+    """Fail fast if agent publication shape leaks env internals or unexpected roots."""
     forbidden: list[Path] = []
+    allowed_root = re.compile(r"^game_[A-Za-z0-9_.-]+$")
     for path in agent_dir.rglob("*"):
         rel = path.relative_to(agent_dir)
+        if path.is_symlink():
+            forbidden.append(rel)
+            continue
+        if len(rel.parts) == 1 and not allowed_root.fullmatch(rel.name):
+            forbidden.append(rel)
+            continue
         if "environment_files" in rel.parts:
             forbidden.append(rel)
             continue
-        if path.name in {"game_state.py", "ls20.py"}:
-            forbidden.append(rel)
-            continue
-        if path.suffix == ".zip" and "environment" in path.name.lower():
+        lower_name = path.name.lower()
+        if lower_name.endswith((".zip", ".tar", ".tgz", ".tar.gz")):
             forbidden.append(rel)
             continue
     if forbidden:
         preview = ", ".join(str(p) for p in sorted(set(forbidden))[:8])
         raise RuntimeError(
-            "agent filesystem contains forbidden game/environment artifacts: "
+            "agent filesystem violates the run publication model: "
             f"{preview}"
         )

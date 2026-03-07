@@ -126,10 +126,17 @@ def test_write_prompt_file_with_image(tmp_path: Path) -> None:
 def test_assert_no_game_files_in_agent_dir(tmp_path: Path) -> None:
     agent = tmp_path / "agent"
     agent.mkdir()
-    (agent / "ok.py").write_text("print('ok')\n")
+    game_dir = agent / "game_ft09"
+    game_dir.mkdir()
+    (game_dir / "play.py").write_text("print('ok')\n")
     harness.assert_no_game_files_in_agent_dir(agent)
     forbidden = agent / "environment_files"
     forbidden.mkdir()
+    with pytest.raises(RuntimeError):
+        harness.assert_no_game_files_in_agent_dir(agent)
+
+    forbidden.rmdir()
+    (agent / "notes.txt").write_text("bad\n")
     with pytest.raises(RuntimeError):
         harness.assert_no_game_files_in_agent_dir(agent)
 
