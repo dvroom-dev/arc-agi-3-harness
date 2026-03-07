@@ -435,6 +435,7 @@ def run_main(deps) -> None:
             run_scorecard_session_preflight(
                 operation_mode_name=operation_mode_name,
                 arc_base_url=arc_base_url,
+                game_id=game_ids[0],
                 log=lambda msg: print(msg, file=sys.stderr, flush=True),
             )
 

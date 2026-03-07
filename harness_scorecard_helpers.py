@@ -240,6 +240,7 @@ def _scorecard_probe_reset_and_action(
     session,
     arc_base_url: str,
     card_id: str,
+    game_id: str,
     use_session: bool,
     headers: dict[str, str],
 ) -> None:
@@ -249,7 +250,7 @@ def _scorecard_probe_reset_and_action(
     reset_url = f"{arc_base_url.rstrip('/')}/api/cmd/RESET"
     reset_payload = {
         "card_id": card_id,
-        "game_id": "ls20-cb3b57cc",
+        "game_id": game_id,
     }
     reset_resp = caller(reset_url, json=reset_payload, headers=headers, timeout=10)
     reset_resp.raise_for_status()
@@ -261,7 +262,7 @@ def _scorecard_probe_reset_and_action(
     action_url = f"{arc_base_url.rstrip('/')}/api/cmd/ACTION1"
     action_payload = {
         "guid": guid,
-        "game_id": "ls20-cb3b57cc",
+        "game_id": game_id,
     }
     action_resp = caller(action_url, json=action_payload, headers=headers, timeout=10)
     action_resp.raise_for_status()
@@ -295,6 +296,7 @@ def run_scorecard_session_preflight(
     *,
     operation_mode_name: str,
     arc_base_url: str,
+    game_id: str,
     log,
 ) -> None:
     if operation_mode_name != "ONLINE":
@@ -327,6 +329,7 @@ def run_scorecard_session_preflight(
             session=session,
             arc_base_url=arc_base_url,
             card_id=pos_id,
+            game_id=game_id,
             use_session=True,
             headers=headers,
         )
@@ -363,6 +366,7 @@ def run_scorecard_session_preflight(
             session=session,
             arc_base_url=arc_base_url,
             card_id=neg_id,
+            game_id=game_id,
             use_session=False,
             headers=headers,
         )

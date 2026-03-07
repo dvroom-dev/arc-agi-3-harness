@@ -25,6 +25,7 @@ def test_scorecard_session_preflight_exercises_failure_path(monkeypatch) -> None
 
     cards: dict[str, int] = {}
     guid_to_card: dict[str, str] = {}
+    observed_game_ids: list[str] = []
     next_id = {"n": 0}
     next_guid = {"n": 0}
 
@@ -47,11 +48,13 @@ def test_scorecard_session_preflight_exercises_failure_path(monkeypatch) -> None
                 return _FakeResponse({"card_id": cid})
             if url.endswith("/api/cmd/RESET"):
                 cid = str((json or {}).get("card_id", ""))
+                observed_game_ids.append(str((json or {}).get("game_id", "")))
                 guid = _new_guid()
                 guid_to_card[guid] = cid
                 return _FakeResponse({"guid": guid})
             if url.endswith("/api/cmd/ACTION1"):
                 guid = str((json or {}).get("guid", ""))
+                observed_game_ids.append(str((json or {}).get("game_id", "")))
                 cid = guid_to_card.get(guid, "")
                 cards[cid] = int(cards.get(cid, 0)) + 1
                 return _FakeResponse({"ok": True})
@@ -68,8 +71,10 @@ def test_scorecard_session_preflight_exercises_failure_path(monkeypatch) -> None
     # Stateless calls used by failure-path probe: never attach actions.
     def stateless_post(url, json=None, headers=None, timeout=0):
         if url.endswith("/api/cmd/RESET"):
+            observed_game_ids.append(str((json or {}).get("game_id", "")))
             return _FakeResponse({"guid": _new_guid()})
         if url.endswith("/api/cmd/ACTION1"):
+            observed_game_ids.append(str((json or {}).get("game_id", "")))
             return _FakeResponse({"ok": True})
         raise AssertionError(f"unexpected requests.post URL: {url}")
 
@@ -82,7 +87,9 @@ def test_scorecard_session_preflight_exercises_failure_path(monkeypatch) -> None
     helpers.run_scorecard_session_preflight(
         operation_mode_name="ONLINE",
         arc_base_url="http://example.test",
+        game_id="ft09-12345678",
         log=logs.append,
     )
     assert logs
     assert "failure-path-reproduced=True" in logs[-1]
+    assert observed_game_ids == ["ft09-12345678"] * 4
