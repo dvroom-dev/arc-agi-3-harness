@@ -9,31 +9,38 @@ Scope:
 
 ## Current status
 
-- Commit is currently blocked by repo policy because both required pre-commit checks fail:
-  - `make lint`
-  - `make test`
-- `make lint` currently fails because the repo enforces a 500-line limit in `scripts/lint.py:9-54`, but several active core modules exceed it:
-  - `arc_model_runtime/session.py`: 601 lines
-  - `tools/arc_repl_session_artifacts.py`: 558 lines
-  - `harness_runner.py`: 536 lines
-  - `tools/arc_repl_session_core.py`: 535 lines
-  - `harness_runtime.py`: 503 lines
-  - `tools/arc_repl.py`: 503 lines
-- `make test` currently fails with an active integration regression rooted in run-config setup, described below.
+- `make lint` passes.
+- `make test` passes (`137 passed`).
+- Completed since this review was written:
+  - lint/test repair and file-splitting refactor
+  - idle-keepalive unscored ONLINE/API coverage
+  - scorecard keepalive hack deletion
+  - legacy `arc_action` / `arc_get_state` deletion
+  - scorecard preflight game-id fix
+  - publication-model containment check tightening
+  - README/tool-surface sync
+- Still open or only partially addressed:
+  - LS20-heavy test bias
+  - remaining likely-dead prompt residue (`prompts/new_game_auto_explore.py`)
 
 ## Executive summary
 
 - The project has a solid benchmark-oriented shape in the areas that matter most: run-local tool staging, separate agent/supervisor workspaces, a conversation-scoped REPL, and useful runtime artifacts under `runs/<session>/...`.
-- The biggest current problems are not architectural ambition but consistency gaps:
-  - one canonical runtime path has not fully replaced legacy tool paths,
-  - timeout handling is split and partially dead,
-  - some benchmark-integrity protections are still blacklist-based and LS20-specific,
-  - the repo’s own lint/test rules are currently broken on the active path.
-- The main strategic theme is to finish the migration to one benchmark-safe, game-agnostic, observable runtime instead of carrying parallel tool families, backup configs, and old mitigation paths.
+- The biggest consistency gaps identified in the initial pass have now largely been closed:
+  - one canonical runtime path has replaced the legacy tool family,
+  - timeout handling now centers on the intercept-marker flow,
+  - the agent filesystem check is no longer LS20-name based,
+  - the repo’s own lint/test gates are green again.
+- The remaining strategic work is narrower:
+  - reduce LS20 bias in tests and harness assumptions,
+  - keep deleting dead residue,
+  - continue improving observability and prompt/runtime speed tradeoffs without reintroducing parallel paths.
 
 ## Prioritized findings
 
 ### 1. Active integration regression: `arc_level.py` became required, but integration test fixtures were not updated
+
+Status: Done
 
 Severity: High
 
@@ -70,6 +77,8 @@ Verification:
 - `make test` should stop failing on missing `tools/arc_level.py`.
 
 ### 2. Idle keepalive protection is scoped to scorecards, not to online game sessions
+
+Status: Done
 
 Severity: High
 
@@ -108,6 +117,8 @@ Verification:
 
 ### 3. Scorecard preflight is LS20-hardcoded inside shared harness logic
 
+Status: Done
+
 Severity: High
 
 Symptom:
@@ -137,6 +148,8 @@ Verification:
 - Confirm no LS20-specific identifiers remain in shared harness logic.
 
 ### 4. Containment checks are still blacklist-based and partially LS20-specific
+
+Status: Done
 
 Severity: High
 
@@ -168,6 +181,8 @@ Verification:
 - Add tests that intentionally place non-LS20 environment/game source files in the candidate tree and assert the setup fails.
 
 ### 5. The repo’s own lint policy is violated by the active core runtime
+
+Status: Done
 
 Severity: Medium
 
@@ -204,6 +219,8 @@ Verification:
 - `make lint` should pass without raising the line limit or adding exemptions for active core files.
 
 ### 6. Legacy `arc_action` / `arc_get_state` tooling is still tracked, tested, and covered despite the active harness having moved on
+
+Status: Done
 
 Severity: Medium
 
@@ -251,6 +268,8 @@ Verification:
 
 ### 7. Timeout mitigation is duplicated and one of the paths appears dead
 
+Status: Done
+
 Severity: Medium
 
 Symptom:
@@ -286,6 +305,8 @@ Verification:
 
 ### 8. Documentation is behind the active runtime
 
+Status: Done
+
 Severity: Medium
 
 Symptom:
@@ -314,6 +335,8 @@ Verification:
 - README examples should be executable against the current harness without discovering extra commands by code reading.
 
 ### 9. There are likely dead or orphaned tracked assets in the active repo
+
+Status: Partially done
 
 Severity: Medium
 
@@ -344,6 +367,8 @@ Verification:
 - After cleanup, rerun search and tests to confirm there are no stale references.
 
 ### 10. The test suite is still heavily LS20-biased
+
+Status: Open
 
 Severity: Medium
 

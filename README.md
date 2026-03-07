@@ -16,8 +16,10 @@ Sibling project for ARC-AGI-3 harness experiments using package imports (`arc-ag
   - `ARC_STATE_DIR` to `runs/<session>/supervisor/arc`
   - `ARC_CONVERSATION_ID` per `super` conversation frontmatter (so REPL state resets on conversation fork)
 - CLI commands exposed via config filesystem `PATH`:
-  - `arc_repl` (status/reset_level/exec/shutdown)
-  - `arc_repl exec` accepts script content on stdin only (heredoc/pipe).
+  - `arc_repl` (`status`, `reset_level`, `exec`, `exec_file`, `shutdown`)
+  - `arc_level` (`current_level`, `levels_completed`, `state`, or `--json`)
+  - `arc_repl exec` accepts script content on stdin (heredoc/pipe).
+  - `arc_repl exec_file` reads a script from disk and routes it through the same `exec` action.
 - `arc_repl exec` interface:
   - Persistent globals per conversation: `env`, `current`, `GameAction`, `GA`, `diff()`, `get_state()`, and helpers from `play_lib.py`.
   - Persistent action-history globals:
@@ -49,6 +51,9 @@ print([{"idx": r["action_index"], "action": r["action_name"]} for r in recent])
 r1 = get_action_record(1)
 print(bool(r1), sorted(r1.keys()) if r1 else [])
 PY
+
+arc_repl exec_file --game-id ls20 ./game_ls20/solve_level_1.py
+arc_level --json
 ```
 - Harness now stages run-local command wrappers in `runs/<session>/config/bin` and run-local tool copies in `runs/<session>/config/tools`, so agent shell commands do not reference project-root executables.
 - Agent workspace is per-run `runs/<session>/agent`.
