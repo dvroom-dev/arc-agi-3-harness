@@ -40,25 +40,47 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _emit(payload: dict, *, action_name: str) -> int:
+def _emit(
+    payload: dict,
+    *,
+    session: ModelSession,
+    action_name: str,
+    code: int | None = None,
+    persist_status: bool = True,
+) -> int:
+    exit_code = 0 if code is None and payload.get("ok") else 1 if code is None else int(code)
+    if persist_status:
+        session.persist_model_status(payload, action_name=action_name, exit_code=exit_code)
     inject_idle_hint(payload, action_name=action_name)
     print(json.dumps(payload, indent=2))
-    return 0 if payload.get("ok") else 1
+    return exit_code
 
 
 def run_model_cli(hooks: ModelHooks, *, game_dir: Path, argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-    session = ModelSession(
-        game_id=getattr(args, "game_id", "game"),
-        game_dir=game_dir,
-        hooks=hooks,
-    )
+    try:
+        session = ModelSession(
+            game_id=getattr(args, "game_id", "game"),
+            game_dir=game_dir,
+            hooks=hooks,
+        )
+    except Exception as exc:
+        payload = {
+            "ok": False,
+            "action": str(getattr(args, "action", "unknown")),
+            "error": {
+                "type": "model_init_error",
+                "message": str(exc),
+            },
+        }
+        print(json.dumps(payload, indent=2))
+        return 1
     if args.action == "status":
-        return _emit(session.do_status(), action_name="status")
+        return _emit(session.do_status(), session=session, action_name="status")
     if args.action == "reset_level":
-        return _emit(session.do_reset_level(), action_name="reset_level")
+        return _emit(session.do_reset_level(), session=session, action_name="reset_level")
     if args.action == "set_level":
-        return _emit(session.do_set_level(int(args.level)), action_name="set_level")
+        return _emit(session.do_set_level(int(args.level)), session=session, action_name="set_level")
     if args.action == "compare_sequences":
         payload, code = session.do_compare_sequences(
             level=args.level,
@@ -66,20 +88,19 @@ def run_model_cli(hooks: ModelHooks, *, game_dir: Path, argv: list[str] | None =
             include_reset_ended=bool(args.include_reset_ended),
             include_level_regressions=bool(args.include_level_regressions),
         )
-        inject_idle_hint(payload, action_name="compare_sequences")
-        print(json.dumps(payload, indent=2))
-        return code
+        return _emit(payload, session=session, action_name="compare_sequences", code=code)
     if args.action == "exec":
         payload, code = session.do_exec(sys.stdin.read())
-        inject_idle_hint(payload, action_name="exec")
-        print(json.dumps(payload, indent=2))
-        return code
+        return _emit(payload, session=session, action_name="exec", code=code)
     if args.action == "exec_file":
         payload, code = session.do_exec_file(Path(args.script_path))
-        inject_idle_hint(payload, action_name="exec_file")
-        print(json.dumps(payload, indent=2))
-        return code
+        return _emit(payload, session=session, action_name="exec_file", code=code)
     if args.action == "shutdown":
-        return _emit(session.do_shutdown(), action_name="shutdown")
-    print(json.dumps({"ok": False, "error": {"type": "unknown_action", "message": str(args.action)}}))
-    return 1
+        return _emit(
+            session.do_shutdown(),
+            session=session,
+            action_name="shutdown",
+            persist_status=False,
+        )
+    payload = {"ok": False, "error": {"type": "unknown_action", "message": str(args.action)}}
+    return _emit(payload, session=session, action_name="unknown_action", code=1)

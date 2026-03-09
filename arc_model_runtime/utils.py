@@ -21,6 +21,31 @@ def session_state_path(game_dir: Path, game_id: str) -> Path:
     return game_dir / f".model_session_{sanitize_game_id(game_id)}.json"
 
 
+def model_status_path(game_dir: Path) -> Path:
+    return game_dir / "model_status.json"
+
+
+def arc_state_json_path() -> Path | None:
+    state_dir = str(os.getenv("ARC_STATE_DIR", "") or "").strip()
+    if not state_dir:
+        return None
+    return Path(state_dir).expanduser() / "state.json"
+
+
+def load_frontier_level_from_arc_state() -> int | None:
+    state_path = arc_state_json_path()
+    if state_path is None or not state_path.exists():
+        return None
+    try:
+        payload = json.loads(state_path.read_text())
+    except Exception:
+        return None
+    try:
+        return int(payload.get("current_level"))
+    except Exception:
+        return None
+
+
 def grid_from_hex_rows(rows: list[str]) -> np.ndarray:
     if not rows:
         return np.zeros((0, 0), dtype=np.int8)

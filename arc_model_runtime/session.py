@@ -5,6 +5,7 @@ import json
 import sys
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,8 @@ from .utils import (
     from_jsonable,
     grid_from_hex_rows,
     grid_hex_rows,
+    load_frontier_level_from_arc_state,
+    model_status_path,
     read_hex_grid,
     resolve_level_dir,
     session_state_path,
@@ -26,6 +29,7 @@ from .utils import (
 from .sequence_compare import compare_sequences as compare_sequences_impl
 
 MODEL_SESSION_SCHEMA_VERSION = 1
+MODEL_STATUS_SCHEMA_VERSION = 1
 
 
 class ModelHooks:
@@ -65,11 +69,11 @@ class ModelEnv:
         self.available_actions = [int(a.value) for a in GameAction]
         self.action_space = [a for a in GameAction]
         self._level_initial_states: dict[int, np.ndarray] = {}
-        self.available_model_levels: list[int] = [1]
+        self.available_model_levels: list[int] = []
         self.current_level = 1
         self.win_levels = 7
         self.turn_budget = 100
-        self.grid = np.zeros((8, 8), dtype=np.int8)
+        self.grid = np.zeros((0, 0), dtype=np.int8)
         self.refresh_level_initial_states()
         self._init_level(1)
 
@@ -77,15 +81,18 @@ class ModelEnv:
         discovered = discover_level_initial_states(self.game_dir)
         self._level_initial_states = {k: np.array(v, dtype=np.int8, copy=True) for k, v in discovered.items()}
         levels = sorted(self._level_initial_states.keys())
-        if not levels:
-            levels = [1]
         self.available_model_levels = levels
-        self.win_levels = max(7, int(levels[-1]))
+        if levels:
+            self.win_levels = max(7, int(levels[-1]))
 
     def initial_grid_for_level(self, level: int) -> np.ndarray:
         grid = self._level_initial_states.get(int(level))
         if grid is None:
-            return np.zeros((8, 8), dtype=np.int8)
+            discovered = [int(v) for v in self.available_model_levels]
+            raise RuntimeError(
+                f"missing initial_state.hex for level {int(level)}; "
+                f"discovered initial states {discovered}"
+            )
         return np.array(grid, dtype=np.int8, copy=True)
 
     def _init_level(self, level: int) -> None:
@@ -117,6 +124,7 @@ class ModelSession:
         self.hooks = hooks
         self.env = ModelEnv(game_id, self.game_dir, self.hooks)
         self.state_path = session_state_path(self.game_dir, self.env.game_id)
+        self.model_status_path = model_status_path(self.game_dir)
         self.globals = {
             "np": np,
             "json": json,
@@ -131,6 +139,57 @@ class ModelSession:
         self._load_helper_file(self.game_dir / "model_lib.py", required=False)
         if not self._restore_from_disk():
             self._persist_to_disk("status")
+
+    def _model_status_summary(self, payload: dict[str, Any], *, action_name: str, exit_code: int) -> dict[str, Any]:
+        state = self.get_status_state()
+        summary: dict[str, Any] = {
+            "schema_version": MODEL_STATUS_SCHEMA_VERSION,
+            "runtime": "model",
+            "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+            "game_id": str(self.env.game_id),
+            "last_action_name": str(action_name),
+            "ok": bool(payload.get("ok", False)),
+            "exit_code": int(exit_code),
+            "state": state,
+        }
+        if action_name == "compare_sequences":
+            summary["compare"] = {
+                "level": int(payload.get("level", state["current_level"])),
+                "requested_sequences": int(payload.get("requested_sequences", 0) or 0),
+                "eligible_sequences": int(payload.get("eligible_sequences", 0) or 0),
+                "compared_sequences": int(payload.get("compared_sequences", 0) or 0),
+                "diverged_sequences": int(payload.get("diverged_sequences", 0) or 0),
+                "all_match": bool(payload.get("all_match", False)),
+                "include_reset_ended": bool(payload.get("include_reset_ended", False)),
+                "include_level_regressions": bool(payload.get("include_level_regressions", False)),
+            }
+            reports = payload.get("reports", [])
+            if isinstance(reports, list):
+                for report in reports:
+                    if not isinstance(report, dict):
+                        continue
+                    if bool(report.get("matched", False)):
+                        continue
+                    summary["compare"]["first_divergence"] = {
+                        "sequence_id": str(report.get("sequence_id", "")),
+                        "divergence_step": report.get("divergence_step"),
+                        "divergence_reason": str(report.get("divergence_reason", "")),
+                    }
+                    break
+        elif not bool(payload.get("ok", False)):
+            error = payload.get("error")
+            if isinstance(error, dict):
+                summary["error"] = {
+                    "type": str(error.get("type", "")),
+                    "message": str(error.get("message", "")),
+                }
+        return summary
+
+    def persist_model_status(self, payload: dict[str, Any], *, action_name: str, exit_code: int) -> None:
+        summary = self._model_status_summary(payload, action_name=action_name, exit_code=exit_code)
+        tmp = self.model_status_path.with_suffix(self.model_status_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(summary, indent=2) + "\n")
+        tmp.replace(self.model_status_path)
 
     def _load_helper_file(self, path: Path, *, required: bool) -> None:
         if not path.exists():
@@ -178,6 +237,28 @@ class ModelSession:
         self.env.refresh_level_initial_states()
         return True
 
+    def _sync_to_frontier_level(self, *, action_name: str) -> dict | None:
+        self.env.refresh_level_initial_states()
+        frontier_level = load_frontier_level_from_arc_state()
+        if frontier_level is None:
+            return None
+        lvl = int(frontier_level)
+        valid_levels = set(int(v) for v in self.env.available_model_levels)
+        if lvl not in valid_levels:
+            return self._error(
+                action_name,
+                "missing_initial_state",
+                f"frontier level {lvl} is active in ARC state but no initial_state.hex "
+                f"was discovered; discovered initial states {sorted(valid_levels)}",
+            )
+        desired_completed = max(0, lvl - 1)
+        if self.env.current_level == lvl and self.env.levels_completed == desired_completed:
+            return None
+        self.env.levels_completed = desired_completed
+        self.env._init_level(lvl)
+        self._persist_to_disk("sync_frontier")
+        return None
+
     def get_state(self) -> dict:
         self.env.refresh_level_initial_states()
         return {
@@ -190,6 +271,23 @@ class ModelSession:
             "available_model_levels": [int(v) for v in self.env.available_model_levels],
             "full_reset": bool(getattr(self.env, "full_reset", False)),
             "grid_hex_rows": grid_hex_rows(self.env.grid),
+        }
+
+    def get_status_state(self) -> dict:
+        """Public model status surface for CLI output/artifacts.
+
+        Keep this compact and artifact-focused. Do not leak internal runtime
+        scaffolding like the model env grid snapshot or synthetic action list.
+        """
+        self.env.refresh_level_initial_states()
+        return {
+            "state": str(self.env.state),
+            "current_level": int(self.env.current_level),
+            "levels_completed": int(self.env.levels_completed),
+            "win_levels": int(self.env.win_levels),
+            "guid": getattr(self.env, "guid", None),
+            "available_model_levels": [int(v) for v in self.env.available_model_levels],
+            "full_reset": bool(getattr(self.env, "full_reset", False)),
         }
 
     def diff(self, before_state, after_state, output: str = "json"):
@@ -214,12 +312,18 @@ class ModelSession:
         return payload
 
     def do_status(self) -> dict:
-        return {"ok": True, "action": "status", **self.get_state()}
+        synced_error = self._sync_to_frontier_level(action_name="status")
+        if synced_error is not None:
+            return synced_error
+        return {"ok": True, "action": "status", **self.get_status_state()}
 
     def do_reset_level(self) -> dict:
+        synced_error = self._sync_to_frontier_level(action_name="reset_level")
+        if synced_error is not None:
+            return synced_error
         self.env.reset()
         self._persist_to_disk("reset_level")
-        return {"ok": True, "action": "reset_level", **self.get_state()}
+        return {"ok": True, "action": "reset_level", **self.get_status_state()}
 
     def do_set_level(self, level: int) -> dict:
         self.env.refresh_level_initial_states()
@@ -234,11 +338,14 @@ class ModelSession:
         self.env.levels_completed = lvl - 1
         self.env._init_level(lvl)
         self._persist_to_disk("set_level")
-        return {"ok": True, "action": "set_level", **self.get_state()}
+        return {"ok": True, "action": "set_level", **self.get_status_state()}
 
     def do_exec(self, script: str) -> tuple[dict, int]:
         if not str(script or "").strip():
             return self._error("exec", "invalid_exec_args", "exec requires script content"), 1
+        synced_error = self._sync_to_frontier_level(action_name="exec")
+        if synced_error is not None:
+            return synced_error, 1
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
         try:
@@ -249,7 +356,7 @@ class ModelSession:
                 print(stdout_capture.getvalue(), end="")
             if stderr_capture.getvalue():
                 print(stderr_capture.getvalue(), end="", file=sys.stderr)
-            return {"ok": True, "action": "exec", **self.get_state()}, 0
+            return {"ok": True, "action": "exec", **self.get_status_state()}, 0
         except Exception as exc:
             return self._error("exec", "exec_error", str(exc), traceback.format_exc()), 1
 
@@ -271,6 +378,10 @@ class ModelSession:
         include_reset_ended: bool = False,
         include_level_regressions: bool = False,
     ) -> tuple[dict, int]:
+        if level is None:
+            synced_error = self._sync_to_frontier_level(action_name="compare_sequences")
+            if synced_error is not None:
+                return synced_error, 1
         return compare_sequences_impl(
             self,
             level=level,
@@ -282,4 +393,6 @@ class ModelSession:
     def do_shutdown(self) -> dict:
         if self.state_path.exists():
             self.state_path.unlink()
+        if self.model_status_path.exists():
+            self.model_status_path.unlink()
         return {"ok": True, "action": "shutdown"}
