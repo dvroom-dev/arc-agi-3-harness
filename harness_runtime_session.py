@@ -352,6 +352,8 @@ def load_conversation_head_metadata_impl(runtime) -> dict[str, str | int | None]
     return {
         "conversation_id": conversation_id,
         "head_id": head_id,
+        "parent_id": str(summary.get("parentId") or fork_payload.get("parentId") or "").strip() or None,
+        "action_summary": str(summary.get("actionSummary") or fork_payload.get("actionSummary") or "").strip() or None,
         "doc_hash": str(summary.get("docHash") or fork_payload.get("docHash") or "").strip() or None,
         "provider_thread_id": str(
             summary.get("providerThreadId") or fork_payload.get("providerThreadId") or ""
