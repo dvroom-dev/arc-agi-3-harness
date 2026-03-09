@@ -2,7 +2,7 @@ Game <id> Theory
 
 # Elements
 - Name:
-  - Detector: `find_all_<name>` in `model_lib.py`
+  - Detector: `find_all_<name>` in `components.py`
   - Covers: which visible pixels/regions this component owns
   - Copies: single|multiple|unknown
   - Mechanics:
@@ -13,7 +13,7 @@ Game <id> Theory
 
 Coverage guardrail:
 - Every visible pixel in every seen state for the active level should lie inside at least one component bounding box.
-- Keep `model_lib.py` detectors broad enough that `python3 inspect_components.py --coverage --level <n>` passes before leaving theory mode.
+- Keep `components.py` detectors broad enough that `python3 inspect_components.py --coverage --level <n>` passes before leaving theory mode.
 - Use neutral feature names until a semantic role is proven by evidence.
 - Do not assume a feature is unique; track multiple copies explicitly.
 

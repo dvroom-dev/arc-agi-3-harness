@@ -70,6 +70,7 @@ def _load_agent_workspace_template(name: str) -> str:
 THEORY_TEMPLATE = _load_agent_workspace_template("theory.md")
 PLAY_TEMPLATE = _load_agent_workspace_template("play.py")
 MODEL_TEMPLATE = _load_agent_workspace_template("model.py")
+COMPONENTS_TEMPLATE = _load_agent_workspace_template("components.py")
 MODEL_LIB_TEMPLATE = _load_agent_workspace_template("model_lib.py")
 PLAY_LIB_TEMPLATE = _load_agent_workspace_template("play_lib.py")
 ARTIFACT_HELPERS_TEMPLATE = _load_agent_workspace_template("artifact_helpers.py")
@@ -397,6 +398,7 @@ def setup_run_dir(
         model_lib_template=MODEL_LIB_TEMPLATE,
         theory_template=THEORY_TEMPLATE,
         model_template=MODEL_TEMPLATE,
+        components_template=COMPONENTS_TEMPLATE,
         play_template=PLAY_TEMPLATE,
         artifact_helpers_template=ARTIFACT_HELPERS_TEMPLATE,
         inspect_sequence_template=INSPECT_SEQUENCE_TEMPLATE,

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize component coverage and compare mismatches using model_lib detectors."""
+"""Summarize component coverage and compare mismatches using components.py detectors."""
 
 from __future__ import annotations
 
@@ -42,10 +42,12 @@ def _mismatch_report_paths(game_dir: Path) -> tuple[Path, Path]:
     return game_dir / "component_mismatch.json", game_dir / "component_mismatch.md"
 
 
-def _load_model_lib(game_dir: Path):
-    spec = importlib.util.spec_from_file_location("agent_model_lib", game_dir / "model_lib.py")
+def _load_components_module(game_dir: Path):
+    components_path = game_dir / "components.py"
+    target_path = components_path if components_path.exists() else game_dir / "model_lib.py"
+    spec = importlib.util.spec_from_file_location("agent_components", target_path)
     if spec is None or spec.loader is None:
-        raise RuntimeError("could not load model_lib.py")
+        raise RuntimeError(f"could not load component definitions from {target_path.name}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
@@ -106,17 +108,17 @@ def _normalize_component(candidate: Any, *, fallback_kind: str, index: int) -> d
     }
 
 
-def _collect_components(model_lib: Any, grid: np.ndarray) -> list[dict[str, Any]]:
-    if hasattr(model_lib, "iter_components") and callable(model_lib.iter_components):
-        raw_components = list(model_lib.iter_components(grid))
+def _collect_components(components_module: Any, grid: np.ndarray) -> list[dict[str, Any]]:
+    if hasattr(components_module, "iter_components") and callable(components_module.iter_components):
+        raw_components = list(components_module.iter_components(grid))
         return [
             _normalize_component(component, fallback_kind=f"component_{index}", index=index)
             for index, component in enumerate(raw_components)
         ]
 
-    registry = getattr(model_lib, "COMPONENT_REGISTRY", None)
+    registry = getattr(components_module, "COMPONENT_REGISTRY", None)
     if not isinstance(registry, dict):
-        raise RuntimeError("model_lib.py must define COMPONENT_REGISTRY or iter_components()")
+        raise RuntimeError("components.py must define COMPONENT_REGISTRY or iter_components()")
     if not registry:
         return []
 
@@ -302,7 +304,7 @@ def _component_mismatch_markdown(payload: dict[str, Any]) -> str:
 
 
 def run_component_coverage(game_dir: Path, *, level: int | None) -> tuple[dict[str, Any], int]:
-    model_lib = _load_model_lib(game_dir)
+    components_module = _load_components_module(game_dir)
     level_value = level or artifact_helpers.current_level_number(game_dir)
     if level_value is None:
         raise RuntimeError("could not determine current level")
@@ -317,7 +319,7 @@ def run_component_coverage(game_dir: Path, *, level: int | None) -> tuple[dict[s
 
     for state in states:
         grid = artifact_helpers.load_hex_grid(game_dir / state["path"])
-        components = _collect_components(model_lib, grid)
+        components = _collect_components(components_module, grid)
         covered = _coverage_mask(grid.shape, components)
         uncovered = ~covered
         if uncovered.any():
@@ -333,6 +335,17 @@ def run_component_coverage(game_dir: Path, *, level: int | None) -> tuple[dict[s
 
     json_path, md_path = _component_report_paths(game_dir)
     _write_json_and_markdown(json_path, md_path, payload, _component_coverage_markdown(payload))
+    if payload["status"] == "pass":
+        pin_payload = artifact_helpers.load_analysis_level_pin(game_dir)
+        if isinstance(pin_payload, dict) and int(pin_payload.get("level", -1)) == int(level_value):
+            artifact_helpers.write_analysis_level_pin(
+                game_dir,
+                {
+                    **pin_payload,
+                    "phase": "theory_passed",
+                    "coverage_checked_level": int(level_value),
+                },
+            )
     return payload, 0 if payload["status"] == "pass" else 1
 
 
@@ -347,12 +360,12 @@ def run_component_mismatch(game_dir: Path) -> tuple[dict[str, Any], int]:
         _write_json_and_markdown(json_path, md_path, payload, _component_mismatch_markdown(payload))
         return payload, 0
 
-    model_lib = _load_model_lib(game_dir)
+    components_module = _load_components_module(game_dir)
     step = mismatch["step"]
     before_grid = artifact_helpers.load_hex_grid(game_dir / step["before_state_hex"])
     after_grid = artifact_helpers.load_hex_grid(game_dir / step["after_state_hex"])
-    before_components = _collect_components(model_lib, before_grid)
-    after_components = _collect_components(model_lib, after_grid)
+    before_components = _collect_components(components_module, before_grid)
+    after_components = _collect_components(components_module, after_grid)
     paired = _pair_components(before_components, after_components)
 
     payload = {

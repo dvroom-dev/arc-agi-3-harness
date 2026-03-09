@@ -129,6 +129,7 @@ def setup_run_dir_impl(
     model_lib_template: str,
     theory_template: str,
     model_template: str,
+    components_template: str,
     play_template: str,
     artifact_helpers_template: str,
     inspect_sequence_template: str,
@@ -169,6 +170,10 @@ def setup_run_dir_impl(
     model_file = game_dir / "model.py"
     if not model_file.exists():
         model_file.write_text(model_template)
+
+    components_file = game_dir / "components.py"
+    if not components_file.exists():
+        components_file.write_text(components_template)
 
     play_file = game_dir / "play.py"
     if not play_file.exists():

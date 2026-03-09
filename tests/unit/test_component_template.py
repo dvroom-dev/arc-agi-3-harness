@@ -19,6 +19,7 @@ def _copy_model_templates(game_dir: Path) -> None:
     game_dir.mkdir(parents=True, exist_ok=True)
     for name in (
         "model.py",
+        "components.py",
         "model_lib.py",
         "play_lib.py",
         "play.py",
@@ -58,6 +59,44 @@ def test_component_coverage_helper_reports_uncovered_pixels(tmp_path: Path) -> N
     assert payload["first_failure"]["uncovered_pixel_count"] == 8
     assert (game_dir / "component_coverage.json").exists()
     assert (game_dir / "component_coverage.md").exists()
+
+
+def test_component_coverage_advances_analysis_level_pin_phase(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["0000", "0000", "0000", "0000"])
+    (game_dir / "components.py").write_text(
+        "from dataclasses import dataclass, field\n"
+        "from typing import Callable\n"
+        "import numpy as np\n"
+        "@dataclass(frozen=True)\n"
+        "class ComponentBox:\n"
+        "    kind: str\n"
+        "    bbox: tuple[int, int, int, int]\n"
+        "    attrs: dict[str, object] = field(default_factory=dict)\n"
+        "ComponentDetector = Callable[[np.ndarray], list[ComponentBox]]\n"
+        "COMPONENT_REGISTRY = {}\n"
+        "def make_component(kind, *, top, left, bottom, right, **attrs):\n"
+        "    return ComponentBox(kind=kind, bbox=(top, left, bottom, right), attrs=dict(attrs))\n"
+        "def iter_components(grid):\n"
+        "    out = []\n"
+        "    for kind, detector in COMPONENT_REGISTRY.items():\n"
+        "        out.extend(detector(grid))\n"
+        "    return out\n"
+        "def find_all_bg(grid):\n"
+        "    rows, cols = grid.shape\n"
+        "    return [make_component('bg', top=0, left=0, bottom=rows - 1, right=cols - 1)]\n"
+        "COMPONENT_REGISTRY['bg'] = find_all_bg\n"
+    )
+    (game_dir / ".analysis_level_pin.json").write_text(
+        json.dumps({"level": 1, "phase": "pending_theory"}, indent=2)
+    )
+
+    proc = _run_helper(game_dir, ["--coverage", "--level", "1"])
+    assert proc.returncode == 0, proc.stderr
+    pin = json.loads((game_dir / ".analysis_level_pin.json").read_text())
+    assert pin["phase"] == "theory_passed"
+    assert pin["coverage_checked_level"] == 1
 
 
 def test_component_mismatch_helper_reads_wrapped_current_compare_payload(tmp_path: Path) -> None:

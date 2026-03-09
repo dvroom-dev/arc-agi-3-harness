@@ -160,6 +160,7 @@ def test_setup_run_dir_seeds_expected_files(tmp_path: Path) -> None:
     assert (agent_dir / "game_ls20" / "model_lib.py").exists()
     assert (agent_dir / "game_ls20" / "theory.md").exists()
     assert (agent_dir / "game_ls20" / "model.py").exists()
+    assert (agent_dir / "game_ls20" / "components.py").exists()
     assert (agent_dir / "game_ls20" / "play.py").exists()
     assert (agent_dir / "game_ls20" / "artifact_helpers.py").exists()
     assert (agent_dir / "game_ls20" / "inspect_sequence.py").exists()

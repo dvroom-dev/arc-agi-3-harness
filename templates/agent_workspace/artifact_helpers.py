@@ -14,6 +14,32 @@ from typing import Any
 import numpy as np
 
 
+def analysis_level_pin_path(game_dir: str | Path) -> Path:
+    return coerce_path(game_dir) / ".analysis_level_pin.json"
+
+
+def load_analysis_level_pin(game_dir: str | Path) -> dict[str, Any] | None:
+    path = analysis_level_pin_path(game_dir)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def write_analysis_level_pin(game_dir: str | Path, payload: dict[str, Any]) -> None:
+    path = analysis_level_pin_path(game_dir)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n")
+    tmp.replace(path)
+
+
+def clear_analysis_level_pin(game_dir: str | Path) -> None:
+    analysis_level_pin_path(game_dir).unlink(missing_ok=True)
+
+
 def coerce_path(path_like: str | Path) -> Path:
     return path_like if isinstance(path_like, Path) else Path(path_like)
 

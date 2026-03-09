@@ -1,18 +1,18 @@
-"""Agent-owned model helper stubs.
+"""Agent-owned model mechanics helper stubs.
 
-Goal: keep model.py thin. Put feature detection and reusable mechanics here.
+Goal: keep model.py thin. Put reusable mechanics and completion logic here.
+Component definitions live in `components.py`.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from dataclasses import dataclass
 
 import numpy as np
 
 import artifact_helpers
-
+from components import COMPONENT_REGISTRY, ComponentBox, iter_components, make_component
 
 @dataclass(frozen=True)
 class LevelConfig:
@@ -20,25 +20,9 @@ class LevelConfig:
     turn_budget: int = 100
 
 
-@dataclass(frozen=True)
-class ComponentBox:
-    kind: str
-    bbox: tuple[int, int, int, int]
-    attrs: dict[str, object] = field(default_factory=dict)
-
-
-ComponentDetector = Callable[[np.ndarray], list[ComponentBox]]
-
-
 LEVEL_REGISTRY = {
     1: LevelConfig(level_num=1, turn_budget=100),
 }
-
-
-# Map every evidence-backed visible feature to a detector.
-# Theory mode should keep this registry broad enough that every pixel in every
-# seen state lies inside at least one component bounding box.
-COMPONENT_REGISTRY: dict[str, ComponentDetector] = {}
 
 
 def get_level_config(level: int) -> LevelConfig | None:
@@ -76,34 +60,6 @@ def get_feature_positions(grid):
     """
     _ = grid
     return {}
-
-
-def iter_components(grid: np.ndarray) -> list[ComponentBox]:
-    """Return all detected components for a grid.
-
-    Keep detectors evidence-backed and plural-first.
-    Each detector should return every visible copy of its feature.
-    """
-    components: list[ComponentBox] = []
-    for kind, detector in COMPONENT_REGISTRY.items():
-        for component in detector(grid):
-            if component.kind != kind:
-                component = ComponentBox(kind=kind, bbox=component.bbox, attrs=dict(component.attrs))
-            components.append(component)
-    return components
-
-
-def make_component(
-    kind: str,
-    *,
-    top: int,
-    left: int,
-    bottom: int,
-    right: int,
-    **attrs: object,
-) -> ComponentBox:
-    """Helper for detector implementations."""
-    return ComponentBox(kind=kind, bbox=(top, left, bottom, right), attrs=dict(attrs))
 
 
 def load_initial_grid(game_dir: str | Path, level: int) -> np.ndarray | None:
