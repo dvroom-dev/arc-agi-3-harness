@@ -1,0 +1,144 @@
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+
+def _write_hex(path: Path, rows: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(rows) + "\n")
+
+
+def _copy_model_templates(game_dir: Path) -> None:
+    src_dir = Path(__file__).resolve().parents[2] / "templates" / "agent_workspace"
+    runtime_src = Path(__file__).resolve().parents[2] / "arc_model_runtime"
+    game_dir.mkdir(parents=True, exist_ok=True)
+    for name in (
+        "model.py",
+        "model_lib.py",
+        "play_lib.py",
+        "play.py",
+        "artifact_helpers.py",
+        "inspect_sequence.py",
+        "inspect_components.py",
+    ):
+        shutil.copy2(src_dir / name, game_dir / name)
+    runtime_dst = game_dir.parent / "config" / "tools" / "arc_model_runtime"
+    runtime_dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(runtime_src, runtime_dst)
+
+
+def _run_helper(game_dir: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["ARC_CONFIG_DIR"] = str((game_dir.parent / "config").resolve())
+    return subprocess.run(
+        [sys.executable, str(game_dir / "inspect_components.py"), *args],
+        cwd=game_dir,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+
+
+def test_component_coverage_helper_reports_uncovered_pixels(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["0123", "4567"])
+
+    proc = _run_helper(game_dir, ["--coverage", "--level", "1"])
+    assert proc.returncode == 1
+    payload = json.loads(proc.stdout)
+    assert payload["status"] == "fail"
+    assert payload["first_failure"]["label"] == "level_1:initial_state"
+    assert payload["first_failure"]["uncovered_pixel_count"] == 8
+    assert (game_dir / "component_coverage.json").exists()
+    assert (game_dir / "component_coverage.md").exists()
+
+
+def test_component_mismatch_helper_reads_wrapped_current_compare_payload(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["4444", "4444", "4444", "4444"])
+
+    step_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
+    _write_hex(step_dir / "before_state.hex", ["4444", "4444", "4444", "4444"])
+    _write_hex(step_dir / "after_state.hex", ["4444", "4994", "4994", "4444"])
+    _write_hex(step_dir / "diff.hex", ["....", ".99.", ".99.", "...."])
+    (step_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
+
+    seq_payload = {
+        "schema_version": "arc_repl.level_sequence.v1",
+        "game_id": "ls20",
+        "level": 1,
+        "sequence_id": "seq_0001",
+        "action_count": 1,
+        "actions": [
+            {
+                "local_step": 1,
+                "action_index": 1,
+                "tool_turn": 1,
+                "step_in_call": 1,
+                "call_action": "exec",
+                "action_name": "ACTION1",
+                "action_data": {},
+                "state_before": "NOT_FINISHED",
+                "state_after": "NOT_FINISHED",
+                "level_before": 1,
+                "level_after": 1,
+                "levels_completed_before": 0,
+                "levels_completed_after": 0,
+                "recorded_at_utc": "",
+                "files": {
+                    "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
+                    "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
+                    "diff_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/diff.hex",
+                    "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
+                },
+            }
+        ],
+    }
+    seq_file = game_dir / "level_1" / "sequences" / "seq_0001.json"
+    seq_file.parent.mkdir(parents=True, exist_ok=True)
+    seq_file.write_text(json.dumps(seq_payload, indent=2))
+
+    (game_dir / "current_compare.json").write_text(
+        json.dumps(
+            {
+                "level": 1,
+                "all_match": False,
+                "compared_sequences": 1,
+                "diverged_sequences": 1,
+                "compare_payload": {
+                    "level": 1,
+                    "all_match": False,
+                    "compared_sequences": 1,
+                    "diverged_sequences": 1,
+                    "reports": [
+                        {
+                            "level": 1,
+                            "sequence_id": "seq_0001",
+                            "matched": False,
+                            "divergence_step": 1,
+                            "divergence_reason": "after_state_mismatch",
+                            "game_step_diff": {"changed_pixels": 4},
+                            "model_step_diff": {"changed_pixels": 0},
+                            "state_diff": {"changed_pixels": 4},
+                        }
+                    ],
+                },
+            },
+            indent=2,
+        )
+    )
+
+    proc = _run_helper(game_dir, ["--current-mismatch"])
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["status"] == "mismatch"
+    assert payload["compare"]["divergence_reason"] == "after_state_mismatch"
+    assert payload["sequence"]["sequence_id"] == "seq_0001"

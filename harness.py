@@ -40,6 +40,7 @@ from harness_runner import run_main
 from harness_setup_helpers import (
     assert_no_game_files_in_agent_dir_impl,
     parse_args_impl,
+    seed_arc_environment_cache_impl,
     setup_run_config_dir_impl,
     setup_run_dir_impl,
 )
@@ -50,6 +51,7 @@ from harness_setup_helpers import (
 PROJECT_ROOT = Path(__file__).resolve().parent
 CTXS = PROJECT_ROOT / ".ctxs"
 PROJECT_VENV_PYTHON = PROJECT_ROOT / ".venv" / "bin" / "python"
+ARC_ENV_CACHE_ROOT = Path("/tmp/arc-agi-env-cache")
 
 LEVEL_COMPLETIONS_TEMPLATE = textwrap.dedent("""\
     # Level Completions
@@ -70,6 +72,9 @@ PLAY_TEMPLATE = _load_agent_workspace_template("play.py")
 MODEL_TEMPLATE = _load_agent_workspace_template("model.py")
 MODEL_LIB_TEMPLATE = _load_agent_workspace_template("model_lib.py")
 PLAY_LIB_TEMPLATE = _load_agent_workspace_template("play_lib.py")
+ARTIFACT_HELPERS_TEMPLATE = _load_agent_workspace_template("artifact_helpers.py")
+INSPECT_SEQUENCE_TEMPLATE = _load_agent_workspace_template("inspect_sequence.py")
+INSPECT_COMPONENTS_TEMPLATE = _load_agent_workspace_template("inspect_components.py")
 
 
 def _drain_stderr(proc, prefix="[super] "):
@@ -91,17 +96,11 @@ def run_super(
     cmd = ["super"] + args
 
     if stream:
-        filtered_cmd: list[str] = []
-        i = 0
-        while i < len(cmd):
-            if cmd[i] == "--output" and i + 1 < len(cmd):
+        for i in range(len(cmd) - 1):
+            if cmd[i] == "--output":
                 if output_path is None:
                     output_path = Path(cmd[i + 1])
-                i += 2
-            else:
-                filtered_cmd.append(cmd[i])
-                i += 1
-        cmd = filtered_cmd
+                break
 
     print(f"[harness] running: {' '.join(cmd)}", file=sys.stderr, flush=True)
 
@@ -139,6 +138,69 @@ def _fix_streamed_transcript(text: str) -> str:
     return text
 
 
+def _remove_stream_sync_path(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink() or path.is_file():
+        path.unlink(missing_ok=True)
+        return
+    for child in path.iterdir():
+        _remove_stream_sync_path(child)
+    path.rmdir()
+
+
+def _read_stream_session_conversation_id(output_path: Path) -> str | None:
+    try:
+        text = output_path.read_text()
+    except Exception:
+        return None
+    lines = text.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:80]:
+        if line.strip() == "---":
+            break
+        match = re.match(r"^\s*conversation_id\s*:\s*(.+?)\s*$", line)
+        if match:
+            return match.group(1).strip().strip("\"'")
+    return None
+
+
+def _sync_live_stream_conversation_artifacts(output_path: Path, cwd: str) -> None:
+    conversation_id = _read_stream_session_conversation_id(output_path)
+    if not conversation_id:
+        return
+
+    run_dir = Path(cwd or PROJECT_ROOT)
+    source_dir = run_dir / ".ai-supervisor" / "conversations" / conversation_id
+    forks_src = source_dir / "forks"
+    if not forks_src.exists():
+        return
+
+    export_root = output_path.parent / "forks"
+    temp_root = output_path.parent / ".forks.tmp"
+    _remove_stream_sync_path(temp_root)
+    temp_root.mkdir(parents=True, exist_ok=True)
+
+    index_src = source_dir / "index.json"
+    if index_src.exists():
+        (temp_root / "index.json").symlink_to(index_src)
+    for fork_path in sorted(forks_src.glob("*.json")):
+        (temp_root / fork_path.name).symlink_to(fork_path)
+
+    _remove_stream_sync_path(export_root)
+    temp_root.rename(export_root)
+
+
+def _poll_live_stream_conversation_artifacts(
+    stop_event: threading.Event,
+    output_path: Path,
+    cwd: str,
+) -> None:
+    while not stop_event.wait(0.25):
+        _sync_live_stream_conversation_artifacts(output_path, cwd)
+
+
 def _run_super_streaming(
     cmd: list[str],
     output_path: Path | None,
@@ -158,6 +220,15 @@ def _run_super_streaming(
 
     stderr_thread = threading.Thread(target=_drain_stderr, args=(proc,), daemon=True)
     stderr_thread.start()
+    artifact_stop_event = threading.Event()
+    artifact_thread = None
+    if output_path is not None:
+        artifact_thread = threading.Thread(
+            target=_poll_live_stream_conversation_artifacts,
+            args=(artifact_stop_event, output_path, cwd or str(PROJECT_ROOT)),
+            daemon=True,
+        )
+        artifact_thread.start()
 
     chunks: list[str] = []
     assert proc.stdout is not None
@@ -170,7 +241,10 @@ def _run_super_streaming(
         sys.stderr.flush()
 
     proc.wait()
+    artifact_stop_event.set()
     stderr_thread.join(timeout=2)
+    if artifact_thread is not None:
+        artifact_thread.join(timeout=1)
 
     transcript = _fix_streamed_transcript("".join(chunks))
 
@@ -179,6 +253,7 @@ def _run_super_streaming(
 
     if output_path is not None:
         output_path.write_text(transcript)
+        _sync_live_stream_conversation_artifacts(output_path, cwd or str(PROJECT_ROOT))
 
     return extract_last_assistant_message(transcript)
 
@@ -323,6 +398,9 @@ def setup_run_dir(
         theory_template=THEORY_TEMPLATE,
         model_template=MODEL_TEMPLATE,
         play_template=PLAY_TEMPLATE,
+        artifact_helpers_template=ARTIFACT_HELPERS_TEMPLATE,
+        inspect_sequence_template=INSPECT_SEQUENCE_TEMPLATE,
+        inspect_components_template=INSPECT_COMPONENTS_TEMPLATE,
         game_id=game_id,
     )
 
@@ -332,6 +410,18 @@ def setup_run_config_dir(run_config_dir: Path) -> tuple[Path, Path]:
         run_config_dir,
         project_root=PROJECT_ROOT,
         project_venv_python=PROJECT_VENV_PYTHON,
+    )
+
+
+def seed_arc_environment_cache(
+    arc_env_dir: Path,
+    *,
+    requested_game_id: str,
+) -> Path:
+    return seed_arc_environment_cache_impl(
+        arc_env_dir,
+        requested_game_id=requested_game_id,
+        cache_root=ARC_ENV_CACHE_ROOT,
     )
 
 

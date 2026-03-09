@@ -10,6 +10,8 @@ def plan_level_actions(state: dict, *, level: int | None = None) -> list[int]:
     """Return a candidate action list for the current level.
 
     Replace this placeholder with reusable, evidence-backed logic.
+    Prefer generic helpers that can reason over multiple detected copies of a
+    feature rather than assuming a single distinguished instance.
     """
     _ = state, level
     return []

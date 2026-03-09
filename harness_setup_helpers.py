@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import shutil
 from pathlib import Path
@@ -129,6 +130,9 @@ def setup_run_dir_impl(
     theory_template: str,
     model_template: str,
     play_template: str,
+    artifact_helpers_template: str,
+    inspect_sequence_template: str,
+    inspect_components_template: str,
     game_id: str,
 ) -> None:
     """Set up an isolated run directory with split agent/supervisor dirs."""
@@ -170,6 +174,115 @@ def setup_run_dir_impl(
     if not play_file.exists():
         play_file.write_text(play_template)
 
+    artifact_helpers_file = game_dir / "artifact_helpers.py"
+    if not artifact_helpers_file.exists():
+        artifact_helpers_file.write_text(artifact_helpers_template)
+
+    inspect_sequence_file = game_dir / "inspect_sequence.py"
+    if not inspect_sequence_file.exists():
+        inspect_sequence_file.write_text(inspect_sequence_template)
+
+    inspect_components_file = game_dir / "inspect_components.py"
+    if not inspect_components_file.exists():
+        inspect_components_file.write_text(inspect_components_template)
+
+    current_compare_md = game_dir / "current_compare.md"
+    if not current_compare_md.exists():
+        current_compare_md.write_text(
+            "# Current Compare\n\n"
+            "No sequence comparison has been recorded yet for this run.\n"
+        )
+
+    current_compare_json = game_dir / "current_compare.json"
+    if not current_compare_json.exists():
+        current_compare_json.write_text(
+            json.dumps(
+                {
+                    "schema_version": "arc.compare.current.v1",
+                    "status": "no_sequences_yet",
+                    "all_match": None,
+                    "summary": "No sequence comparison has been recorded yet for this run.",
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+
+
+def _game_id_candidates(game_id: str) -> list[str]:
+    normalized = str(game_id or "").strip()
+    if not normalized:
+        return []
+    out = [normalized]
+    if re.fullmatch(r".+-[0-9a-f]{8}", normalized):
+        base = normalized.rsplit("-", 1)[0]
+        if base and base not in out:
+            out.append(base)
+    return out
+
+
+def _metadata_matches_game_id(metadata_game_id: str, requested_game_id: str) -> bool:
+    metadata_value = str(metadata_game_id or "").strip()
+    if not metadata_value:
+        return False
+    for candidate in _game_id_candidates(requested_game_id):
+        if metadata_value == candidate or metadata_value.startswith(f"{candidate}-"):
+            return True
+    return False
+
+
+def seed_arc_environment_cache_impl(
+    arc_env_dir: Path,
+    *,
+    requested_game_id: str,
+    cache_root: Path,
+) -> Path:
+    """Populate a per-run OFFLINE cache from an existing cached environment."""
+    arc_env_dir.mkdir(parents=True, exist_ok=True)
+    metadata_candidates: list[tuple[float, Path, dict]] = []
+    resolved_dest = arc_env_dir.resolve()
+
+    for metadata_path in cache_root.rglob("metadata.json"):
+        try:
+            if resolved_dest in metadata_path.resolve().parents:
+                continue
+            payload = json.loads(metadata_path.read_text())
+        except Exception:
+            continue
+        if not _metadata_matches_game_id(payload.get("game_id", ""), requested_game_id):
+            continue
+        try:
+            parent_mtime = metadata_path.parent.stat().st_mtime
+        except Exception:
+            parent_mtime = metadata_path.stat().st_mtime
+        metadata_candidates.append((parent_mtime, metadata_path, payload))
+
+    if not metadata_candidates:
+        raise RuntimeError(
+            "OFFLINE mode could not find a cached environment for "
+            f"{requested_game_id!r} under {cache_root}"
+        )
+
+    metadata_candidates.sort(key=lambda item: (item[0], str(item[1])))
+    _mtime, selected_metadata_path, _payload = metadata_candidates[-1]
+    selected_variant_dir = selected_metadata_path.parent
+    selected_game_dir = selected_variant_dir.parent
+    destination_game_dir = arc_env_dir / selected_game_dir.name
+
+    if destination_game_dir.exists():
+        shutil.rmtree(destination_game_dir)
+    shutil.copytree(selected_game_dir, destination_game_dir)
+
+    for copied_metadata_path in destination_game_dir.rglob("metadata.json"):
+        try:
+            copied_payload = json.loads(copied_metadata_path.read_text())
+        except Exception:
+            continue
+        copied_payload["local_dir"] = str(copied_metadata_path.parent)
+        copied_metadata_path.write_text(json.dumps(copied_payload, indent=2) + "\n")
+
+    return destination_game_dir
+
 
 def setup_run_config_dir_impl(
     run_config_dir: Path,
@@ -203,6 +316,7 @@ def setup_run_config_dir_impl(
         "arc_repl_daemon_client.py",
         "arc_repl_diagnostics.py",
         "arc_repl_intercepts.py",
+        "arc_repl_component_sync.py",
         "arc_repl_session_artifacts.py",
         "arc_repl_session_compat.py",
         "arc_repl_session_core.py",

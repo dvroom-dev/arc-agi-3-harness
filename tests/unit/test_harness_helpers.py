@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,6 +9,7 @@ import numpy as np
 import pytest
 
 import harness
+import harness_runtime_session
 
 
 def test_format_change_records_and_palette_collection() -> None:
@@ -159,7 +161,57 @@ def test_setup_run_dir_seeds_expected_files(tmp_path: Path) -> None:
     assert (agent_dir / "game_ls20" / "theory.md").exists()
     assert (agent_dir / "game_ls20" / "model.py").exists()
     assert (agent_dir / "game_ls20" / "play.py").exists()
+    assert (agent_dir / "game_ls20" / "artifact_helpers.py").exists()
+    assert (agent_dir / "game_ls20" / "inspect_sequence.py").exists()
+    assert (agent_dir / "game_ls20" / "inspect_components.py").exists()
+    assert (agent_dir / "game_ls20" / "current_compare.md").exists()
+    assert (agent_dir / "game_ls20" / "current_compare.json").exists()
+    assert "No sequence comparison has been recorded yet" in (
+        agent_dir / "game_ls20" / "current_compare.md"
+    ).read_text()
     assert not (agent_dir / "_runtime").exists()
+
+
+def test_seed_arc_environment_cache_copies_latest_matching_game(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cache_root = tmp_path / "env-cache"
+    older_variant = cache_root / "older-run" / "ls20" / "oldhash"
+    newer_variant = cache_root / "newer-run" / "ls20" / "newhash"
+    older_variant.mkdir(parents=True)
+    newer_variant.mkdir(parents=True)
+    (older_variant / "ls20.py").write_text("# old\n")
+    (newer_variant / "ls20.py").write_text("# new\n")
+    (older_variant / "metadata.json").write_text(
+        json.dumps({"game_id": "ls20-oldhash", "local_dir": str(older_variant)}) + "\n"
+    )
+    (newer_variant / "metadata.json").write_text(
+        json.dumps({"game_id": "ls20-newhash", "local_dir": str(newer_variant)}) + "\n"
+    )
+    destination_root = cache_root / "fresh-run"
+    monkeypatch.setattr(harness, "ARC_ENV_CACHE_ROOT", cache_root)
+
+    copied_game_dir = harness.seed_arc_environment_cache(
+        destination_root,
+        requested_game_id="ls20",
+    )
+
+    copied_variant = copied_game_dir / "newhash"
+    assert copied_variant.exists()
+    assert (copied_variant / "ls20.py").read_text() == "# new\n"
+    copied_metadata = json.loads((copied_variant / "metadata.json").read_text())
+    assert copied_metadata["game_id"] == "ls20-newhash"
+    assert copied_metadata["local_dir"] == str(copied_variant)
+
+
+def test_seed_arc_environment_cache_raises_when_game_missing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cache_root = tmp_path / "env-cache"
+    cache_root.mkdir()
+    monkeypatch.setattr(harness, "ARC_ENV_CACHE_ROOT", cache_root)
+
+    with pytest.raises(RuntimeError, match="OFFLINE mode could not find a cached environment"):
+        harness.seed_arc_environment_cache(
+            cache_root / "fresh-run",
+            requested_game_id="ls20",
+        )
 
 
 def test_setup_run_config_dir_creates_wrappers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -235,3 +287,69 @@ beta
     assert last == "beta"
     assert out_path.read_text() == transcript
     _ = capsys.readouterr().err
+
+
+def test_sync_live_stream_conversation_artifacts_exports_flat_fork_view(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    session_dir = tmp_path / ".ctxs" / "t-run"
+    output_path = session_dir / "session.md"
+    conversation_dir = run_dir / ".ai-supervisor" / "conversations" / "conversation_abc"
+    forks_dir = conversation_dir / "forks"
+    forks_dir.mkdir(parents=True, exist_ok=True)
+    session_dir.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        "---\nconversation_id: conversation_abc\nfork_id: fork_a\n---\n"
+    )
+    (conversation_dir / "index.json").write_text('{"headId":"fork_a"}\n')
+    (forks_dir / "fork_a.json").write_text('{"id":"fork_a"}\n')
+
+    harness._sync_live_stream_conversation_artifacts(output_path, str(run_dir))
+
+    exported_root = session_dir / "forks"
+    assert (exported_root / "index.json").is_symlink()
+    assert (exported_root / "fork_a.json").is_symlink()
+    assert (exported_root / "fork_a.json").read_text() == '{"id":"fork_a"}\n'
+
+
+def test_recover_session_file_normalizes_to_workspace_head(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    session_dir = tmp_path / ".ctxs" / "t-run"
+    session_file = session_dir / "session.md"
+    conversation_dir = run_dir / ".ai-supervisor" / "conversations" / "conversation_abc"
+    forks_dir = conversation_dir / "forks"
+    forks_dir.mkdir(parents=True, exist_ok=True)
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    stale_text = "---\nconversation_id: conversation_abc\nfork_id: fork_old\n---\n```chat role=assistant\nstale\n```\n"
+    head_text = "---\nconversation_id: conversation_abc\nfork_id: fork_new\n---\n```chat role=assistant\nfresh\n```\n"
+    session_file.write_text(stale_text)
+    (conversation_dir / "index.json").write_text(json.dumps({"headId": "fork_new"}) + "\n")
+    (forks_dir / "fork_new.json").write_text(
+        json.dumps({"id": "fork_new", "documentText": head_text}) + "\n"
+    )
+
+    run_super_calls: list[list[str]] = []
+    runtime = SimpleNamespace(
+        session_file=session_file,
+        run_dir=run_dir,
+        session_dir=session_dir,
+        active_actual_conversation_id=None,
+        super_env={},
+        deps=SimpleNamespace(
+            run_super=lambda args, **kwargs: run_super_calls.append(args),
+        ),
+        log=lambda _msg: None,
+    )
+    runtime.session_frontmatter = lambda: harness_runtime_session.session_frontmatter_impl(runtime)
+    runtime.discover_workspace_conversation_id = (
+        lambda: harness_runtime_session.discover_workspace_conversation_id_impl(runtime)
+    )
+
+    harness_runtime_session.recover_session_file_from_workspace_impl(
+        runtime,
+        reason="unit-test",
+        force=False,
+    )
+
+    assert run_super_calls == []
+    assert session_file.read_text() == head_text

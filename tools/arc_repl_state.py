@@ -97,13 +97,7 @@ def _ensure_level_completions_file(cwd: Path) -> Path:
 
 
 def _play_lib_path(cwd: Path) -> Path:
-    active_game = str(os.getenv("ARC_ACTIVE_GAME_ID", "") or "").strip()
-    if not active_game:
-        raise RuntimeError(
-            "ARC_ACTIVE_GAME_ID is required to resolve play_lib.py (no legacy fallback)."
-        )
-    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", active_game).strip("._") or "game"
-    return cwd / f"game_{safe}" / "play_lib.py"
+    return cwd / "play_lib.py"
 
 
 def _ensure_play_lib_file(cwd: Path) -> Path:

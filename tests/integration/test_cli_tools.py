@@ -106,7 +106,7 @@ def test_arc_repl_cli_run_writes_stdout_stderr(monkeypatch: pytest.MonkeyPatch, 
     assert "e" in captured.err
 
 
-def test_run_super_strips_output_in_stream_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_run_super_preserves_output_in_stream_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     captured = {}
 
     def fake_stream(cmd, output_path, *, cwd="", env=None):
@@ -121,7 +121,7 @@ def test_run_super_strips_output_in_stream_mode(monkeypatch: pytest.MonkeyPatch,
         cwd=tmp_path,
     )
     assert result == "assistant"
-    assert "--output" not in captured["cmd"]
+    assert "--output" in captured["cmd"]
     assert captured["out"] == tmp_path / "s.md"
 
 

@@ -10,6 +10,61 @@ runtime_defaults:
   supervisor_model: gpt-5.3-codex
   supervisor_model_reasoning_effort: high
 
+context_management_strategy: aggressive
+
+prompt_parts:
+  supervisor_context_block:
+    - template: |
+        <supervisor-context>
+        {{supervisor.user_message}}
+        </supervisor-context>
+  available_actions_context:
+    - literal: |
+        The only non-RESET real-game actions available in this game are listed here:
+        ${env.ARC_PROMPT_ACTIONS_BLOCK}
+        Do not invent other actions.
+  artifact_read_path:
+    - literal: |
+        Use filesystem artifacts as the canonical read path when the current mode allows them: `level_current/**`, `level_current/sequences/**`, `level_current/sequence_compare/**`, `current_compare.md`, and `theory.md`.
+        `current_compare.md` and `current_compare.json` are generated artifacts. Read them; do not hand-edit them.
+  component_model_runtime:
+    - literal: |
+        Component workflow:
+        - `model_lib.py` should define a broad `COMPONENT_REGISTRY` (or `iter_components`) whose bounding boxes cover every visible pixel in every seen state for the active level.
+        - `python3 inspect_components.py --coverage --level LEVEL` checks that coverage across every seen state and writes `component_coverage.json` / `component_coverage.md`.
+        - `python3 inspect_components.py --current-mismatch` writes `component_mismatch.json` / `component_mismatch.md` using component bounding boxes instead of raw grid diffs.
+        - Outside theory mode, prefer these component summaries over direct hex-grid or diff inspection.
+  arc_repl_probe_runtime:
+    - literal: |
+        `arc_repl` acts on the real game.
+        Treat `arc_repl` as action/reset only, not as a read-only inspection interface.
+        There is no `arc_repl step` command.
+        Use `arc_repl reset_level` (not `env.reset()` / `GameAction.RESET`).
+        In probe scripts, call `env.step(...)` directly. Do not unpack, subscript, or introspect the returned object.
+        Do not call `get_state()`, `env.get_frame()`, or custom frame-inspection code inside real-game probes.
+        Let `arc_repl` report the outcome, then read the resulting artifacts in the next mode.
+        For a one-action inline probe without creating a file, run:
+        ```bash
+        arc_repl exec <<'PY'
+        from arcengine import GameAction
+        env.step(GameAction.ACTION1)
+        PY
+        ```
+    - prompt_part: available_actions_context
+  arc_repl_playback_runtime:
+    - prompt_part: arc_repl_probe_runtime
+    - literal: |
+        Use `arc_repl exec_file ./play.py` for deterministic full-level execution.
+  model_runtime:
+    - literal: |
+        `model.py` acts on your model/simulator.
+        Valid `model.py` commands are: `status`, `reset_level`, `exec`, `set_level`, `compare_sequences`, `exec_file`, `shutdown`.
+        Use `python3 inspect_components.py --current-mismatch` to summarize the first compare mismatch in component terms.
+        Use `python3 inspect_components.py --coverage --level LEVEL` to verify that component bounding boxes cover every seen state for the current level.
+        When using provider file-edit tools, read the file first, then edit/write it.
+        Do not use private/underscored internals.
+    - prompt_part: component_model_runtime
+
 supervisor:
   enabled: true
   stop_condition: |
@@ -17,28 +72,36 @@ supervisor:
     1) All levels of the current game are complete.
     2) The run is irrecoverably blocked by errors.
   review_timeout_ms: 300000
-  cadence_time_ms: 31536000000
+  cadence_time_ms: 300000
   cadence_interrupt_policy: boundary
   disable_synthetic_check_supervisor_on_rule_failure: false
   context_carryover_limit_bytes: 98304
   instructions:
     operation: append
     values:
-      - "Mode intent: explore_game discovers mechanics with minimal real-game actions; code_model updates model code; solve_model verifies model solutions; solve_game executes real-game solutions; recover replays solved levels after regression."
+      - "Mode intent: theory performs read-only analysis and probe planning; explore_game performs minimal real-game probes; code_model updates model code; solve_model verifies model solutions; solve_game executes real-game solutions; recover replays solved levels after regression."
       - "On every supervisor pass, review `model.py` and `model_lib.py` for concrete bugs/logic errors (state transition mistakes, invalid feature detectors, stale assumptions, inconsistent action effects, missing failure guards)."
       - "If model-file bugs are found, require the agent to fix them before further solve progression."
       - "When model bugs are found outside `code_model`, route to `code_model` (resume or fork as appropriate) with explicit fix targets and required verification."
       - "Do not allow `solve_model`/`solve_game` progression while unresolved model-file bugs are known."
       - "Prefer continue unless there is a clear, evidence-backed correction to make."
-      - "When switching to explore_game, prefer resume_mode_head over fork_new_conversation so exploration context is preserved. Only fork a new explore_game conversation after a game-state discontinuity (reset_level, level_complete, game_complete, game_over)."
+      - "When switching to theory or explore_game, prefer resume_mode_head over fork_new_conversation so cross-mode context is preserved. Only fork a new theory/explore_game conversation after a game-state discontinuity (reset_level, level_complete, game_complete, game_over)."
+      - "When choosing `resume_mode_head` or `fork_new_conversation`, always include a concrete handoff message: what was learned, why the mode is changing, and the exact next action or verification target."
+      - "If the trigger is an agent `switch_mode` request that you accept or redirect into another mode, include the agent's full latest assistant message in the handoff context so the next mode does not lose its plan."
       - "For rule enforcement decisions, cite concrete evidence pointers (turn/tool/output/file)."
       - "If evidence is ambiguous, request one minimal discriminating check instead of broad re-analysis."
       - "When a tool interception marker is present, prioritize handling it immediately."
+      - "Assume newly visible frontier features matter until disproven. If a visible feature is still unexplained, the agent likely does not understand the level well enough to solve it efficiently."
+      - "Do not assign semantic roles to a feature unless action-linked evidence supports that role. Use neutral feature names until the role is proven."
+      - "Do not assume a feature is unique unless evidence shows only one copy matters; prefer reasoning that can track multiple copies."
+      - "After level 1, when a frontier level completes and the game continues, prefer routing next to `theory` so the agent first inspects what changed from files before taking more real-game actions."
+      - "If `current_compare.md` shows divergence and current mode is not `code_model`, route to `code_model` with the compare file as concrete evidence."
       - "Keepalive interrupt protocol (`__ARC_INTERCEPT_IDLE_KEEPALIVE__`): capture `prior_mode` as the mode active when marker is detected; route to `explore_game` for exactly one real-game action; then on the next supervisor pass, return to `prior_mode` via `resume_mode_head` once that one action is evidenced."
       - "During keepalive interrupt handling, do not ask for broad analysis or file churn; require a single valid `arc_repl` game action and concise evidence only."
+      - "If intercept marker is __ARC_INTERCEPT_COMPARE_MISMATCH__, route to `code_model` via `resume_mode_head`, attach compare results, and require compare parity across all explored current-level sequences before further real-game progression."
       - "If intercept marker is __ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__, route to code_model with compare results and require model parity repair before solve_model/solve_game."
       - "If intercept marker is __ARC_INTERCEPT_RESET_LEVEL__, evaluate whether reset usage is appropriate for the current mode and recent evidence, then decide whether to continue or intervene with corrective guidance."
-      - "In `code_model`, if compare output is unchanged across repeated runs and no new mismatch evidence is produced, direct a mode switch to `explore_game` for one minimal discriminating real-game probe (do not keep re-checking the same compare output)."
+      - "In `code_model`, if compare output is unchanged across repeated runs and no new mismatch evidence is produced, direct a mode switch to `theory` or `explore_game` for the smallest missing-evidence step (do not keep re-checking the same compare output)."
   tool_interception:
     rules:
       - name: idle-keepalive
@@ -51,6 +114,11 @@ supervisor:
         tool: bash
         match_type: contains
         pattern: __ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__
+      - name: compare-mismatch
+        when: response
+        tool: bash
+        match_type: contains
+        pattern: __ARC_INTERCEPT_COMPARE_MISMATCH__
       - name: compare-clean
         when: response
         tool: bash
@@ -84,17 +152,16 @@ supervisor:
                    - If sending `payload.message`, set `payload.message_template=intercept_command` (never `custom`).
                    - If using `mode_payload.user_message` (fork/resume path), manually wrap message in:
                      `<supervisor-command trigger="agent_tool_intercept"> ... </supervisor-command>`.
-              2) If marker is `__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__`:
-                 - Fork a new `code_model` conversation.
-                 - Put the compare output/details from the intercepted tool response into `mode_payload.user_message`.
-                 - Instruct the agent to patch model code, rerun compare, and repeat until parity matches.
+              2) If marker is `__ARC_INTERCEPT_COMPARE_MISMATCH__` or `__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__`:
+                 - Use `resume_mode_head` to mode `code_model`.
+                 - Put the compare output/details from the intercepted tool response into the resume message.
+                 - Instruct the agent to patch model code, rerun compare, and repeat until compare is clean across all explored current-level sequences.
               3) If marker is `__ARC_INTERCEPT_COMPARE_CLEAN__`:
-                 - If current mode is `code_model` or `solve_model`, use `resume_mode_head` to `explore_game`.
-                 - Inject a concise supervisor command:
-                   - model parity for recorded sequences is clean,
-                   - stop model-only churn,
-                   - take the minimal real-game probe needed for new causal evidence,
-                   - then switch_mode as appropriate.
+                 - If current mode is `code_model`:
+                   - If the model now includes a concrete level-completion mechanism and `play.py`/`play_lib.py` contain a plausible deterministic attempt, use `resume_mode_head` to `solve_model`.
+                   - Otherwise use `resume_mode_head` to `theory`.
+                 - If current mode is `solve_model`, do not treat compare-clean alone as sufficient. Stay in `solve_model` unless the model-side `play.py` proof actually solves the level; otherwise route to `theory` only when the agent can name the missing evidence that blocks solution search.
+                 - Inject concise guidance that compare-clean means model parity is clean for explored sequences, not that the level is solved.
               4) If marker is `__ARC_INTERCEPT_RESET_LEVEL__`:
                  - Judge whether the reset is appropriate for the current mode and evidence state.
                  - If appropriate, continue with a concise note.
@@ -106,6 +173,26 @@ supervisor:
           message_type: user
           text: |
             <supervisor-command trigger="agent_tool_intercept">
+            {{message}}
+            </supervisor-command>
+    cadence:
+      supervisor_prompt:
+        operation: append
+        parts:
+          - literal: |
+              Cadence review runs asynchronously. Continue immediately if there is no concrete rule violation.
+
+              Priorities:
+              1) If the latest `current_compare.md` in the active game workspace shows `all_match: false` or divergent sequences and current mode is not `code_model`, prefer `resume_mode_head` or `fork_new_conversation` to `code_model` after the next tool boundary. Put the compare file path and mismatch summary in the user-facing guidance.
+              2) If current mode is `code_model` or `solve_model` and the transcript shows an `arc_repl` shell command, treat that as a mode violation and inject or fork corrective guidance.
+              3) If the run has just reached a new frontier level after completing a prior one, prefer `theory` as the next mode so the agent inspects what changed before new real-game probing.
+              4) Otherwise continue.
+      message_templates:
+        - name: supervisor_command
+          description: "Wrap cadence guidance in a supervisor command envelope."
+          message_type: user
+          text: |
+            <supervisor-command trigger="cadence">
             {{message}}
             </supervisor-command>
 
@@ -132,7 +219,7 @@ agent:
           - Later levels usually build on earlier mechanics and add one twist.
           - Mechanics/features usually carry over across levels; positions often do not.
           - Define features by visual form/behavior, not single colors.
-          - Assume visible features matter; unexplained features are likely part of solution logic.
+          - Assume visible features matter; if a frontier feature is unexplained, you probably cannot solve that level efficiently yet.
           - GAME_OVER can reset progress; track causes and prevention theories.
 
           # Workspace and paths
@@ -150,14 +237,13 @@ agent:
             - `play_lib.py`
 
           # Tool policy
-          - `arc_repl` acts on the real game.
-          - `model.py` acts on your model/simulator.
-          - In `code_model`, do not use `arc_repl`.
-          - In `solve_game` and `recover`, prioritize `arc_repl exec_file "play.py"` for deterministic execution.
-          - Use `arc_repl reset_level` (not `env.reset()` / `GameAction.RESET`).
-          - Do not use private/underscored internals.
+          - Obey the current mode's tool/runtime contract exactly.
+          - If the current mode does not mention a runtime/tool family, do not assume it is allowed.
+          - When using provider file-edit tools, read the file first, then edit/write it. Do not try to write a file the provider has not read in the current turn.
+          - Do not assign semantic roles to a feature until evidence supports that role.
+          - Do not assume a feature is unique unless evidence supports uniqueness.
           - If a supervisor command includes `KEEPALIVE_RETURN_MODE=<mode>`, treat it as an interrupt:
-            execute exactly one valid real-game action via `arc_repl`, report concise evidence, and stop.
+            execute exactly the required real-game action, report concise evidence, and stop.
 
           # Objective
           - Minimize real-game actions.
@@ -169,10 +255,6 @@ agent:
           8=#F93C31 9=#1E93FF A=#88D8F1 B=#FFDC00 C=#FF851B D=#921231 E=#4FCC30 F=#A356D6
       - builtin: tools
 
-  user_message:
-    operation: append
-    parts: []
-
   rules:
     operation: append
     requirements:
@@ -183,16 +265,18 @@ agent:
       - "Using exhaustive exploratory search over unknown state/action space (e.g., broad BFS/DFS) to discover solutions."
 
 modes:
-  explore_game:
-    description: "Explore real-game mechanics efficiently and produce a concrete model patch plan."
+  theory:
+    description: "Define component coverage, update theory.md/model_lib.py, and decide the smallest next step."
+    agent_model_reasoning_effort: low
     start_when:
-      - "A frontier unsolved level is reached."
-      - "A model-vs-game mismatch is observed."
-      - "Recovery returns to the frontier unsolved level."
+      - "A new run starts."
+      - "A new frontier level is reached."
+      - "Compare is clean but the level is not yet solved."
+      - "Recover reaches the frontier unsolved level."
     stop_when:
-      - "A concrete model patch plan exists; switch_mode to code_model."
+      - "A concrete real-game probe is required, component coverage passes for the active level, and the passing coverage report is fresh in this theory turn; switch_mode to explore_game."
+      - "Concrete state-transition patches are clear from existing evidence, component coverage passes for the active level, and the passing coverage report is fresh in this theory turn; switch_mode to code_model."
       - "A solved-level regression requires replay; switch_mode to recover."
-      - "A model-only implementation pass is ready with no further game probing needed; switch_mode to code_model."
     tools:
       allow_builtin:
         - shell
@@ -202,62 +286,173 @@ modes:
         - check_supervisor
         - paginate_tool_response
         - switch_mode
+      shell_invocation_policy:
+        allow:
+          - match_type: exact_match
+            pattern: pwd
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^(ls|find|rg|grep|wc|arc_level)(\s|$)'
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^python3 (\./)?inspect_components\.py(\s|$)'
+            case_sensitive: true
+      provider_builtin_tools:
+        claude:
+          allow:
+            - Bash
+            - Glob
+            - Grep
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
+      provider_filesystem:
+        claude:
+          allow_new_files: false
+          write:
+            allow:
+              - theory.md
+              - model_lib.py
+    system_message:
+      operation: append
+      parts:
+        - literal: |
+            Mode: theory.
+            Goal: define evidence-backed components, keep `theory.md` and `model_lib.py` aligned, and decide the smallest next step.
+            Theory mode owns raw grid/diff inspection.
+            You may read any workspace file, but you may only edit `theory.md` and `model_lib.py`.
+            Do not use `arc_repl` in this mode.
+            The only Python command allowed here is `python3 inspect_components.py ...` for component coverage/mismatch checks.
+            Use raw `.hex`, sequence metadata, and compare artifacts to define components and map every visible pixel to named elements.
+            Use neutral feature names until evidence proves a stronger role.
+            Do not exhaustively restate stable geometry. After one initial survey, only reopen a file if it answers a specific open question or verifies a concrete handoff.
+            If you can already name the smallest next step, switch modes promptly instead of continuing broad analysis.
+        - prompt_part: artifact_read_path
+        - prompt_part: component_model_runtime
+        - prompt_part: available_actions_context
+    user_message:
+      operation: append
+      parts:
+        - literal: |
+            Active game: `${vars.game_id}`.
+            Deliverables for this mode:
+            - update `theory.md` with components, action effects, completion candidates, and unknowns;
+            - keep `model_lib.py` detectors broad enough that every visible pixel in every seen state for the active level lies inside at least one component bounding box;
+            - run `python3 inspect_components.py --coverage --level <LEVEL>` before leaving theory mode;
+            - record the available non-RESET actions from the prompt or existing artifacts; do not propose read-only action-discovery probes;
+            - decide whether the next step is `explore_game`, `code_model`, or `recover`;
+            - if switching, include a concrete handoff message with exact files/evidence to inspect or the exact probe to run.
+            Read these agent-workspace files as needed instead of relying on inlined contents:
+            - `theory.md`
+            - `model.py`
+            - `model_lib.py`
+            - `inspect_components.py`
+            - `component_coverage.md`
+            - `component_mismatch.md`
+        - prompt_part: supervisor_context_block
+    agent_rules:
+      operation: append
+      requirements:
+        - "In theory mode, keep `theory.md` synchronized with newly read evidence and open questions."
+        - "In theory mode, keep `model_lib.py` component detectors synchronized with the named elements in `theory.md`."
+        - "Before leaving theory mode, run `python3 inspect_components.py --coverage --level <active level>` and ensure it passes for the current level."
+        - "In theory mode, after an initial survey, reread only the files needed for one specific unresolved question or handoff."
+        - "In theory mode, use raw `.hex`/`.diff` evidence to define named components and keep every visible pixel accounted for by component bounding boxes."
+        - "If a real-game probe is needed, switch_mode to `explore_game` with one concrete probe plan."
+        - "If state-transition patches are clear from existing evidence, switch_mode to `code_model` with explicit patch targets."
+      violations:
+        - "Repeatedly rereading full-grid or stable artifact files in theory mode without a new specific question."
+        - "Using `arc_repl` or any Python execution other than `python3 inspect_components.py ...` in theory mode."
+        - "Leaving theory mode without a fresh passing `component_coverage.json` for the active level."
+        - "Writing any file other than `theory.md` or `model_lib.py` in theory mode."
+
+  explore_game:
+    description: "Take the smallest real-game probe needed and record the result in theory.md."
+    agent_model_reasoning_effort: low
+    start_when:
+      - "Theory identifies a concrete real-game probe."
+      - "Keepalive requires exactly one real-game action."
+    stop_when:
+      - "A real-game probe has been executed and the result is recorded; switch_mode to theory, code_model, or recover as appropriate."
+      - "A solved-level regression requires replay; switch_mode to recover."
+    tools:
+      allow_builtin:
+        - shell
+        - read_file
+        - write_file
+        - check_supervisor
+        - paginate_tool_response
+        - switch_mode
+      shell_invocation_policy:
+        allow:
+          - match_type: exact_match
+            pattern: pwd
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^arc_repl (exec|reset_level)(\s|$)'
+            case_sensitive: true
+      provider_builtin_tools:
+        claude:
+          allow:
+            - Bash
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
+      provider_filesystem:
+        claude:
+          allow_new_files: false
+          read:
+            allow:
+              - theory.md
+          write:
+            allow:
+              - theory.md
     system_message:
       operation: append
       parts:
         - literal: |
             Mode: explore_game.
-            Goal: discover/confirm mechanics using minimal real-game actions, then hand off a concrete model patch plan.
-            Prefer artifact-first reasoning from existing hex/diff/sequence files before taking new game actions.
-            After each novel real-game signal, update theory/plan before taking additional game actions.
-            Do not leave explore_game until newly observed or uncertain frontier features each have at least one targeted real-game probe with causal evidence.
+            Goal: run the smallest real-game probe needed, then update `theory.md` and hand control back quickly.
+            Do not broad-analyze or read additional workspace files here; theory mode handles that.
+            Do not inspect raw `.hex`, `diff.hex`, or sequence metadata in this mode.
+            Once the requested evidence is observed, stop probing, write the result to `theory.md`, and switch modes immediately.
+        - prompt_part: arc_repl_probe_runtime
     user_message:
       operation: append
       parts:
         - literal: |
-            Active game: `${vars.game_id}`
-            Active game directory: `.`.
-
-            Deliverable for this mode:
-            - Update `theory.md` with mechanics + evidence.
-            - Produce a concise patch plan for model code in your final message or mode_payload when switching.
-            - Use `arc_repl` for real-game interaction and focus on discovering or disambiguating uncertain/new mechanics.
-            - Do not try to fully solve the level in this mode unless needed to validate a specific mechanic.
-            - Before switching out of explore_game on a frontier level, ensure each newly observed or uncertain feature has at least one targeted real-game action probe recorded with evidence.
-
-            Transition guidance:
-            - If model code changes are clear, call `switch_mode` to `code_model` with explicit patch steps.
-            - If game regressed to a solved level, call `switch_mode` to `recover`.
-        - files:
-            scope: agent
-            paths:
-              - theory.md
-              - model.py
-              - model_lib.py
-        - template: |
-            <supervisor-context>
-            {{supervisor.user_message}}
-            </supervisor-context>
+            Active game: `${vars.game_id}`.
+            Explore mode is narrow:
+            - perform the minimal real-game probe you already planned;
+            - write the observed outcome and its likely implication into `theory.md`;
+            - then switch_mode promptly.
+            Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
+            Do not use read-only `arc_repl` calls as inspection tools.
+            Do not inspect Python runtime objects inside the probe script; the `arc_repl` response and next-mode artifacts are the inspection surface.
+            Only read/write `theory.md` in this mode.
+        - prompt_part: supervisor_context_block
     agent_rules:
       operation: append
       requirements:
-        - "In explore_game, keep `theory.md` synchronized with new causal evidence."
-        - "When switching to code_model, include explicit patch targets (files/functions) and expected parity checks."
-        - "Only switch to code_model after confirming current-level sequence evidence exists in `level_current/sequences/`."
-        - "Do not switch out of explore_game on a frontier level until each newly observed/uncertain feature has at least one targeted real-game action probe with evidence recorded in `theory.md`."
+        - "In explore_game, perform the minimum real-game action sequence needed to answer the current probe question."
+        - "After each real-game probe, update `theory.md` before switching modes."
       violations:
-        - "Editing model code repeatedly without first identifying what game evidence is missing or mismatched."
-        - "Switching to code_model without confirming current-level sequence evidence exists."
-        - "Switching out of explore_game without targeted real-game probes for newly observed or uncertain frontier features."
+        - "Creating new files or scripts in explore_game."
+        - "Reading workspace files other than `theory.md` in explore_game."
+        - "Reading raw `.hex`, `diff.hex`, or sequence metadata in explore_game."
+        - "Using explore_game for broad analysis instead of a concrete probe."
 
   code_model:
-    description: "Implement/repair model code to match observed game behavior."
+    description: "Implement or repair model code until compare is clean across explored sequences."
     start_when:
-      - "Current level has recorded real-game sequence evidence and explore_game produced a concrete model patch plan."
-      - "Tool interception reported level completion with model mismatch for the current level."
+      - "Explore or intercept evidence shows model-vs-game mismatch."
+      - "Theory identifies concrete model changes from existing evidence."
     stop_when:
-      - "Model parity for current target is restored; switch_mode to solve_model."
-      - "Missing real-game evidence blocks implementation; switch_mode to explore_game."
+      - "Compare is clean across all explored current-level sequences and the model now includes a concrete current-level completion mechanism; switch_mode to solve_model."
+      - "Compare is clean across all explored current-level sequences but the completion mechanism remains unknown; switch_mode to theory."
+      - "Missing real-game evidence blocks implementation; switch_mode to theory."
     tools:
       allow_builtin:
         - shell
@@ -267,76 +462,116 @@ modes:
         - check_supervisor
         - paginate_tool_response
         - switch_mode
-    system_message:
-      operation: append
-      parts:
-        - literal: |
-            Mode: code_model.
-            Goal: patch `model.py` and `model_lib.py` until they match real-game evidence.
-            Do not use `arc_repl` in this mode.
-            Keep `model.py` thin and move reusable mechanics/helpers into `model_lib.py`.
-            Runtime/harness internals are out of scope: do not read or edit any file under `/config/tools/`.
-    user_message:
-      operation: append
-      parts:
-        - literal: |
-            Active game: `${vars.game_id}`
-            Edit model code only.
-            Allowed code focus for this mode: `model.py`, `model_lib.py`, `play.py`, `play_lib.py`, `theory.md`, and `level_current/**`.
-            Do not inspect runtime implementation files (harness internals, tool implementations).
-            Do not trust static level context in this prompt.
-            Determine current level at runtime each turn:
-            - `LEVEL="$(arc_level --field current_level)"`
-            - `echo "runtime level=$LEVEL"`
-            - `META_LEVEL="$(jq -r '.level // empty' level_current/meta.json 2>/dev/null || true)"`
-            - If `META_LEVEL` is empty or differs from `LEVEL`, switch_mode to `explore_game` (state/evidence discontinuity).
-            - `SEQ_COUNT="$(ls level_current/sequences/seq_*.json 2>/dev/null | wc -l | tr -d ' ')" ; echo "current_level_sequence_count=$SEQ_COUNT"`
-            - If `SEQ_COUNT` is `0`, switch_mode to `explore_game` (collect level evidence before patching model).
-
-            Required loop:
-            1) immediately run compare on all recorded sequences for current level:
-               - `python3 model.py compare_sequences --game-id "${vars.game_id}" --level "$LEVEL"`
-               - If compare reports no sequences/evidence for `$LEVEL`, switch_mode to `explore_game` (do not patch blind).
-            2) patch model code,
-            3) rerun model checks (`compare_sequences`, `exec_file`, `status`), for example:
-               - `python3 model.py compare_sequences --game-id "${vars.game_id}" --level "$LEVEL"`
-               - `python3 model.py set_level --game-id "${vars.game_id}" "$LEVEL"`
-               - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`
-               - `python3 model.py status --game-id "${vars.game_id}"`
-            4) if mismatch remains, patch again,
-            5) when parity is good, switch_mode to solve_model.
-            6) if compare shows no new information:
-               - If `all_match: true` (or no mismatch reports), do not keep validating; switch_mode to `solve_model`.
-               - If mismatch output is unchanged across repeated compares, stop re-running compare and switch_mode to `explore_game` for one minimal discriminating real-game probe.
-        - files:
-            scope: agent
-            paths:
+      shell_invocation_policy:
+        allow:
+          - match_type: exact_match
+            pattern: pwd
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^(ls|find|rg|grep|wc|jq|arc_level)(\s|$)'
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^python3 model\.py(\s|$)'
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^python3 (\./)?inspect_components\.py(\s|$)'
+            case_sensitive: true
+        disallow:
+          - match_type: contains
+            pattern: ARC_CONFIG_DIR
+            case_sensitive: true
+          - match_type: contains
+            pattern: arc_model_runtime
+            case_sensitive: true
+          - match_type: contains
+            pattern: /config/tools/
+            case_sensitive: true
+      provider_builtin_tools:
+        claude:
+          allow:
+            - Bash
+            - Glob
+            - Grep
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
+      provider_filesystem:
+        claude:
+          allow_new_files: false
+          read:
+            allow:
               - theory.md
               - model.py
               - model_lib.py
               - play.py
               - play_lib.py
-        - template: |
-            <supervisor-context>
-            {{supervisor.user_message}}
-            </supervisor-context>
+              - inspect_components.py
+              - component_coverage.json
+              - component_coverage.md
+              - component_mismatch.json
+              - component_mismatch.md
+          write:
+            allow:
+              - theory.md
+              - model.py
+              - model_lib.py
+              - play.py
+              - play_lib.py
+    system_message:
+      operation: append
+      parts:
+        - literal: |
+            Mode: code_model.
+            Goal: patch `model.py`/`model_lib.py` until they match explored real-game evidence.
+            Do not use `arc_repl` in this mode.
+            Keep `model.py` thin and move reusable mechanics/helpers into `model_lib.py`.
+            Do not do route planning here; only patch component detectors and state transitions needed to explain observed diffs.
+            Use `theory.md`, `component_mismatch.*`, `component_coverage.*`, and compare summaries as the primary evidence surface here.
+            Do not read raw `.hex`, `diff.hex`, or sequence metadata directly in this mode.
+            Runtime/harness internals are out of scope: do not read or edit any file under `/config/tools/`.
+        - prompt_part: model_runtime
+    user_message:
+      operation: append
+      parts:
+        - literal: |
+            Active game: `${vars.game_id}`.
+            Required loop:
+            1) determine the current runtime level with `arc_level`;
+            2) run `python3 inspect_components.py --current-mismatch`;
+            3) name changed elements, match them to `theory.md`, and patch only the missing component detectors or state transitions;
+            4) run `python3 model.py compare_sequences` for that level;
+            5) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes;
+            5) if compare is clean across all explored current-level sequences:
+               - switch_mode to `solve_model` if completion logic now exists;
+               - otherwise switch_mode to `theory`.
+            6) if compare still lacks enough evidence to patch confidently, switch_mode to `theory`.
+            Read these agent-workspace files as needed; prefer component summaries over raw grid artifacts:
+            - `theory.md`
+            - `model.py`
+            - `model_lib.py`
+            - `play.py`
+            - `play_lib.py`
+            - `component_coverage.md`
+            - `component_mismatch.md`
+        - prompt_part: supervisor_context_block
     agent_rules:
       operation: append
       requirements:
-        - "End each code_model turn with either model-file edits or a switch_mode call."
+        - "End each code_model turn with model-file edits, theory updates, or a switch_mode call."
       violations:
-        - "Using `arc_repl` or taking real-game actions in code_model."
+        - "Using any `arc_repl` command in code_model."
+        - "Reading raw `.hex`, `diff.hex`, or sequence metadata directly in code_model."
         - "Reading or editing runtime/harness internals (any path containing `/config/tools/`) in code_model."
-        - "Running shell commands outside the active game directory tree in code_model."
-        - "Remaining in code_model when there is no current-level sequence evidence in `level_current/sequences/`."
 
   solve_model:
     description: "Produce and verify deterministic model-side solutions in play.py/play_lib.py."
     start_when:
       - "Model parity is sufficient for current level execution planning."
     stop_when:
-      - "Model proof run succeeds for current level; switch_mode to solve_game."
-      - "Model proof fails due mismatch; switch_mode to explore_game or code_model with evidence."
+      - "`python3 model.py exec_file ./play.py` solves the current level from its start state in the model; switch_mode to solve_game."
+      - "Model proof exposes a model bug or parity failure; switch_mode to code_model with evidence."
+      - "A deterministic model-side solve cannot be found because required completion evidence is still missing; switch_mode to theory with exact missing evidence."
       - "Game regressed; switch_mode to recover."
     tools:
       allow_builtin:
@@ -347,64 +582,130 @@ modes:
         - check_supervisor
         - paginate_tool_response
         - switch_mode
+      shell_invocation_policy:
+        allow:
+          - match_type: exact_match
+            pattern: pwd
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^(ls|find|rg|grep|wc|jq|arc_level)(\s|$)'
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^python3 model\.py(\s|$)'
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^python3 (\./)?inspect_components\.py(\s|$)'
+            case_sensitive: true
+      provider_builtin_tools:
+        claude:
+          allow:
+            - Bash
+            - Glob
+            - Grep
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
+      provider_filesystem:
+        claude:
+          allow_new_files: false
+          read:
+            allow:
+              - theory.md
+              - model.py
+              - model_lib.py
+              - play.py
+              - play_lib.py
+              - inspect_components.py
+              - component_coverage.json
+              - component_coverage.md
+              - component_mismatch.json
+              - component_mismatch.md
+          write:
+            allow:
+              - theory.md
+              - play.py
+              - play_lib.py
     system_message:
       operation: append
       parts:
         - literal: |
             Mode: solve_model.
-            Goal: make `play.py` solve current level from start in the model.
-            Use model-only commands; do not run real-game actions here.
+            Goal: make `play.py` solve the current level from start in the model.
+            Use model-only commands; do not run `arc_repl` or any real-game actions here.
+            Do not read raw `.hex`, `diff.hex`, or sequence metadata directly in this mode.
+        - prompt_part: model_runtime
     user_message:
       operation: append
       parts:
         - literal: |
-            Active game: `${vars.game_id}`
-            Determine current level at runtime each turn:
-            - `LEVEL="$(arc_level --field current_level)"`
-            - `echo "runtime level=$LEVEL"`
-
+            Active game: `${vars.game_id}`.
             Required proof sequence before switching to solve_game:
-            - `python3 model.py set_level --game-id "${vars.game_id}" "$LEVEL"`
-            - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`
-            - `python3 model.py status --game-id "${vars.game_id}"`
-
-            If proof fails because model behavior is wrong, switch_mode to `code_model` with mismatch evidence.
-            If `code_model` has already reported stable compare output with no new mismatch information, do not loop in solve_model; switch_mode to `explore_game` for one minimal real-game discriminating check.
-            Do not edit model files in solve_model.
-        - files:
-            scope: agent
-            paths:
-              - theory.md
-              - play.py
-              - play_lib.py
-        - template: |
-            <supervisor-context>
-            {{supervisor.user_message}}
-            </supervisor-context>
+            - determine `LEVEL` with `arc_level`;
+            - `python3 model.py set_level --game-id "${vars.game_id}" "$LEVEL"`;
+            - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`;
+            - `python3 model.py status --game-id "${vars.game_id}"`.
+            Stay in solve_model until the model-side proof succeeds, exposes a model bug, or clearly proves that more evidence is needed and you must return to `theory`.
+            Read these agent-workspace files as needed:
+            - `theory.md`
+            - `model.py`
+            - `model_lib.py`
+            - `play.py`
+            - `play_lib.py`
+            - `component_coverage.md`
+            - `component_mismatch.md`
+        - prompt_part: supervisor_context_block
     agent_rules:
       operation: append
       requirements:
         - "When model proof succeeds, mark the level SOLVED in `theory.md` with concise evidence."
       violations:
-        - "Running real-game actions in solve_model."
+        - "Using any `arc_repl` command or running real-game actions in solve_model."
+        - "Reading raw `.hex`, `diff.hex`, or sequence metadata directly in solve_model."
 
   solve_game:
     description: "Execute deterministic real-game solution with minimal attempts."
     start_when:
       - "solve_model produced a deterministic level solution with proof evidence."
     stop_when:
-      - "Level completes; if game not complete switch_mode to explore_game."
-      - "Deterministic attempt fails on frontier level; switch_mode to explore_game with mismatch evidence."
+      - "Level completes; if the game continues switch_mode to theory."
+      - "Deterministic attempt fails on frontier level; switch_mode to theory with mismatch evidence."
       - "Regression/game_over detected; switch_mode to recover."
     tools:
       allow_builtin:
         - shell
         - read_file
         - write_file
-        - list_dir
         - check_supervisor
         - paginate_tool_response
         - switch_mode
+      shell_invocation_policy:
+        allow:
+          - match_type: exact_match
+            pattern: pwd
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^arc_repl (exec_file|reset_level)(\s|$)'
+            case_sensitive: true
+      provider_builtin_tools:
+        claude:
+          allow:
+            - Bash
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
+      provider_filesystem:
+        claude:
+          allow_new_files: false
+          read:
+            allow:
+              - theory.md
+              - play.py
+              - play_lib.py
+          write:
+            allow:
+              - theory.md
     system_message:
       operation: append
       parts:
@@ -412,33 +713,28 @@ modes:
             Mode: solve_game.
             Goal: execute deterministic real-game solution efficiently.
             Prefer replaying `play.py` over ad-hoc exploration.
+            Do not inspect raw `.hex`, `diff.hex`, or sequence metadata in this mode.
+        - prompt_part: arc_repl_playback_runtime
     user_message:
       operation: append
       parts:
         - literal: |
-            Active game: `${vars.game_id}`
-            Run deterministic game execution:
-            - `arc_repl status --game-id "${vars.game_id}"`
-            - `arc_repl exec_file --game-id "${vars.game_id}" ./play.py`
-            - `arc_repl status --game-id "${vars.game_id}"`
-
-            If frontier level does not complete, switch_mode back to explore_game with mismatch evidence.
-        - files:
-            scope: agent
-            paths:
-              - theory.md
-              - play.py
-              - play_lib.py
-        - template: |
-            <supervisor-context>
-            {{supervisor.user_message}}
-            </supervisor-context>
+            Active game: `${vars.game_id}`.
+            Execute the deterministic solution, record any mismatch or completion evidence in `theory.md`, and switch out promptly.
+            If the frontier level completes and the game continues, switch_mode to `theory`.
+            If the deterministic attempt fails, switch_mode to `theory` with concise mismatch evidence.
+            Read these agent-workspace files as needed:
+            - `theory.md`
+            - `play.py`
+            - `play_lib.py`
+        - prompt_part: supervisor_context_block
     agent_rules:
       operation: append
       requirements:
         - "When a new frontier level is completed, ensure `play.py` replay branch is present and `theory.md` is updated."
       violations:
-        - "Multiple repeated deterministic retries in solve_game without model/theory updates."
+        - "Multiple repeated deterministic retries in solve_game without theory or solver updates."
+        - "Reading raw `.hex`, `diff.hex`, or sequence metadata directly in solve_game."
 
   recover:
     description: "Rapidly replay solved levels to return to the frontier unsolved level."
@@ -446,17 +742,43 @@ modes:
       - "Game regressed to a previously solved level."
       - "GAME_OVER occurred."
     stop_when:
-      - "Frontier unsolved level is reached; switch_mode to explore_game."
-      - "Previously solved replay path fails; switch_mode to explore_game with failure evidence."
+      - "Frontier unsolved level is reached; switch_mode to theory."
+      - "Previously solved replay path fails; switch_mode to theory with failure evidence."
     tools:
       allow_builtin:
         - shell
         - read_file
         - write_file
-        - list_dir
         - check_supervisor
         - paginate_tool_response
         - switch_mode
+      shell_invocation_policy:
+        allow:
+          - match_type: exact_match
+            pattern: pwd
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^arc_repl (exec_file|reset_level)(\s|$)'
+            case_sensitive: true
+      provider_builtin_tools:
+        claude:
+          allow:
+            - Bash
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
+      provider_filesystem:
+        claude:
+          allow_new_files: false
+          read:
+            allow:
+              - theory.md
+              - play.py
+              - play_lib.py
+          write:
+            allow:
+              - theory.md
     system_message:
       operation: append
       parts:
@@ -464,38 +786,37 @@ modes:
             Mode: recover.
             Goal: replay known solved levels quickly and safely to return to frontier work.
             Avoid broad exploration in this mode.
+            Do not inspect raw `.hex`, `diff.hex`, or sequence metadata in this mode.
+        - prompt_part: arc_repl_playback_runtime
     user_message:
       operation: append
       parts:
         - literal: |
-            Active game: `${vars.game_id}`
-            Replay known solutions from `play.py` using deterministic runs until reaching frontier unsolved level.
-            After frontier is reached, switch_mode to explore_game.
-        - files:
-            scope: agent
-            paths:
-              - theory.md
-              - play.py
-              - play_lib.py
-        - template: |
-            <supervisor-context>
-            {{supervisor.user_message}}
-            </supervisor-context>
+            Active game: `${vars.game_id}`.
+            Replay known solutions from `play.py` using deterministic runs until the frontier unsolved level is reached.
+            After frontier is reached, switch_mode to `theory`.
+            Read these agent-workspace files as needed:
+            - `theory.md`
+            - `play.py`
+            - `play_lib.py`
+        - prompt_part: supervisor_context_block
     agent_rules:
       operation: append
       requirements:
         - "Use known solver branches in `play.py` for replay before inventing new routes."
       violations:
         - "Doing broad exploratory probing in recover mode."
+        - "Reading raw `.hex`, `diff.hex`, or sequence metadata directly in recover mode."
 
 mode_state_machine:
-  initial_mode: explore_game
+  initial_mode: theory
   transitions:
-    explore_game: [code_model, recover, explore_game]
-    code_model: [solve_model, explore_game, recover, code_model]
-    solve_model: [solve_game, code_model, explore_game, recover, solve_model]
-    solve_game: [explore_game, recover]
-    recover: [explore_game, solve_game, solve_model, code_model, recover]
+    theory: [explore_game, code_model, recover, theory]
+    explore_game: [theory, code_model, recover, explore_game]
+    code_model: [solve_model, theory, recover, code_model]
+    solve_model: [solve_game, code_model, theory, recover, solve_model]
+    solve_game: [theory, recover]
+    recover: [theory, solve_game, solve_model, code_model, recover]
 
 tools:
   allow_builtin:
@@ -506,13 +827,5 @@ tools:
     - check_supervisor
     - paginate_tool_response
     - switch_mode
-
-sdk_builtin_tools:
-  claude:
-    deny:
-      - WebFetch
-      - WebSearch
-      - Task
-      - TodoWrite
 
 cycle_limit: 1

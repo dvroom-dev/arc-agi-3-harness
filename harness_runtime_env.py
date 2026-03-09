@@ -15,6 +15,10 @@ def refresh_dynamic_super_env_impl(runtime) -> None:
     runtime.super_env["ARC_PROMPT_GAME_ID"] = runtime.prompt_game_id
     runtime.super_env["ARC_PROMPT_GAME_SLUG"] = runtime.prompt_game_slug
     runtime.super_env["ARC_PROMPT_GAME_DIR"] = runtime.prompt_game_dir
+    runtime.super_env["ARC_PROMPT_AVAILABLE_ACTIONS"] = ",".join(
+        str(action) for action in runtime.prompt_available_actions
+    )
+    runtime.super_env["ARC_PROMPT_ACTIONS_BLOCK"] = runtime.prompt_actions_block
     runtime.super_env["ARC_REPL_SESSION_KEY"] = runtime.active_repl_session_key
 
 

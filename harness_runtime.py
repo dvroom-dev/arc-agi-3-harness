@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from harness_runtime_monitor import (
+    format_model_status_summary as format_model_status_summary_impl,
     format_state_summary as format_state_summary_impl,
     load_engine_turn as load_engine_turn_impl,
     load_history_events as load_history_events_impl,
@@ -50,8 +51,6 @@ from harness_scorecard_helpers import (
     resolve_arc_api_key,
 )
 from tools.proc_utils import read_proc_start_ticks
-
-
 class HarnessRuntime:
     def __init__(
         self,
@@ -66,12 +65,10 @@ class HarnessRuntime:
         self.operation_mode_name = operation_mode_name
         self.arc_base_url = arc_base_url
         self.offline_mode = operation_mode_name == "OFFLINE"
-
         self.session_name = args.session_name or datetime.now().strftime("%Y%m%d_%H%M%S")
         self.session_dir = deps.CTXS / self.session_name
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.session_file = self.session_dir / "session.md"
-
         self.run_dir = deps.PROJECT_ROOT / "runs" / self.session_name
         cleanup_stats = deps.cleanup_orphan_repl_daemons(
             deps.PROJECT_ROOT,
@@ -112,8 +109,13 @@ class HarnessRuntime:
             deps.sys.exit(1)
 
         self.arc_state_dir = self.supervisor_dir / "arc"
-        self.arc_env_dir = Path("/tmp/arc-agi-env-cache") / self.session_name
+        self.arc_env_dir = deps.ARC_ENV_CACHE_ROOT / self.session_name
         self.arc_env_dir.mkdir(parents=True, exist_ok=True)
+        if self.offline_mode:
+            self.log(
+                "[harness] seeded offline env cache: "
+                f"{deps.seed_arc_environment_cache(self.arc_env_dir, requested_game_id=str(args.game_id))}"
+            )
         self.state_json = self.arc_state_dir / "state.json"
         self.history_json = self.arc_state_dir / "tool-engine-history.json"
         self.completions_md = self.arc_state_dir / "level_completions.md"
@@ -175,10 +177,10 @@ class HarnessRuntime:
                 + "\n"
             )
 
-        self.active_game_id = str(args.game_id).strip()
-        self.prompt_game_id = str(args.game_id).strip()
-        self.prompt_game_slug = ""
-        self.prompt_game_dir = ""
+        self.active_game_id = self.prompt_game_id = str(args.game_id).strip()
+        self.prompt_game_slug = self.prompt_game_dir = self.prompt_actions_block = ""
+        self.prompt_available_actions: list[int] = []
+        self.prompt_actions_game_id: str | None = None
         self.repl_session_key = f"{self.session_name}__{(re.sub(r'[^A-Za-z0-9_.-]+', '_', self.active_game_id).strip('._') or 'game')}"
         self.active_repl_session_key = self.repl_session_key
         self.active_conversation_id = "harness_bootstrap"
@@ -210,24 +212,23 @@ class HarnessRuntime:
         self.super_env["ARC_PROMPT_GAME_ID"] = self.prompt_game_id
         self.super_env["ARC_PROMPT_GAME_SLUG"] = self.prompt_game_slug
         self.super_env["ARC_PROMPT_GAME_DIR"] = self.prompt_game_dir
+        self.super_env["ARC_PROMPT_AVAILABLE_ACTIONS"] = ",".join(str(action) for action in self.prompt_available_actions)
+        self.super_env["ARC_PROMPT_ACTIONS_BLOCK"] = self.prompt_actions_block
         self.super_env["ARC_REPL_PARENT_PID"] = str(self.repl_parent_pid)
         if self.repl_parent_start_ticks is not None:
             self.super_env["ARC_REPL_PARENT_START_TICKS"] = str(self.repl_parent_start_ticks)
         self.super_env["PATH"] = f"{self.run_bin_dir}:{os.environ.get('PATH', '')}"
 
-        self.idle_keepalive_marker_path = (
-            self.arc_state_dir / "intercepts" / "idle_keepalive.flag"
-        )
+        self.idle_keepalive_marker_path = self.arc_state_dir / "intercepts" / "idle_keepalive.flag"
         self.idle_keepalive_marker_path.parent.mkdir(parents=True, exist_ok=True)
         if self.idle_keepalive_marker_path.exists():
             try:
                 self.idle_keepalive_marker_path.unlink()
             except Exception:
                 pass
-        self.api_idle_keepalive_base_enabled = (
-            self.operation_mode_name == "ONLINE"
-            and str(getattr(self.args, "arc_backend", "") or "").strip().lower() == "api"
-        )
+        self.api_idle_keepalive_base_enabled = self.operation_mode_name == "ONLINE" and str(
+            getattr(self.args, "arc_backend", "") or ""
+        ).strip().lower() == "api"
 
     def open_scorecard_now(self) -> str: return open_scorecard_now_impl(self)
 
@@ -235,10 +236,8 @@ class HarnessRuntime:
 
     def _build_scorecard_client(self):
         return build_scorecard_client(
-            operation_mode_name=self.operation_mode_name,
-            arc_base_url=self.arc_base_url,
-            environments_dir=self.arc_env_dir,
-            arc_api_key=self.arc_api_key,
+            operation_mode_name=self.operation_mode_name, arc_base_url=self.arc_base_url,
+            environments_dir=self.arc_env_dir, arc_api_key=self.arc_api_key,
             scorecard_cookies_json=self.scorecard_cookies_json,
         )
 
@@ -256,17 +255,16 @@ class HarnessRuntime:
 
     def resolve_raw_events_path(self) -> Path | None:
         return resolve_raw_events_path_impl(
-            run_dir=self.run_dir,
-            session_file=self.session_file,
+            run_dir=self.run_dir, session_file=self.session_file,
             active_actual_conversation_id=self.active_actual_conversation_id,
-            active_conversation_id=self.active_conversation_id,
-            load_conversation_id=self.load_conversation_id,
+            active_conversation_id=self.active_conversation_id, load_conversation_id=self.load_conversation_id,
         )
 
     def monitor_snapshot(self) -> dict[str, Any]:
         return monitor_snapshot_impl(
             state_path=self.state_json,
             history_path=self.history_json,
+            model_status_path=self.active_agent_dir() / "model_status.json",
             run_dir=self.run_dir,
             session_file=self.session_file,
             active_actual_conversation_id=self.active_actual_conversation_id,
@@ -280,6 +278,9 @@ class HarnessRuntime:
     def format_state_summary(self, state: dict | None, *, history_turn: int | None = None) -> str:
         turn = self.load_engine_turn() if history_turn is None else int(history_turn)
         return format_state_summary_impl(state, history_turn=turn)
+
+    def format_model_status_summary(self, model_status: dict | None) -> str:
+        return format_model_status_summary_impl(model_status)
 
     def run_arc_repl(self, payload: dict) -> tuple[dict | None, str, int]:
         request = dict(payload)

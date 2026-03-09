@@ -63,9 +63,7 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
         runtime.log(f"[harness] initialized: {runtime.format_state_summary(runtime.load_state())}")
 
         safe_game = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(args.game_id)).strip("_") or "game"
-        runtime.auto_explore_once_marker = (
-            runtime.arc_state_dir / f"auto_explore_once_{safe_game}.done"
-        )
+        runtime.auto_explore_once_marker = runtime.arc_state_dir / f"auto_explore_once_{safe_game}.done"
 
         init_state = runtime.load_state() or {}
         at_fresh_game_start = (
@@ -129,6 +127,7 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
                 "[harness] monitor sources: "
                 f"state={monitor['state_path']} "
                 f"history={monitor['history_path']} "
+                f"model_status={monitor['model_status_path']} "
                 f"session={monitor['session_path']} "
                 f"raw_events={monitor.get('raw_events_path') or '(not-found-yet)'}"
             )
@@ -157,8 +156,12 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
                 runtime.log(
                     "[harness] monitor: "
                     f"history_events={monitor['history_events_len']} "
+                    f"model_status_exists={monitor['model_status_exists']} "
                     f"raw_events_exists={monitor['raw_events_exists']} "
                     f"raw_events_size={monitor['raw_events_size_bytes']}B"
+                )
+                runtime.log(
+                    f"[harness] model: {runtime.format_model_status_summary(monitor.get('model_status'))}"
                 )
                 repl_health = collect_repl_health(runtime)
                 runtime.log(f"[harness] {format_repl_health_summary(runtime)}")
@@ -388,6 +391,10 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
         runtime.log(traceback.format_exc().rstrip())
         raise
     finally:
+        try:
+            runtime.recover_session_file_from_workspace(reason="run-finalize", force=True)
+        except Exception as exc:
+            runtime.log(f"[harness] WARNING: failed to recover session artifacts during finalization: {exc}")
         runtime.close_scorecard_if_needed()
         runtime.cleanup_repl_daemons()
 

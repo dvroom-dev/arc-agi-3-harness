@@ -54,7 +54,7 @@ from arc_repl_intercepts import (
     idle_keepalive_marker_for_call as _idle_keepalive_marker_for_call_impl,
     reset_level_intercept_line as _reset_level_intercept_line,
     result_has_real_game_action as _result_has_real_game_action,
-    run_level_completion_compare as _run_level_completion_compare,
+    run_exec_compare_intercept as _run_exec_compare_intercept,
 )
 from arc_repl_session_core import (
     BaseReplSession,
@@ -425,7 +425,7 @@ def main() -> int:
                 idle_intercept_line = f"{idle_marker} action={action}".strip()
         reset_intercept_line = _reset_level_intercept_line(action, result)
         level_compare_block = (
-            _run_level_completion_compare(cwd, result)
+            _run_exec_compare_intercept(cwd, result)
             if str(action).strip().lower() == "exec"
             else None
         )

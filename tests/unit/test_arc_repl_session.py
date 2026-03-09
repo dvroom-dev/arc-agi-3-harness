@@ -100,7 +100,7 @@ def _patch_session_dependencies(monkeypatch, tmp_path: Path):
     arc_dir = tmp_path / "arc"
     arc_dir.mkdir()
     monkeypatch.setenv("ARC_ACTIVE_GAME_ID", "ls20")
-    play_lib = tmp_path / "game_ls20" / "play_lib.py"
+    play_lib = tmp_path / "play_lib.py"
     play_lib.parent.mkdir(parents=True, exist_ok=True)
     play_lib.write_text("def helper():\n    return 1\n")
     completions = arc_dir / "level_completions.md"
@@ -359,7 +359,7 @@ def test_repl_writes_level_turn_files(monkeypatch, tmp_path: Path) -> None:
         session_created=False,
     )
 
-    game_dir = tmp_path / "game_ls20"
+    game_dir = tmp_path
     artifacts_game_dir = tmp_path / "arc" / "game_artifacts" / "game_ls20-cb3b57cc"
     level_dir = artifacts_game_dir / "level_1"
     turn_1 = level_dir / "turn_0001"

@@ -316,6 +316,8 @@ def test_harness_recovers_session_md_from_workspace_store_before_resume(
     assert "fork_id: fork-1" in seen_resume_doc["text"]
     session_text = (root / ".ctxs" / "t-recover" / "session.md").read_text()
     assert "fork_id: fork-2" in session_text
+    assert (root / ".ctxs" / "t-recover" / "forks" / "index.json").exists()
+    assert (root / ".ctxs" / "t-recover" / "forks" / "fork_store_head.json").exists()
 
 
 def test_harness_fails_loudly_on_noop_provider_cycle(
