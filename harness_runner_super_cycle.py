@@ -21,11 +21,7 @@ def noop_super_cycle_error(
         head_before_resume is not None
         and head_before_resume.get("doc_hash") == head_after_resume.get("doc_hash")
     )
-    resumed_into_fresh_supervise_head = (
-        head_before_resume is not None
-        and head_after_resume.get("action_summary") == "supervise:start"
-        and head_after_resume.get("parent_id") == head_before_resume.get("head_id")
-    )
+    resumed_into_fresh_supervise_head = head_after_resume.get("action_summary") == "supervise:start"
     if resumed_into_fresh_supervise_head:
         return None
     if not head_advanced or not same_doc:

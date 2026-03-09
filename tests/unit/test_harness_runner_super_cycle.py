@@ -23,6 +23,30 @@ def test_noop_super_cycle_allows_fresh_supervise_start_head_after_fork() -> None
     )
 
 
+def test_noop_super_cycle_allows_fresh_supervise_start_sibling_head() -> None:
+    assert (
+        noop_super_cycle_error(
+            stdout="",
+            new_events=[],
+            head_before_resume={
+                "head_id": "fork_first_start",
+                "parent_id": "fork_soft",
+                "action_summary": "supervise:start",
+                "doc_hash": "abc",
+                "provider_thread_id": None,
+            },
+            head_after_resume={
+                "head_id": "fork_second_start",
+                "parent_id": "fork_soft",
+                "action_summary": "supervise:start",
+                "doc_hash": "abc",
+                "provider_thread_id": None,
+            },
+        )
+        is None
+    )
+
+
 def test_noop_super_cycle_errors_on_same_doc_head_advance_without_real_transition() -> None:
     err = noop_super_cycle_error(
         stdout="",
