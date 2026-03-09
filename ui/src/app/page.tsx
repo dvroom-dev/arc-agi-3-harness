@@ -54,7 +54,11 @@ export default function Home() {
       {/* Main content */}
       <div className="flex-1 min-w-0 min-h-0 overflow-hidden">
         {selectedRunId ? (
-          <RunDashboard key={selectedRunId} runId={selectedRunId} />
+          <RunDashboard
+            key={selectedRunId}
+            runId={selectedRunId}
+            onRunStopped={() => setRefreshToken((value) => value + 1)}
+          />
         ) : (
           <div className="flex items-center justify-center h-full text-zinc-600">
             <div className="text-center">

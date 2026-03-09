@@ -3,15 +3,21 @@
 import { useState, useEffect, useRef } from "react";
 import { ArcGrid } from "./ArcGrid";
 import { usePolling } from "@/lib/hooks";
-import type { HistoryEvent, TraceSummary, TraceWithGrid } from "@/lib/types";
+import type { TraceSummary, TraceWithGrid } from "@/lib/types";
 
 interface TimelineViewProps {
   runId: string;
 }
 
-interface TimelineEvent extends HistoryEvent {
-  index: number;
-  traceTurn: number | null;
+interface TimelineEvent {
+  id: string;
+  label: string;
+  level: number;
+  traceTurn: number;
+  stepInCall: number | null;
+  scriptError: boolean;
+  steps: number;
+  traceAction: string;
 }
 
 interface LevelSegment {
@@ -20,101 +26,77 @@ interface LevelSegment {
   completed: boolean;
 }
 
-function mapHistoryEventsToTraceTurns(
-  events: HistoryEvent[],
-  traceSummaries: TraceSummary[]
-): TimelineEvent[] {
-  const mapped = events.map((event, index) => ({
-    ...event,
-    index,
-    traceTurn: null,
-  }));
+function labelForTrace(trace: TraceSummary): string {
+  if (trace.action === "reset_level") return "\u21bb reset";
+  if (trace.scriptError) return `${trace.action} (script error)`;
+  return trace.action;
+}
 
-  let eventIndex = 0;
-
-  const consumeNextMatchingEvent = (
-    predicate: (event: HistoryEvent) => boolean,
-    turnNumber: number
-  ) => {
-    while (eventIndex < mapped.length) {
-      const current = mapped[eventIndex];
-      if (current.traceTurn === null && predicate(current)) {
-        current.traceTurn = turnNumber;
-        eventIndex += 1;
-        return;
-      }
-      eventIndex += 1;
-    }
-  };
-
-  const consumeNextStepEvents = (count: number, turnNumber: number) => {
-    let assigned = 0;
-    while (eventIndex < mapped.length && assigned < count) {
-      const current = mapped[eventIndex];
-      if (current.traceTurn === null && current.kind !== "reset") {
-        current.traceTurn = turnNumber;
-        assigned += 1;
-      }
-      eventIndex += 1;
-    }
-  };
+function buildTimelineEvents(traceSummaries: TraceSummary[]): TimelineEvent[] {
+  const events: TimelineEvent[] = [];
+  let currentLevel = 1;
 
   for (const trace of traceSummaries) {
+    const traceLevel = trace.startLevel ?? currentLevel;
+    currentLevel = trace.endLevel ?? traceLevel;
+
     if (trace.action === "status") {
       continue;
     }
+
     if (trace.action === "reset_level") {
-      consumeNextMatchingEvent((event) => event.kind === "reset", trace.turnNumber);
+      events.push({
+        id: `turn-${trace.turnNumber}-reset`,
+        label: labelForTrace(trace),
+        level: traceLevel,
+        traceTurn: trace.turnNumber,
+        stepInCall: null,
+        scriptError: trace.scriptError,
+        steps: trace.steps,
+        traceAction: trace.action,
+      });
       continue;
     }
 
-    consumeNextStepEvents(Math.max(1, trace.steps), trace.turnNumber);
+    const labels = trace.stepActions?.length ? trace.stepActions : [labelForTrace(trace)];
+    labels.forEach((label, index) => {
+      events.push({
+        id: `turn-${trace.turnNumber}-step-${index}`,
+        label,
+        level: traceLevel,
+        traceTurn: trace.turnNumber,
+        stepInCall: trace.stepActions?.length ? index + 1 : null,
+        scriptError: trace.scriptError,
+        steps: trace.steps,
+        traceAction: trace.action,
+      });
+    });
   }
 
-  return mapped;
+  return events;
 }
 
 function segmentByLevel(events: TimelineEvent[]): LevelSegment[] {
   const segments: LevelSegment[] = [];
-  let currentLevel = 1;
-  let currentEvents: TimelineEvent[] = [];
-
-  events.forEach((event) => {
-    if (event.kind === "step" && event.levels_completed !== undefined) {
-      const newLevel = event.levels_completed + 1;
-      if (newLevel > currentLevel) {
-        segments.push({
-          level: currentLevel,
-          events: currentEvents,
-          completed: true,
-        });
-        currentLevel = newLevel;
-        currentEvents = [event];
-      } else {
-        currentEvents.push(event);
+  for (const event of events) {
+    const current = segments[segments.length - 1];
+    if (!current || current.level !== event.level) {
+      if (current) {
+        current.completed = true;
       }
-    } else {
-      currentEvents.push(event);
+      segments.push({
+        level: event.level,
+        events: [event],
+        completed: false,
+      });
+      continue;
     }
-  });
-
-  if (currentEvents.length > 0) {
-    segments.push({
-      level: currentLevel,
-      events: currentEvents,
-      completed: false,
-    });
+    current.events.push(event);
   }
-
   return segments;
 }
 
 export function TimelineView({ runId }: TimelineViewProps) {
-  const { data: history } = usePolling<{ events: HistoryEvent[] }>(
-    `/api/runs/${runId}/history`,
-    3000,
-    { events: [] }
-  );
   const { data: traceSummaries } = usePolling<TraceSummary[]>(
     `/api/runs/${runId}/traces`,
     5000,
@@ -122,13 +104,13 @@ export function TimelineView({ runId }: TimelineViewProps) {
   );
 
   const [selectedTurn, setSelectedTurn] = useState<number | null>(null);
-  const [selectedEventIndex, setSelectedEventIndex] = useState<number | null>(null);
+  const [selectedStepInCall, setSelectedStepInCall] = useState<number | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [selectedGrid, setSelectedGrid] = useState<TraceWithGrid | null>(null);
   const [isLive, setIsLive] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  const mappedEvents = mapHistoryEventsToTraceTurns(history.events, traceSummaries);
-  const segments = segmentByLevel(mappedEvents);
+  const segments = segmentByLevel(buildTimelineEvents(traceSummaries));
   const totalTraces = traceSummaries.length;
 
   // Fetch grid for selected turn (or latest in live mode)
@@ -139,22 +121,26 @@ export function TimelineView({ runId }: TimelineViewProps) {
     if (turnToFetch === null || turnToFetch === undefined) {
       return;
     }
-    fetch(`/api/runs/${runId}/traces?turn=${turnToFetch}`)
+    const search = new URLSearchParams({ turn: String(turnToFetch) });
+    if (!isLive && selectedStepInCall !== null) {
+      search.set("step", String(selectedStepInCall));
+    }
+    fetch(`/api/runs/${runId}/traces?${search.toString()}`)
       .then((r) => r.json())
       .then(setSelectedGrid)
       .catch(console.error);
-  }, [runId, selectedTurn, isLive, totalTraces, traceSummaries]);
+  }, [runId, selectedTurn, selectedStepInCall, isLive, totalTraces, traceSummaries]);
 
   useEffect(() => {
     if (isLive && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [history.events.length, isLive]);
+  }, [traceSummaries.length, isLive]);
 
   return (
-    <div className="flex gap-3 h-full">
+    <div className="flex gap-3 h-full min-h-0 min-w-0">
       {/* Timeline */}
-      <div className="w-56 flex flex-col border-r border-zinc-800">
+      <div className="w-52 shrink-0 flex flex-col border-r border-zinc-800">
         <div className="flex items-center justify-between px-2 py-1.5 border-b border-zinc-800">
           <span className="text-xs font-medium text-zinc-400">TIMELINE</span>
           <button
@@ -162,7 +148,8 @@ export function TimelineView({ runId }: TimelineViewProps) {
               setIsLive(!isLive);
               if (!isLive) {
                 setSelectedTurn(null);
-                setSelectedEventIndex(null);
+                setSelectedStepInCall(null);
+                setSelectedEventId(null);
               }
             }}
             className={`text-xs px-1.5 py-0.5 rounded ${
@@ -184,27 +171,23 @@ export function TimelineView({ runId }: TimelineViewProps) {
                 )}
               </div>
               {seg.events.map((event) => {
-                const isCurrent = !isLive && selectedEventIndex === event.index;
+                const isCurrent = !isLive && selectedEventId === event.id;
                 return (
                   <button
-                    key={event.index}
+                    key={event.id}
                     onClick={() => {
                       setIsLive(false);
-                      setSelectedEventIndex(event.index);
+                      setSelectedEventId(event.id);
                       setSelectedTurn(event.traceTurn);
-                      if (event.traceTurn === null) {
-                        setSelectedGrid(null);
-                      }
+                      setSelectedStepInCall(event.stepInCall);
                     }}
                     className={`w-full text-left px-3 py-0.5 hover:bg-zinc-800/50 font-mono ${
                       isCurrent ? "bg-blue-900/30 text-blue-300" : ""
-                    } ${event.kind === "reset" ? "text-orange-400" : "text-zinc-300"}`}
+                    } ${event.traceAction === "reset_level" ? "text-orange-400" : "text-zinc-300"}`}
                   >
-                    <span>
-                      {event.kind === "reset" ? "\u21ba reset" : event.action}
-                    </span>
-                    {event.traceTurn === null && (
-                      <span className="ml-2 text-zinc-600">no trace</span>
+                    <span>{event.label}</span>
+                    {event.scriptError && (
+                      <span className="ml-2 text-red-500">error</span>
                     )}
                   </button>
                 );
@@ -215,11 +198,14 @@ export function TimelineView({ runId }: TimelineViewProps) {
       </div>
 
       {/* Grid preview */}
-      <div className="flex-1 p-2">
+      <div className="flex-1 min-h-0 min-w-0 p-2">
         {selectedGrid?.grid ? (
-          <div>
-            <div className="text-xs text-zinc-500 mb-2">
+          <div className="flex h-full min-h-0 min-w-0 flex-col">
+            <div className="text-xs text-zinc-500 mb-2 shrink-0">
               Turn {selectedGrid.turnNumber} &middot; {selectedGrid.action}
+              {selectedGrid.selectedStep ? (
+                <span className="text-zinc-400 ml-2">step {selectedGrid.selectedStep}</span>
+              ) : null}
               {selectedGrid.scriptError && (
                 <span className="text-red-400 ml-2">SCRIPT ERROR</span>
               )}
@@ -229,11 +215,13 @@ export function TimelineView({ runId }: TimelineViewProps) {
                 </span>
               )}
             </div>
-            <ArcGrid grid={selectedGrid.grid} cellSize={6} className="rounded" />
-          </div>
-        ) : !isLive && selectedEventIndex !== null ? (
-          <div className="text-xs text-zinc-600">
-            No trace artifact available for this event
+            <div className="flex-1 min-h-0 min-w-0 overflow-auto">
+              <div className="flex min-h-full min-w-full items-start justify-center">
+                <div className="min-w-max">
+                  <ArcGrid grid={selectedGrid.grid} cellSize={6} className="rounded" />
+                </div>
+              </div>
+            </div>
           </div>
         ) : (
           <div className="text-xs text-zinc-600">Select a turn to view grid</div>

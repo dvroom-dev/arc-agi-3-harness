@@ -5,7 +5,8 @@ import { useState, useEffect, useCallback } from "react";
 export function usePolling<T>(
   url: string | null,
   intervalMs: number = 3000,
-  initialValue: T
+  initialValue: T,
+  onData?: (data: T) => void
 ): { data: T; loading: boolean; refresh: () => void } {
   const [data, setData] = useState<T>(initialValue);
   const [loading, setLoading] = useState(true);
@@ -16,10 +17,11 @@ export function usePolling<T>(
       .then((r) => r.json())
       .then((d) => {
         setData(d);
+        onData?.(d);
         setLoading(false);
       })
       .catch(console.error);
-  }, [url]);
+  }, [url, onData]);
 
   useEffect(() => {
     if (!url) return;

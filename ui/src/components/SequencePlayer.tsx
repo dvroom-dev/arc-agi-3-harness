@@ -110,9 +110,9 @@ export function SequencePlayer({ runId }: SequencePlayerProps) {
   }
 
   return (
-    <div className="flex h-full">
+    <div className="flex h-full min-h-0 min-w-0">
       {/* Left: level/sequence picker */}
-      <div className="w-48 border-r border-zinc-800 overflow-y-auto shrink-0">
+      <div className="w-44 border-r border-zinc-800 overflow-y-auto shrink-0">
         <div className="text-xs text-zinc-500 px-2 py-1.5 border-b border-zinc-800 font-medium">
           SEQUENCES
         </div>
@@ -167,7 +167,7 @@ export function SequencePlayer({ runId }: SequencePlayerProps) {
       </div>
 
       {/* Right: player */}
-      <div className="flex-1 flex flex-col">
+      <div className="flex-1 min-h-0 min-w-0 flex flex-col">
         {currentSeqData ? (
           <>
             {/* Action strip */}
@@ -191,28 +191,32 @@ export function SequencePlayer({ runId }: SequencePlayerProps) {
             </div>
 
             {/* Grid display */}
-            <div className="flex-1 flex items-center justify-center p-4 gap-6">
-              {stepData?.beforeGrid && (
-                <div>
-                  <div className="text-xs text-zinc-500 mb-1 text-center">
-                    Before
-                  </div>
-                  <ArcGrid grid={stepData.beforeGrid} cellSize={5} className="rounded" />
+            <div className="flex-1 min-h-0 min-w-0 overflow-auto p-4">
+              <div className="flex min-h-full min-w-full items-start justify-center">
+                <div className="flex min-w-max flex-col gap-6">
+                  {stepData?.beforeGrid && (
+                    <div>
+                      <div className="text-xs text-zinc-500 mb-1 text-center">
+                        Before
+                      </div>
+                      <ArcGrid grid={stepData.beforeGrid} cellSize={5} className="rounded" />
+                    </div>
+                  )}
+                  {stepData?.afterGrid && (
+                    <div>
+                      <div className="text-xs text-zinc-500 mb-1 text-center">
+                        After &middot; {stepData.action}
+                      </div>
+                      <ArcGrid grid={stepData.afterGrid} cellSize={5} className="rounded" />
+                    </div>
+                  )}
+                  {!stepData?.beforeGrid && !stepData?.afterGrid && (
+                    <div className="text-sm text-zinc-600">
+                      No grid data for this step
+                    </div>
+                  )}
                 </div>
-              )}
-              {stepData?.afterGrid && (
-                <div>
-                  <div className="text-xs text-zinc-500 mb-1 text-center">
-                    After &middot; {stepData.action}
-                  </div>
-                  <ArcGrid grid={stepData.afterGrid} cellSize={5} className="rounded" />
-                </div>
-              )}
-              {!stepData?.beforeGrid && !stepData?.afterGrid && (
-                <div className="text-sm text-zinc-600">
-                  No grid data for this step
-                </div>
-              )}
+              </div>
             </div>
 
             {/* Transport controls */}

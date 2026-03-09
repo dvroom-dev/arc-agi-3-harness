@@ -12,6 +12,11 @@ function isTerminalState(state: string): boolean {
   return TERMINAL_STATES.has((state || "").trim().toUpperCase());
 }
 
+interface ActiveRunProcess {
+  pid: number;
+  args: string;
+}
+
 function parseActiveRunIds(psOutput: string): Set<string> {
   const runIds = new Set<string>();
   for (const line of psOutput.split(/\r?\n/)) {
@@ -27,6 +32,25 @@ function parseActiveRunIds(psOutput: string): Set<string> {
   return runIds;
 }
 
+function parseHarnessProcesses(psOutput: string): ActiveRunProcess[] {
+  const processes: ActiveRunProcess[] = [];
+  for (const line of psOutput.split(/\r?\n/)) {
+    const match = line.match(/^\s*(\d+)\s+(.*)$/);
+    if (!match) continue;
+    const pid = Number.parseInt(match[1] ?? "", 10);
+    const args = (match[2] ?? "").trim();
+    if (!Number.isFinite(pid) || !args.includes("harness.py")) continue;
+    processes.push({ pid, args });
+  }
+  return processes;
+}
+
+function runIdMatchesProcess(runId: string, args: string): boolean {
+  const sessionName = args.match(/--session-name\s+([^\s]+)/)?.[1]?.trim();
+  if (sessionName === runId) return true;
+  return args.includes(`/runs/${runId}/`);
+}
+
 async function listActiveRunIds(): Promise<Set<string>> {
   try {
     const { stdout } = await execFileAsync("ps", ["-eo", "args="], {
@@ -36,6 +60,63 @@ async function listActiveRunIds(): Promise<Set<string>> {
   } catch {
     return new Set<string>();
   }
+}
+
+async function findHarnessProcessForRun(
+  runId: string
+): Promise<ActiveRunProcess | null> {
+  try {
+    const { stdout } = await execFileAsync("ps", ["-eo", "pid=,args="], {
+      maxBuffer: 1024 * 1024 * 8,
+    });
+    return (
+      parseHarnessProcesses(stdout).find((processInfo) =>
+        runIdMatchesProcess(runId, processInfo.args)
+      ) ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function pidExists(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForExit(pid: number, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!pidExists(pid)) return true;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return !pidExists(pid);
+}
+
+async function stopRunProcess(runId: string): Promise<{
+  status: "stopped" | "not-running" | "signal-sent";
+  pid: number | null;
+}> {
+  const processInfo = await findHarnessProcessForRun(runId);
+  if (!processInfo) {
+    return { status: "not-running", pid: null };
+  }
+
+  process.kill(processInfo.pid, "SIGINT");
+  if (await waitForExit(processInfo.pid, 2500)) {
+    return { status: "stopped", pid: processInfo.pid };
+  }
+
+  process.kill(processInfo.pid, "SIGTERM");
+  if (await waitForExit(processInfo.pid, 1500)) {
+    return { status: "stopped", pid: processInfo.pid };
+  }
+
+  return { status: "signal-sent", pid: processInfo.pid };
 }
 
 async function readLogTail(runId: string): Promise<string> {
@@ -82,4 +163,4 @@ export async function inferDisplayedRunState(args: {
   return inferExitedStateFromLog(logTail);
 }
 
-export { listActiveRunIds };
+export { findHarnessProcessForRun, listActiveRunIds, stopRunProcess };

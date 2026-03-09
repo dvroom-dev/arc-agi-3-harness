@@ -14,18 +14,50 @@ export function hexCharToNumber(ch: string): number {
  * Parse a grid from hex-encoded text lines (one hex char per cell).
  */
 export function parseHexGrid(text: string): number[][] {
-  const lines = text.trim().split("\n");
+  const lines = text.trim().split("\n").filter(Boolean);
   return lines.map((line) =>
     Array.from(line.trim()).map(hexCharToNumber)
   );
 }
 
+function isHexGridBlock(block: string): boolean {
+  const lines = block
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) return false;
+  const width = lines[0]?.length ?? 0;
+  if (width === 0) return false;
+  return lines.every((line) => line.length === width && /^[0-9A-Fa-f]+$/.test(line));
+}
+
+function extractGridBlockForSection(raw: string, sectionTitle: string): string | null {
+  const escapedTitle = sectionTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = raw.match(
+    new RegExp(`## ${escapedTitle}\\s*\\n\`\`\`(?:[A-Za-z0-9_-]+)?\\n([\\s\\S]*?)\\n\`\`\``, "m")
+  );
+  if (!match?.[1]) return null;
+  return isHexGridBlock(match[1]) ? match[1] : null;
+}
+
 /**
  * Parse a grid from a turn trace markdown file.
- * Looks for the grid inside a fenced code block.
+ * Prefer the labeled Final/Initial Grid sections, then fall back to the
+ * last fenced block that actually looks like a hex grid.
  */
 export function parseGridFromTrace(raw: string): number[][] | null {
-  const gridMatch = raw.match(/```\n([\s\S]*?)\n```/);
-  if (!gridMatch) return null;
-  return parseHexGrid(gridMatch[1]);
+  const labeledGrid =
+    extractGridBlockForSection(raw, "Final Grid") ??
+    extractGridBlockForSection(raw, "Initial Grid");
+  if (labeledGrid) {
+    return parseHexGrid(labeledGrid);
+  }
+
+  const blocks = Array.from(
+    raw.matchAll(/```(?:[A-Za-z0-9_-]+)?\n([\s\S]*?)\n```/g),
+    (match) => match[1]
+  ).filter((block): block is string => Boolean(block) && isHexGridBlock(block));
+
+  if (blocks.length === 0) return null;
+  return parseHexGrid(blocks[blocks.length - 1]);
 }
