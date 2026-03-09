@@ -19,6 +19,7 @@ def _copy_model_templates(game_dir: Path) -> None:
     game_dir.mkdir(parents=True, exist_ok=True)
     for name in (
         "model.py",
+        "components.py",
         "model_lib.py",
         "play_lib.py",
         "play.py",
@@ -102,3 +103,72 @@ def test_model_status_errors_when_frontier_level_has_no_initial_grid(tmp_path: P
     assert payload["ok"] is False
     assert payload["error"]["type"] == "missing_initial_state"
     assert "frontier level 2 is active in ARC state" in payload["error"]["message"]
+
+
+def test_compare_sequences_uses_pinned_solved_level_until_theory_and_code_model_finish(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["0000", "0000"])
+    _write_hex(game_dir / "level_2" / "initial_state.hex", ["1111", "1111"])
+    (game_dir / "model_lib.py").write_text(
+        (game_dir / "model_lib.py").read_text() + "\n\ndef is_level_complete(env):\n    return int(env.turn) >= 1\n"
+    )
+    arc_state_dir = tmp_path / "arc"
+    arc_state_dir.mkdir(parents=True, exist_ok=True)
+    (arc_state_dir / "state.json").write_text(json.dumps({"current_level": 2, "levels_completed": 1}, indent=2))
+    (game_dir / ".analysis_level_pin.json").write_text(
+        json.dumps({"level": 1, "phase": "theory_passed"}, indent=2)
+    )
+
+    step_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
+    _write_hex(step_dir / "before_state.hex", ["0000", "0000"])
+    _write_hex(step_dir / "after_state.hex", ["1111", "1111"])
+    _write_hex(step_dir / "diff.hex", ["1111", "1111"])
+    (step_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
+    seq_payload = {
+        "schema_version": "arc_repl.level_sequence.v1",
+        "game_id": "ls20",
+        "level": 1,
+        "sequence_id": "seq_0001",
+        "end_reason": "level_change",
+        "action_count": 1,
+        "actions": [
+            {
+                "local_step": 1,
+                "action_index": 1,
+                "tool_turn": 1,
+                "step_in_call": 1,
+                "call_action": "exec",
+                "action_name": "ACTION1",
+                "action_data": {},
+                "state_before": "NOT_FINISHED",
+                "state_after": "NOT_FINISHED",
+                "level_before": 1,
+                "level_after": 2,
+                "levels_completed_before": 0,
+                "levels_completed_after": 1,
+                "recorded_at_utc": "",
+                "files": {
+                    "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
+                    "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
+                    "diff_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/diff.hex",
+                    "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
+                },
+            }
+        ],
+    }
+    seq_file = game_dir / "level_1" / "sequences" / "seq_0001.json"
+    seq_file.parent.mkdir(parents=True, exist_ok=True)
+    seq_file.write_text(json.dumps(seq_payload, indent=2))
+
+    proc = _run_model_with_env(
+        game_dir,
+        ["compare_sequences", "--game-id", "ls20", "--clear-level-pin-on-clean"],
+        extra_env={"ARC_STATE_DIR": str(arc_state_dir)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is True
+    assert payload["level"] == 1
+    assert payload["analysis_level_pinned"] is True
+    assert not (game_dir / ".analysis_level_pin.json").exists()

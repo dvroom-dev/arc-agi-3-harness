@@ -377,6 +377,7 @@ class ModelSession:
         sequence_id: str | None,
         include_reset_ended: bool = False,
         include_level_regressions: bool = False,
+        clear_level_pin_on_clean: bool = False,
     ) -> tuple[dict, int]:
         if level is None:
             synced_error = self._sync_to_frontier_level(action_name="compare_sequences")
@@ -388,6 +389,7 @@ class ModelSession:
             sequence_id=sequence_id,
             include_reset_ended=include_reset_ended,
             include_level_regressions=include_level_regressions,
+            clear_level_pin_on_clean=clear_level_pin_on_clean,
         )
 
     def do_shutdown(self) -> dict:

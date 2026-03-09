@@ -20,6 +20,7 @@ def _copy_model_templates(game_dir: Path) -> None:
     game_dir.mkdir(parents=True, exist_ok=True)
     for name in (
         "model.py",
+        "components.py",
         "model_lib.py",
         "play_lib.py",
         "play.py",

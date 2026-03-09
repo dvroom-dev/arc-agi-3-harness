@@ -8,7 +8,15 @@ from typing import Any
 
 import numpy as np
 
-from .utils import action_from_name, diff_payload, read_hex_grid, resolve_level_dir
+from .utils import (
+    action_from_name,
+    clear_analysis_level_pin,
+    diff_payload,
+    load_analysis_level_pin,
+    read_hex_grid,
+    resolve_level_dir,
+    update_analysis_level_pin,
+)
 
 
 def _sequence_has_level_regression(payload: dict) -> bool:
@@ -297,8 +305,18 @@ def compare_sequences(
     sequence_id: str | None,
     include_reset_ended: bool = False,
     include_level_regressions: bool = False,
+    clear_level_pin_on_clean: bool = False,
 ) -> tuple[dict, int]:
-    target_level = int(level) if level is not None else int(session.env.current_level)
+    pin = load_analysis_level_pin(session.game_dir)
+    pinned_level = None
+    if isinstance(pin, dict):
+        try:
+            pinned_level = int(pin.get("level"))
+        except Exception:
+            pinned_level = None
+    target_level = int(pinned_level) if pinned_level is not None else (
+        int(level) if level is not None else int(session.env.current_level)
+    )
     level_dir = resolve_level_dir(session.game_dir, target_level)
     if level_dir is None:
         return session._error(
@@ -402,10 +420,27 @@ def compare_sequences(
         "compared_sequences": int(len(reports)),
         "diverged_sequences": int(diverged),
         "all_match": bool(diverged == 0),
+        "analysis_level_pinned": bool(pinned_level is not None),
+        "analysis_level_pin": pin,
+        "clear_level_pin_on_clean": bool(clear_level_pin_on_clean),
         "include_reset_ended": bool(include_reset_ended),
         "include_level_regressions": bool(include_level_regressions),
         "reports": reports,
         **session.get_status_state(),
     }
     _persist_current_compare(session, payload)
+    if (
+        bool(clear_level_pin_on_clean)
+        and bool(payload["all_match"])
+        and isinstance(pin, dict)
+        and int(pin.get("level", -1)) == int(target_level)
+    ):
+        phase = str(pin.get("phase", "") or "").strip()
+        if phase == "theory_passed":
+            clear_analysis_level_pin(session.game_dir)
+        else:
+            update_analysis_level_pin(
+                session.game_dir,
+                {"last_compare_all_match": True, "last_compare_level": int(target_level)},
+            )
     return payload, 0

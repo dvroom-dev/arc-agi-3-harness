@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import arc_repl_compare_intercepts
 import arc_repl_intercepts
 from arc_model_runtime import intercepts as model_intercepts
 
@@ -257,7 +258,7 @@ def test_run_exec_compare_intercept_writes_current_compare_artifacts(monkeypatch
     )
 
     monkeypatch.setattr(
-        arc_repl_intercepts.subprocess,
+        arc_repl_compare_intercepts.subprocess,
         "run",
         lambda *args, **kwargs: SimpleNamespace(
             returncode=0,
@@ -332,7 +333,7 @@ def test_run_exec_compare_intercept_returns_clean_marker_on_level_gain(monkeypat
     )
 
     monkeypatch.setattr(
-        arc_repl_intercepts.subprocess,
+        arc_repl_compare_intercepts.subprocess,
         "run",
         lambda *args, **kwargs: SimpleNamespace(
             returncode=0,
@@ -395,7 +396,7 @@ def test_run_exec_compare_intercept_returns_none_when_clean_without_level_gain(
     )
 
     monkeypatch.setattr(
-        arc_repl_intercepts.subprocess,
+        arc_repl_compare_intercepts.subprocess,
         "run",
         lambda *args, **kwargs: SimpleNamespace(
             returncode=0,

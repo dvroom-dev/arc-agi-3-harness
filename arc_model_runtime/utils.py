@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +24,52 @@ def session_state_path(game_dir: Path, game_id: str) -> Path:
 
 def model_status_path(game_dir: Path) -> Path:
     return game_dir / "model_status.json"
+
+
+def analysis_level_pin_path(game_dir: Path) -> Path:
+    return game_dir / ".analysis_level_pin.json"
+
+
+def load_analysis_level_pin(game_dir: Path) -> dict | None:
+    path = analysis_level_pin_path(game_dir)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def write_analysis_level_pin(game_dir: Path, *, level: int, phase: str, reason: str) -> None:
+    payload = {
+        "schema_version": "arc.analysis_level_pin.v1",
+        "level": int(level),
+        "phase": str(phase),
+        "reason": str(reason),
+        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+    }
+    path = analysis_level_pin_path(game_dir)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n")
+    tmp.replace(path)
+
+
+def update_analysis_level_pin(game_dir: Path, updates: dict) -> dict | None:
+    current = load_analysis_level_pin(game_dir)
+    if not isinstance(current, dict):
+        return None
+    current.update(dict(updates))
+    current["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
+    path = analysis_level_pin_path(game_dir)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(current, indent=2) + "\n")
+    tmp.replace(path)
+    return current
+
+
+def clear_analysis_level_pin(game_dir: Path) -> None:
+    analysis_level_pin_path(game_dir).unlink(missing_ok=True)
 
 
 def arc_state_json_path() -> Path | None:
