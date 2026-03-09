@@ -321,6 +321,7 @@ def setup_run_config_dir_impl(
         "arc_repl_daemon_client.py",
         "arc_repl_diagnostics.py",
         "arc_repl_intercepts.py",
+        "arc_repl_compare_intercepts.py",
         "arc_repl_component_sync.py",
         "arc_repl_session_artifacts.py",
         "arc_repl_session_compat.py",
