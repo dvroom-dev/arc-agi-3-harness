@@ -221,7 +221,7 @@ def test_setup_run_config_dir_creates_wrappers(tmp_path: Path, monkeypatch: pyte
     (fake_root / "prompts").mkdir(parents=True)
     (fake_root / "arc_model_runtime").mkdir(parents=True)
     (fake_root / "arc_model_runtime" / "__init__.py").write_text("# runtime\n")
-    for f in ("arc_repl.py", "arc_repl_cli.py", "arc_repl_daemon.py", "arc_level.py"):
+    for f in ("arc_repl.py", "arc_repl_cli.py", "arc_repl_daemon.py", "arc_repl_exec_output.py", "arc_level.py"):
         (fake_root / "tools" / f).write_text("# tool\n")
     (fake_root / "prompts" / "new_game_auto_explore.py").write_text("print('x')\n")
 
@@ -354,3 +354,91 @@ def test_recover_session_file_normalizes_to_workspace_head(tmp_path: Path) -> No
 
     assert run_super_calls == []
     assert session_file.read_text() == head_text
+
+
+def test_recover_session_file_reconstructs_patch_only_workspace_head(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "t-patch-head"
+    conversation_dir = run_dir / ".ai-supervisor" / "conversations" / "conversation_abc"
+    forks_dir = conversation_dir / "forks"
+    session_dir = tmp_path / ".ctxs" / "t-patch-head"
+    session_file = session_dir / "session.md"
+    forks_dir.mkdir(parents=True, exist_ok=True)
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    stale_text = (
+        "---\nconversation_id: conversation_abc\nfork_id: fork_soft\nmode: explore_and_solve\n---\n"
+        "```chat role=user\nsoft parent\n```\n"
+    )
+    session_file.write_text(stale_text)
+    (conversation_dir / "index.json").write_text(
+        json.dumps({"headId": "fork_start", "headIds": ["fork_start"]}) + "\n"
+    )
+    (forks_dir / "fork_soft.json").write_text(
+        json.dumps({"id": "fork_soft", "documentText": stale_text}) + "\n"
+    )
+    patch_payload = {
+        "id": "fork_start",
+        "parentId": "fork_soft",
+        "storage": "patch",
+        "patch": {
+            "ops": [
+                {
+                    "op": "equal",
+                    "lines": [
+                        "---",
+                        "conversation_id: conversation_abc",
+                    ],
+                },
+                {
+                    "op": "delete",
+                    "lines": [
+                        "fork_id: fork_soft",
+                        "mode: explore_and_solve",
+                    ],
+                },
+                {
+                    "op": "insert",
+                    "lines": [
+                        "fork_id: fork_start",
+                        "mode: explore_and_solve",
+                    ],
+                },
+                {
+                    "op": "equal",
+                    "lines": [
+                        "---",
+                        "```chat role=user",
+                        "soft parent",
+                        "```",
+                    ],
+                },
+            ]
+        },
+    }
+    (forks_dir / "fork_start.json").write_text(json.dumps(patch_payload) + "\n")
+
+    run_super_calls: list[list[str]] = []
+    runtime = SimpleNamespace(
+        session_file=session_file,
+        run_dir=run_dir,
+        session_dir=session_dir,
+        active_actual_conversation_id=None,
+        super_env={},
+        deps=SimpleNamespace(run_super=lambda args, **kwargs: run_super_calls.append(args)),
+        log=lambda _msg: None,
+    )
+    runtime.session_frontmatter = lambda: harness_runtime_session.session_frontmatter_impl(runtime)
+    runtime.discover_workspace_conversation_id = (
+        lambda: harness_runtime_session.discover_workspace_conversation_id_impl(runtime)
+    )
+
+    harness_runtime_session.recover_session_file_from_workspace_impl(
+        runtime,
+        reason="unit-test-patch-head",
+        force=False,
+    )
+
+    assert run_super_calls == []
+    recovered = session_file.read_text()
+    assert "fork_id: fork_start" in recovered
+    assert "mode: explore_and_solve" in recovered

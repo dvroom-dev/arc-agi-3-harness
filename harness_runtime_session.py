@@ -79,19 +79,117 @@ def _load_workspace_head_document(
     ).strip()
     if not head_id:
         return None
-    fork_path = conversation_dir / "forks" / f"{head_id}.json"
+    forks_dir = conversation_dir / "forks"
+    document_text = _reconstruct_fork_document(forks_dir, head_id, {})
+    if not document_text or not document_text.strip():
+        return None
+    return head_id, document_text
+
+
+def _load_super_state_document(
+    runtime,
+) -> tuple[str, str, str] | None:
+    state_path = runtime.run_dir / "super" / "state.json"
+    if not state_path.exists():
+        return None
+    try:
+        state_payload = json.loads(state_path.read_text())
+    except Exception:
+        return None
+    if not isinstance(state_payload, dict):
+        return None
+    conversation_id = str(state_payload.get("conversationId") or "").strip()
+    fork_id = str(state_payload.get("activeForkId") or "").strip()
+    if not conversation_id or not fork_id:
+        return None
+    forks_dir = runtime.run_dir / ".ai-supervisor" / "conversations" / conversation_id / "forks"
+    document_text = _reconstruct_fork_document(forks_dir, fork_id, {})
+    if not document_text or not document_text.strip():
+        return None
+    return conversation_id, fork_id, document_text
+
+
+def _load_fork_payload(forks_dir: Path, fork_id: str) -> dict | None:
+    fork_path = forks_dir / f"{fork_id}.json"
     if not fork_path.exists():
         return None
     try:
         fork_payload = json.loads(fork_path.read_text())
     except Exception:
         return None
-    if not isinstance(fork_payload, dict):
+    return fork_payload if isinstance(fork_payload, dict) else None
+
+
+def _apply_fork_patch(base_text: str, patch_payload: dict) -> str | None:
+    patch = patch_payload.get("patch")
+    if not isinstance(patch, dict):
         return None
+    ops = patch.get("ops")
+    if not isinstance(ops, list):
+        return None
+
+    base_lines = base_text.splitlines()
+    rebuilt_lines: list[str] = []
+    cursor = 0
+    for op in ops:
+        if not isinstance(op, dict):
+            return None
+        kind = str(op.get("op") or "").strip()
+        lines = op.get("lines")
+        if not isinstance(lines, list) or any(not isinstance(line, str) for line in lines):
+            return None
+        if kind == "equal":
+            expected = base_lines[cursor : cursor + len(lines)]
+            if expected != lines:
+                return None
+            rebuilt_lines.extend(lines)
+            cursor += len(lines)
+        elif kind == "insert":
+            rebuilt_lines.extend(lines)
+        elif kind == "delete":
+            expected = base_lines[cursor : cursor + len(lines)]
+            if expected != lines:
+                return None
+            cursor += len(lines)
+        else:
+            return None
+
+    if cursor != len(base_lines):
+        rebuilt_lines.extend(base_lines[cursor:])
+    return "\n".join(rebuilt_lines) + ("\n" if base_text.endswith("\n") else "")
+
+
+def _reconstruct_fork_document(
+    forks_dir: Path,
+    fork_id: str,
+    memo: dict[str, str | None],
+) -> str | None:
+    if fork_id in memo:
+        return memo[fork_id]
+
+    fork_payload = _load_fork_payload(forks_dir, fork_id)
+    if not fork_payload:
+        memo[fork_id] = None
+        return None
+
     document_text = str(fork_payload.get("documentText") or "")
-    if not document_text.strip():
+    if document_text.strip():
+        memo[fork_id] = document_text
+        return document_text
+
+    parent_id = str(fork_payload.get("parentId") or "").strip()
+    if not parent_id:
+        memo[fork_id] = None
         return None
-    return head_id, document_text
+
+    parent_text = _reconstruct_fork_document(forks_dir, parent_id, memo)
+    if parent_text is None:
+        memo[fork_id] = None
+        return None
+
+    patched_text = _apply_fork_patch(parent_text, fork_payload)
+    memo[fork_id] = patched_text
+    return patched_text
 
 
 def _normalize_session_file_to_workspace_head(
@@ -128,17 +226,22 @@ def recover_session_file_from_workspace_impl(
     force: bool = False,
 ) -> None:
     frontmatter = runtime.session_frontmatter()
-    conversation_id = (
-        frontmatter.get("conversation_id")
-        or runtime.active_actual_conversation_id
-        or runtime.discover_workspace_conversation_id()
-    )
-    if conversation_id and not force and frontmatter.get("conversation_id") and frontmatter.get("fork_id"):
-        _normalize_session_file_to_workspace_head(
-            runtime,
-            conversation_id=conversation_id,
-            reason=reason,
-        )
+    super_state_document = _load_super_state_document(runtime)
+    if super_state_document:
+        conversation_id, fork_id, document_text = super_state_document
+        current_text = ""
+        if runtime.session_file.exists():
+            try:
+                current_text = runtime.session_file.read_text()
+            except Exception:
+                current_text = ""
+        if current_text != document_text:
+            runtime.session_file.parent.mkdir(parents=True, exist_ok=True)
+            runtime.session_file.write_text(document_text)
+            runtime.log(
+                "[harness] exported session.md from super state: "
+                f"reason={reason} conversation={conversation_id} fork={fork_id}"
+            )
         export_workspace_conversation_artifacts_impl(
             runtime,
             conversation_id=conversation_id,
@@ -146,43 +249,47 @@ def recover_session_file_from_workspace_impl(
         )
         return
 
+    conversation_id = (
+        frontmatter.get("conversation_id")
+        or runtime.active_actual_conversation_id
+        or runtime.discover_workspace_conversation_id()
+    )
+    if conversation_id and not force and frontmatter.get("conversation_id") and frontmatter.get("fork_id"):
+        normalized = _normalize_session_file_to_workspace_head(
+            runtime,
+            conversation_id=conversation_id,
+            reason=reason,
+        )
+        if normalized:
+            export_workspace_conversation_artifacts_impl(
+                runtime,
+                conversation_id=conversation_id,
+                reason=reason,
+            )
+            return
+
     if not conversation_id:
         raise RuntimeError(
             "session.md is missing required frontmatter and no workspace conversation "
             f"was recoverable (reason={reason})"
         )
 
-    runtime.log(
-        "[harness] recovering session.md from workspace conversation store: "
-        f"reason={reason} conversation={conversation_id}"
-    )
-    runtime.deps.run_super(
-        [
-            "recover",
-            "--workspace",
-            str(runtime.run_dir),
-            "--conversation",
-            conversation_id,
-            "--output",
-            str(runtime.session_file),
-            "--quiet",
-        ],
-        stream=False,
-        cwd=runtime.run_dir,
-        env=runtime.super_env,
-    )
-
-    recovered = runtime.session_frontmatter()
-    if not recovered.get("conversation_id") or not recovered.get("fork_id"):
-        raise RuntimeError(
-            "Recovered session.md still missing required frontmatter "
-            f"(reason={reason}, path={runtime.session_file})"
-        )
-    _normalize_session_file_to_workspace_head(
+    normalized = _normalize_session_file_to_workspace_head(
         runtime,
         conversation_id=conversation_id,
         reason=reason,
     )
+    if not normalized and not runtime.session_file.exists():
+        raise RuntimeError(
+            "Unable to export session.md from workspace conversation store "
+            f"(reason={reason}, conversation={conversation_id})"
+        )
+    recovered = runtime.session_frontmatter()
+    if not recovered.get("conversation_id") or not recovered.get("fork_id"):
+        raise RuntimeError(
+            "Exported session.md still missing required frontmatter "
+            f"(reason={reason}, path={runtime.session_file})"
+        )
     export_workspace_conversation_artifacts_impl(
         runtime,
         conversation_id=conversation_id,

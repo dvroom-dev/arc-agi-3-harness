@@ -253,7 +253,14 @@ def _run_super_streaming(
         raise RuntimeError(f"super exited with code {proc.returncode}")
 
     if output_path is not None:
-        output_path.write_text(transcript)
+        existing_text = ""
+        try:
+            if output_path.exists():
+                existing_text = output_path.read_text()
+        except Exception:
+            existing_text = ""
+        if not existing_text.lstrip().startswith("---"):
+            output_path.write_text(transcript)
         _sync_live_stream_conversation_artifacts(output_path, cwd or str(PROJECT_ROOT))
 
     return extract_last_assistant_message(transcript)

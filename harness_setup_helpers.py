@@ -311,6 +311,7 @@ def setup_run_config_dir_impl(
         "arc_level.py",
     ]
     optional_tools = [
+        "arc_repl_exec_output.py",
         "arc_repl_paths.py",
         "proc_utils.py",
         "arc_repl_diffs.py",
