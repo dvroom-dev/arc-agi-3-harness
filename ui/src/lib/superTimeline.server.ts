@@ -246,6 +246,17 @@ export async function buildSuperTimeline(runId: string): Promise<SuperTimelinePa
         parseTime
       );
 
+      const isEmptySupervisorOnlyCycle =
+        !cycle.sessionId &&
+        cycle.totalEvents === 0 &&
+        cycle.toolCallCount === 0 &&
+        cycle.toolResultCount === 0 &&
+        cycle.assistantTextCount === 0 &&
+        cycle.userTextCount === 0;
+      if (isEmptySupervisorOnlyCycle) {
+        continue;
+      }
+
       if (fork.mode && cycle.durationMs != null) {
         modeTotals.set(fork.mode, (modeTotals.get(fork.mode) ?? 0) + cycle.durationMs);
       }

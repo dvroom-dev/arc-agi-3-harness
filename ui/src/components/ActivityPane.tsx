@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ConversationView } from "./ConversationView";
 import { LogStream } from "./LogStream";
 import { SuperTimeline } from "./SuperTimeline";
 import { usePolling } from "@/lib/hooks";
+import type { AgentConversationBranch } from "@/lib/types";
 
 interface ActivityPaneProps {
   runId: string;
@@ -21,6 +22,7 @@ const ACTIVITY_TABS: { id: ActivityTab; label: string }[] = [
 
 export function ActivityPane({ runId }: ActivityPaneProps) {
   const [activeTab, setActiveTab] = useState<ActivityTab>("agent");
+  const [requestedAgentBranchKey, setRequestedAgentBranchKey] = useState<string | null>(null);
   const { data: logStats } = usePolling<{
     errorCount: number;
     warningCount: number;
@@ -28,6 +30,20 @@ export function ActivityPane({ runId }: ActivityPaneProps) {
     errorCount: 0,
     warningCount: 0,
   });
+  const { data: agentBranches } = usePolling<{ branches: AgentConversationBranch[] }>(
+    `/api/runs/${runId}/conversation/agent/branches`,
+    5000,
+    { branches: [] }
+  );
+  const activeAgentBranchKey = useMemo(() => {
+    const branches = agentBranches.branches;
+    if (branches.length === 0) return null;
+    if (requestedAgentBranchKey && branches.some((branch) => branch.key === requestedAgentBranchKey)) {
+      return requestedAgentBranchKey;
+    }
+    const activeBranch = branches.find((branch) => branch.active);
+    return activeBranch?.key ?? branches.at(-1)?.key ?? null;
+  }, [agentBranches.branches, requestedAgentBranchKey]);
 
   return (
     <aside className="w-[45rem] shrink-0 border-l border-zinc-800 bg-zinc-950/40 flex flex-col min-h-0">
@@ -56,8 +72,32 @@ export function ActivityPane({ runId }: ActivityPaneProps) {
           </button>
         ))}
       </div>
+      {activeTab === "agent" && agentBranches.branches.length > 0 ? (
+        <div className="flex gap-1 overflow-x-auto border-b border-zinc-800 px-2 py-2 shrink-0 bg-zinc-950/70">
+          {agentBranches.branches.map((branch) => (
+            <button
+              key={branch.key}
+              onClick={() => setRequestedAgentBranchKey(branch.key)}
+              className={`shrink-0 rounded-full border px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors ${
+                activeAgentBranchKey === branch.key
+                  ? "border-emerald-700 bg-emerald-950/50 text-emerald-200"
+                  : "border-zinc-800 bg-zinc-900 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+              }`}
+              title={`${branch.mode || "unknown"} · ${branch.createdAt}`}
+            >
+              {branch.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
       <div className="flex-1 min-h-0">
-        {activeTab === "agent" && <ConversationView runId={runId} source="agent" />}
+        {activeTab === "agent" && (
+          <ConversationView
+            runId={runId}
+            source="agent"
+            branchKey={activeAgentBranchKey}
+          />
+        )}
         {activeTab === "supervisor" && <ConversationView runId={runId} source="supervisor" />}
         {activeTab === "super" && <SuperTimeline runId={runId} />}
         {activeTab === "logs" && <LogStream runId={runId} />}

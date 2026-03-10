@@ -238,4 +238,16 @@ export interface SuperTimelinePayload {
   entries: SuperTimelineEntry[];
 }
 
+export interface AgentConversationBranch {
+  key: string;
+  mode: string | null;
+  label: string;
+  conversationId: string;
+  forkId: string;
+  createdAt: string;
+  active: boolean;
+  initialUserPreview: string | null;
+  lastAssistantPreview: string | null;
+}
+
 export type { RunLaunchParams, StoredRunParams };

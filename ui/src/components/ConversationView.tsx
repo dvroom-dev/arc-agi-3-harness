@@ -14,6 +14,7 @@ import { useAutoFollowScroll } from "@/lib/useAutoFollowScroll";
 interface ConversationViewProps {
   runId: string;
   source?: "agent" | "supervisor";
+  branchKey?: string | null;
 }
 interface ContentSegment {
   kind: "text" | "file";
@@ -90,12 +91,17 @@ function roleTone(role: string | undefined) {
   }
 }
 
-export function ConversationView({ runId, source = "supervisor" }: ConversationViewProps) {
+export function ConversationView({
+  runId,
+  source = "supervisor",
+  branchKey = null,
+}: ConversationViewProps) {
+  const viewKey = `${runId}:${source}:${branchKey || "current"}`;
   const [windowState, setWindowState] = useState<{
-    runId: string;
+    viewKey: string;
     hiddenEvents: number | null;
-  }>({ runId, hiddenEvents: null });
-  const hiddenEvents = windowState.runId === runId ? windowState.hiddenEvents : null;
+  }>({ viewKey, hiddenEvents: null });
+  const hiddenEvents = windowState.viewKey === viewKey ? windowState.hiddenEvents : null;
   const conversationUrl = useMemo(() => {
     const params = new URLSearchParams();
     if (hiddenEvents === null) {
@@ -107,24 +113,27 @@ export function ConversationView({ runId, source = "supervisor" }: ConversationV
       source === "agent"
         ? `/api/runs/${runId}/conversation/agent`
         : `/api/runs/${runId}/conversation`;
+    if (source === "agent" && branchKey) {
+      params.set("branchKey", branchKey);
+    }
     return `${basePath}?${params.toString()}`;
-  }, [runId, hiddenEvents, source]);
+  }, [runId, hiddenEvents, source, branchKey]);
 
   const handleConversationData = useCallback(
     (next: {
       hiddenEvents: number;
     }) => {
       setWindowState((current) => {
-        if (current.runId !== runId) {
-          return { runId, hiddenEvents: next.hiddenEvents };
+        if (current.viewKey !== viewKey) {
+          return { viewKey, hiddenEvents: next.hiddenEvents };
         }
         if (current.hiddenEvents === null) {
-          return { runId, hiddenEvents: next.hiddenEvents };
+          return { viewKey, hiddenEvents: next.hiddenEvents };
         }
         return current;
       });
     },
-    [runId]
+    [viewKey]
   );
 
   const { data } = usePolling<{

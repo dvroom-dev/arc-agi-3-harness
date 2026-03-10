@@ -1,7 +1,19 @@
 import fs from "fs/promises";
 import path from "path";
 import type { ConversationBlock } from "@/lib/conversation";
-import { ctxDir, runDir } from "@/lib/paths";
+import { parseConversationBlocks, sliceConversationBlocks } from "@/lib/conversation";
+import {
+  findConversationId,
+  loadRunHistoryForks,
+  type RunHistoryForkSummaryFile,
+} from "@/lib/agentConversationData.server";
+import {
+  activeSessionInfo,
+  loadAgentBaseBlock,
+  loadConversationForkBranchFallback,
+} from "@/lib/agentConversationSession.server";
+import { runDir } from "@/lib/paths";
+import type { AgentConversationBranch } from "@/lib/types";
 
 interface AgentConversationDocument {
   blocks: ConversationBlock[];
@@ -31,54 +43,6 @@ function parseTime(value: string | null | undefined): number | null {
   if (!value) return null;
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-async function preferredConversationId(runId: string): Promise<string | null> {
-  const sessionFile = path.join(ctxDir(runId), "session.md");
-  try {
-    const text = await fs.readFile(sessionFile, "utf-8");
-    return text.match(/^conversation_id:\s*(.+)$/m)?.[1]?.trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-async function findConversationId(runId: string): Promise<string | null> {
-  const conversationsDir = path.join(runDir(runId), ".ai-supervisor", "conversations");
-  const preferredId = await preferredConversationId(runId);
-  let conversationIds: string[] = [];
-  try {
-    conversationIds = (await fs.readdir(conversationsDir, { withFileTypes: true }))
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort();
-  } catch {
-    return null;
-  }
-  if (conversationIds.length === 0) return null;
-  if (preferredId && conversationIds.includes(preferredId)) return preferredId;
-  return conversationIds.at(-1) ?? null;
-}
-
-async function loadAgentBaseBlock(runId: string): Promise<ConversationBlock | null> {
-  const sessionFile = path.join(ctxDir(runId), "session.md");
-  try {
-    const text = await fs.readFile(sessionFile, "utf-8");
-    const match = text.match(/(`{3,})chat role=system scope=agent_base\n([\s\S]*?)\n\1/);
-    if (!match) return null;
-    const content = match[2]?.trim();
-    if (!content) return null;
-    return {
-      kind: "chat",
-      role: "system",
-      header: "```chat role=system scope=agent_base",
-      meta: { role: "system", scope: "agent_base" },
-      content,
-      raw: match[0],
-    };
-  } catch {
-    return null;
-  }
 }
 
 async function loadRawEvents(runId: string, conversationId: string | null): Promise<RawEventEntry[]> {
@@ -341,11 +305,175 @@ function sliceBlocks(
   };
 }
 
-export async function readAgentConversationDocument(
+export async function listAgentConversationBranches(
+  runId: string
+): Promise<{ branches: AgentConversationBranch[] }> {
+  const forks = await loadRunHistoryForks(runId);
+  const active = await activeSessionInfo(runId);
+  if (forks.length === 0) {
+    return loadConversationForkBranchFallback(runId);
+  }
+  const sorted = forks
+    .filter(
+      (fork): fork is Required<
+        Pick<
+          RunHistoryForkSummaryFile,
+          "key" | "conversationId" | "forkId" | "createdAt" | "skeletonPath"
+        >
+      > &
+        RunHistoryForkSummaryFile =>
+        Boolean(
+          fork &&
+            typeof fork.key === "string" &&
+            typeof fork.conversationId === "string" &&
+            typeof fork.forkId === "string" &&
+            typeof fork.createdAt === "string" &&
+            typeof fork.skeletonPath === "string"
+        )
+    )
+    .sort((a, b) => (parseTime(a.createdAt) ?? 0) - (parseTime(b.createdAt) ?? 0));
+  const baseBranches = sorted.map((fork) => ({
+    key: fork.key,
+    mode: fork.mode ?? null,
+    label: fork.mode ?? "agent",
+    conversationId: fork.conversationId,
+    forkId: fork.forkId,
+    createdAt: fork.createdAt,
+    active: fork.conversationId === active.conversationId && fork.forkId === active.forkId,
+    initialUserPreview:
+      typeof fork.initialUserPreview === "string" ? fork.initialUserPreview : null,
+    lastAssistantPreview:
+      typeof fork.lastAssistantPreview === "string" ? fork.lastAssistantPreview : null,
+  })) satisfies AgentConversationBranch[];
+
+  const mergedBranches = [...baseBranches];
+  if (
+    active.conversationId &&
+    active.forkId &&
+    !mergedBranches.some(
+      (branch) =>
+        branch.conversationId === active.conversationId && branch.forkId === active.forkId
+    )
+  ) {
+    mergedBranches.push({
+      key: `${active.conversationId}:${active.forkId}`,
+      mode: active.mode,
+      label: active.mode || "agent",
+      conversationId: active.conversationId,
+      forkId: active.forkId,
+      createdAt: new Date().toISOString(),
+      active: true,
+      initialUserPreview: null,
+      lastAssistantPreview: null,
+    });
+  }
+
+  if (mergedBranches.length === 0) {
+    return loadConversationForkBranchFallback(runId);
+  }
+
+  mergedBranches.sort((a, b) => (parseTime(a.createdAt) ?? 0) - (parseTime(b.createdAt) ?? 0));
+  const modeCounts = new Map<string, number>();
+  for (const branch of mergedBranches) {
+    const mode = branch.mode?.trim() || "agent";
+    modeCounts.set(mode, (modeCounts.get(mode) ?? 0) + 1);
+  }
+  const seenPerMode = new Map<string, number>();
+  const branches = mergedBranches.map((branch) => {
+    const mode = branch.mode?.trim() || "agent";
+    const nextIndex = (seenPerMode.get(mode) ?? 0) + 1;
+    seenPerMode.set(mode, nextIndex);
+    const totalForMode = modeCounts.get(mode) ?? 1;
+    return {
+      ...branch,
+      label: totalForMode > 1 ? `${mode} (${nextIndex})` : mode,
+      active:
+        branch.conversationId === active.conversationId && branch.forkId === active.forkId,
+    } satisfies AgentConversationBranch;
+  });
+
+  return { branches };
+}
+
+async function readAgentBranchSkeletonDocument(
   runId: string,
+  branchKey: string,
   options: { hiddenEvents?: number; maxEvents?: number }
 ): Promise<AgentConversationDocument> {
+  const active = await activeSessionInfo(runId);
+  const activeCompositeBranchKey =
+    active.conversationId && active.forkId
+      ? `${active.conversationId}:${active.forkId}`
+      : null;
+  const matchesActiveBranch =
+    (activeCompositeBranchKey && branchKey === activeCompositeBranchKey)
+    || (active.forkId && branchKey === active.forkId);
+  if (matchesActiveBranch) {
+    return readAgentConversationDocument(runId, {
+      hiddenEvents: options.hiddenEvents,
+      maxEvents: options.maxEvents,
+    });
+  }
+
+  const forks = await loadRunHistoryForks(runId);
+  const fork = forks.find((entry) => entry.key === branchKey);
+  if (
+    !fork ||
+    typeof fork.conversationId !== "string" ||
+    typeof fork.forkId !== "string" ||
+    typeof fork.skeletonPath !== "string"
+  ) {
+    return {
+      blocks: [],
+      source: null,
+      totalLines: 0,
+      totalEvents: 0,
+      shownEvents: 0,
+      hiddenEvents: 0,
+    };
+  }
+
+  if (fork.conversationId === active.conversationId && fork.forkId === active.forkId) {
+    return readAgentConversationDocument(runId, {
+      hiddenEvents: options.hiddenEvents,
+      maxEvents: options.maxEvents,
+    });
+  }
+
+  try {
+    const skeletonPath = path.join(runDir(runId), fork.skeletonPath);
+    const text = await fs.readFile(skeletonPath, "utf-8");
+    const blocks = parseConversationBlocks(text);
+    const windowed = sliceConversationBlocks(blocks, options);
+    return {
+      blocks: windowed.blocks,
+      source: `${fork.mode || "agent"} branch`,
+      totalLines: text.split("\n").length,
+      totalEvents: windowed.totalEvents,
+      shownEvents: windowed.shownEvents,
+      hiddenEvents: windowed.hiddenEvents,
+    };
+  } catch {
+    return {
+      blocks: [],
+      source: null,
+      totalLines: 0,
+      totalEvents: 0,
+      shownEvents: 0,
+      hiddenEvents: 0,
+    };
+  }
+}
+
+export async function readAgentConversationDocument(
+  runId: string,
+  options: { hiddenEvents?: number; maxEvents?: number; branchKey?: string }
+): Promise<AgentConversationDocument> {
+  if (options.branchKey) {
+    return readAgentBranchSkeletonDocument(runId, options.branchKey, options);
+  }
   const conversationId = await findConversationId(runId);
+  const active = await activeSessionInfo(runId);
   const agentBaseBlock = await loadAgentBaseBlock(runId);
   const rawEvents = await loadRawEvents(runId, conversationId);
   const interventions = await loadInterventions(runId, conversationId);
@@ -362,15 +490,20 @@ export async function readAgentConversationDocument(
     entry.type === "event" ? rawEventToBlocks(entry.payload) : [interventionBlock(entry.payload)]
   );
   const windowed = sliceBlocks(eventBlocks, options);
-  const blocks = agentBaseBlock ? [agentBaseBlock, ...windowed.blocks] : windowed.blocks;
+  const blocks = [
+    ...(active.frontmatterBlock ? [active.frontmatterBlock] : []),
+    ...(agentBaseBlock ? [agentBaseBlock] : []),
+    ...windowed.blocks,
+  ];
 
   return {
     blocks,
-    source: conversationId ? `${conversationId} raw events` : null,
-    totalLines: (agentBaseBlock ? agentBaseBlock.content.split("\n").length : 0)
+    source: active.mode ? `${active.mode} raw events` : conversationId ? "agent raw events" : null,
+    totalLines: (active.frontmatterBlock ? active.frontmatterBlock.content.split("\n").length : 0)
+      + (agentBaseBlock ? agentBaseBlock.content.split("\n").length : 0)
       + eventBlocks.reduce((sum, block) => sum + block.content.split("\n").length, 0),
-    totalEvents: windowed.totalEvents + (agentBaseBlock ? 1 : 0),
-    shownEvents: windowed.shownEvents + (agentBaseBlock ? 1 : 0),
+    totalEvents: windowed.totalEvents + (agentBaseBlock ? 1 : 0) + (active.frontmatterBlock ? 1 : 0),
+    shownEvents: windowed.shownEvents + (agentBaseBlock ? 1 : 0) + (active.frontmatterBlock ? 1 : 0),
     hiddenEvents: windowed.hiddenEvents,
   };
 }
