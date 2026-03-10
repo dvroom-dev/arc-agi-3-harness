@@ -188,6 +188,9 @@ def _component_coverage_markdown(payload: dict[str, Any]) -> str:
         f"level: {payload.get('level')}",
         f"states_checked: {payload.get('states_checked')}",
     ]
+    observed_shapes = payload.get("observed_shapes") or []
+    if observed_shapes:
+        lines.append(f"observed_shapes: {', '.join(str(shape) for shape in observed_shapes)}")
     failure = payload.get("first_failure")
     if not failure:
         lines.extend(["", "All seen states for this level are covered by component bounding boxes."])
@@ -197,6 +200,7 @@ def _component_coverage_markdown(payload: dict[str, Any]) -> str:
             "",
             f"first_failure_state: {failure.get('label')}",
             f"state_file: {failure.get('path')}",
+            f"state_shape: {failure.get('shape')}",
             f"uncovered_pixel_count: {failure.get('uncovered_pixel_count')}",
             "",
             "uncovered_boxes:",
@@ -314,24 +318,34 @@ def run_component_coverage(game_dir: Path, *, level: int | None) -> tuple[dict[s
         "status": "pass",
         "level": int(level_value),
         "states_checked": len(states),
+        "observed_shapes": [],
         "first_failure": None,
     }
+    observed_shapes: list[str] = []
 
     for state in states:
         grid = artifact_helpers.load_hex_grid(game_dir / state["path"])
+        shape_label = f"{int(grid.shape[0])}x{int(grid.shape[1])}"
+        if shape_label not in observed_shapes:
+            observed_shapes.append(shape_label)
         components = _collect_components(components_module, grid)
         covered = _coverage_mask(grid.shape, components)
         uncovered = ~covered
         if uncovered.any():
             payload["status"] = "fail"
+            payload["observed_shapes"] = observed_shapes
             payload["first_failure"] = {
                 "label": state["label"],
                 "path": state["path"],
+                "shape": shape_label,
                 "uncovered_pixel_count": int(uncovered.sum()),
                 "uncovered_boxes": _connected_uncovered_boxes(uncovered),
                 "components": components,
             }
             break
+
+    if payload["status"] == "pass":
+        payload["observed_shapes"] = observed_shapes
 
     json_path, md_path = _component_report_paths(game_dir)
     _write_json_and_markdown(json_path, md_path, payload, _component_coverage_markdown(payload))
@@ -359,6 +373,15 @@ def run_component_mismatch(game_dir: Path) -> tuple[dict[str, Any], int]:
         json_path, md_path = _mismatch_report_paths(game_dir)
         _write_json_and_markdown(json_path, md_path, payload, _component_mismatch_markdown(payload))
         return payload, 0
+    if mismatch.get("status") == "error":
+        payload = {
+            "status": "error",
+            "message": mismatch.get("message"),
+            "compare": mismatch.get("compare"),
+        }
+        json_path, md_path = _mismatch_report_paths(game_dir)
+        _write_json_and_markdown(json_path, md_path, payload, _component_mismatch_markdown(payload))
+        return payload, 1
 
     components_module = _load_components_module(game_dir)
     step = mismatch["step"]

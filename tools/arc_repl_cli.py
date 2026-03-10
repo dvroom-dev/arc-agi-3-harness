@@ -10,7 +10,7 @@ Usage:
 
 Output contract:
 - status/reset_level/shutdown: JSON object
-- exec: raw script stdout/stderr (like a normal REPL)
+- exec: raw script stdout/stderr plus an `<arc_repl_result>` JSON block
 """
 
 from __future__ import annotations

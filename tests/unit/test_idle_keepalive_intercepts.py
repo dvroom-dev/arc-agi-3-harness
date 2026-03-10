@@ -306,6 +306,76 @@ def test_run_exec_compare_intercept_writes_current_compare_artifacts(monkeypatch
     ).exists()
 
 
+def test_run_exec_compare_intercept_returns_mismatch_marker_on_level_one_before_first_completion(
+    monkeypatch, tmp_path: Path
+) -> None:
+    cwd = tmp_path / "agent"
+    cwd.mkdir(parents=True, exist_ok=True)
+    (cwd / "model.py").write_text("# model\n", encoding="utf-8")
+    (cwd / "inspect_components.py").write_text(
+        "import json\nprint(json.dumps({'status': 'mismatch'}))\n",
+        encoding="utf-8",
+    )
+
+    arc_state_dir = tmp_path / "arc"
+    monkeypatch.setenv("ARC_STATE_DIR", str(arc_state_dir))
+
+    level_dir = arc_state_dir / "game_artifacts" / "game_ls20" / "level_1" / "sequences"
+    level_dir.mkdir(parents=True, exist_ok=True)
+    (level_dir / "seq_0001.json").write_text(
+        json.dumps(
+            {
+                "sequence_id": "seq_0001",
+                "end_reason": "active",
+                "actions": [{"levels_completed_before": 0, "levels_completed_after": 0}],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        arc_repl_compare_intercepts.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "ok": True,
+                    "all_match": False,
+                    "compared_sequences": 1,
+                    "diverged_sequences": 1,
+                    "reports": [
+                        {
+                            "sequence_id": "seq_0001",
+                            "matched": False,
+                            "divergence_step": 1,
+                            "divergence_reason": "after_state_mismatch",
+                        }
+                    ],
+                }
+            ),
+            stderr="",
+        ),
+    )
+
+    marker = arc_repl_intercepts.run_exec_compare_intercept(
+        cwd,
+        {
+            "ok": True,
+            "game_id": "ls20",
+            "current_level": 1,
+            "steps_executed": 1,
+            "levels_gained_in_call": 0,
+            "levels_completed": 0,
+            "state": "NOT_FINISHED",
+        },
+    )
+
+    assert marker is not None
+    assert "__ARC_INTERCEPT_COMPARE_MISMATCH__" in marker
+
+
 def test_run_exec_compare_intercept_returns_clean_marker_on_level_gain(monkeypatch, tmp_path: Path) -> None:
     cwd = tmp_path / "agent"
     cwd.mkdir(parents=True, exist_ok=True)

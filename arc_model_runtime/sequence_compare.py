@@ -12,9 +12,11 @@ from .utils import (
     action_from_name,
     clear_analysis_level_pin,
     diff_payload,
+    load_frontier_level_from_arc_state,
     load_analysis_level_pin,
     read_hex_grid,
     resolve_level_dir,
+    sync_workspace_level_view,
     update_analysis_level_pin,
 )
 
@@ -443,4 +445,11 @@ def compare_sequences(
                 session.game_dir,
                 {"last_compare_all_match": True, "last_compare_level": int(target_level)},
             )
+    frontier_level = load_frontier_level_from_arc_state()
+    if frontier_level is not None:
+        sync_workspace_level_view(
+            session.game_dir,
+            game_id=str(session.game_id),
+            frontier_level=int(frontier_level),
+        )
     return payload, 0

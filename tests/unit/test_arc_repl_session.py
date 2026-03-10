@@ -158,6 +158,12 @@ def test_repl_session_status_reset_exec(monkeypatch, tmp_path: Path) -> None:
     assert result["ok"] is True
     assert result["steps_executed"] >= 1
     assert result["state"] in {"NOT_FINISHED", "WIN"}
+    assert result["artifacts"]["tool_turn"] >= 1
+    assert result["artifacts"]["changed_pixels"] >= 0
+    assert len(result["artifacts"]["after_state_hex_rows"]) == 64
+    assert result["artifacts"]["after_state_hex"].count("\n") >= 63
+    assert len(result["artifacts"]["diff_hex_rows"]) == 64
+    assert result["artifacts"]["files"]["after_state_hex"].endswith("after_state.hex")
 
 
 def test_repl_compat_helpers_available(monkeypatch, tmp_path: Path) -> None:
@@ -339,6 +345,8 @@ def test_repl_exec_stops_on_unexpected_level_regression(monkeypatch, tmp_path: P
     assert result["ok"] is False
     assert result["steps_executed"] == 1
     assert "unexpected level regression" in (result.get("script_error") or "")
+    assert result["artifacts"]["tool_turn"] >= 1
+    assert len(result["artifacts"]["after_state_hex_rows"]) == 64
 
     history_records = session.get_action_history()
     assert len(history_records) == 1

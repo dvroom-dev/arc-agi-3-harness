@@ -28,6 +28,7 @@ from arc_repl_env import (
     _reset_env_with_retry,
 )
 from arc_repl_exec import _write_turn_trace
+from arc_repl_exec_output import emit_exec_result_block
 from arc_repl_state import (
     _append_level_completion,
     _arc_dir,
@@ -441,6 +442,11 @@ def main() -> int:
                 sys.stdout.write(script_stdout)
                 if not script_stdout.endswith("\n"):
                     sys.stdout.write("\n")
+            exec_result_block = emit_exec_result_block(result)
+            if exec_result_block:
+                sys.stdout.write(exec_result_block)
+                if not exec_result_block.endswith("\n"):
+                    sys.stdout.write("\n")
             if level_compare_block:
                 sys.stdout.write(level_compare_block)
                 if not level_compare_block.endswith("\n"):
@@ -468,7 +474,6 @@ def main() -> int:
                                     sys.stderr.write("\n")
                 return 1
             return 0
-
         if isinstance(result, dict):
             intercept_lines: list[str] = []
             if reset_intercept_line:

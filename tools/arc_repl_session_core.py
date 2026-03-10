@@ -48,13 +48,11 @@ class BaseReplSession:
         self.arc_dir = deps._arc_dir(cwd)
         self.session_dir = deps._session_dir(cwd, conversation_id)
         self.session_dir.mkdir(parents=True, exist_ok=True)
-
         game_id = str(requested_game_id or "").strip() or deps._default_game_id(cwd)
         if not game_id:
             raise RuntimeError(
                 "game_id is required (or initialize state first with action=status and game_id)"
             )
-
         self.play_lib_file = deps._ensure_play_lib_file(cwd)
         self.completions_path = deps._ensure_level_completions_file(cwd)
         self.history = deps._load_history(cwd, game_id)
@@ -79,6 +77,7 @@ class BaseReplSession:
             game_id=self.game_id,
             make_id_candidates=self.deps._make_id_candidates,
         )
+        self.latest_turn_artifacts: dict[str, Any] | None = None
         self.action_history_path = self.action_history.path
 
         self.script_counter = 0
@@ -299,12 +298,10 @@ class BaseReplSession:
             step_snapshots=step_snapshots,
             step_results=step_results,
         )
-
         try:
             trace_rel = str(trace_path.relative_to(self.cwd))
         except Exception:
             trace_rel = str(trace_path)
-
         result = {
             "schema_version": self.deps.SCHEMA_VERSION,
             "ok": not bool(script_error),
@@ -342,6 +339,8 @@ class BaseReplSession:
                 "daemon_pid": os.getpid(),
             },
         }
+        if action == "exec" and step_snapshots and self.latest_turn_artifacts:
+            result["artifacts"] = dict(self.latest_turn_artifacts)
         return result
     def do_status(self, requested_game_id: str, *, session_created: bool) -> dict:
         if requested_game_id and not self._same_game_lineage(requested_game_id):

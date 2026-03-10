@@ -55,7 +55,9 @@ def test_component_coverage_helper_reports_uncovered_pixels(tmp_path: Path) -> N
     assert proc.returncode == 1
     payload = json.loads(proc.stdout)
     assert payload["status"] == "fail"
+    assert payload["observed_shapes"] == ["2x4"]
     assert payload["first_failure"]["label"] == "level_1:initial_state"
+    assert payload["first_failure"]["shape"] == "2x4"
     assert payload["first_failure"]["uncovered_pixel_count"] == 8
     assert (game_dir / "component_coverage.json").exists()
     assert (game_dir / "component_coverage.md").exists()
@@ -94,6 +96,8 @@ def test_component_coverage_advances_analysis_level_pin_phase(tmp_path: Path) ->
 
     proc = _run_helper(game_dir, ["--coverage", "--level", "1"])
     assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["observed_shapes"] == ["4x4"]
     pin = json.loads((game_dir / ".analysis_level_pin.json").read_text())
     assert pin["phase"] == "theory_passed"
     assert pin["coverage_checked_level"] == 1
@@ -181,3 +185,27 @@ def test_component_mismatch_helper_reads_wrapped_current_compare_payload(tmp_pat
     assert payload["status"] == "mismatch"
     assert payload["compare"]["divergence_reason"] == "after_state_mismatch"
     assert payload["sequence"]["sequence_id"] == "seq_0001"
+
+
+def test_component_mismatch_helper_errors_when_compare_is_red_without_report(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["4444", "4444"])
+    (game_dir / "current_compare.json").write_text(
+        json.dumps(
+            {
+                "level": 1,
+                "all_match": False,
+                "compared_sequences": 1,
+                "diverged_sequences": 1,
+                "reports": [],
+            },
+            indent=2,
+        )
+    )
+
+    proc = _run_helper(game_dir, ["--current-mismatch"])
+    assert proc.returncode == 1
+    payload = json.loads(proc.stdout)
+    assert payload["status"] == "error"
+    assert "not clean" in payload["message"]

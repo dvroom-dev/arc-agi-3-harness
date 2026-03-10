@@ -16,6 +16,7 @@ from .utils import (
     action_from_name,
     diff_payload,
     discover_level_initial_states,
+    effective_analysis_level,
     from_jsonable,
     grid_from_hex_rows,
     grid_hex_rows,
@@ -121,8 +122,9 @@ class ModelEnv:
 class ModelSession:
     def __init__(self, *, game_id: str, game_dir: Path, hooks: ModelHooks):
         self.game_dir = Path(game_dir)
+        self.game_id = str(game_id or "game")
         self.hooks = hooks
-        self.env = ModelEnv(game_id, self.game_dir, self.hooks)
+        self.env = ModelEnv(self.game_id, self.game_dir, self.hooks)
         self.state_path = session_state_path(self.game_dir, self.env.game_id)
         self.model_status_path = model_status_path(self.game_dir)
         self.globals = {
@@ -280,13 +282,22 @@ class ModelSession:
         scaffolding like the model env grid snapshot or synthetic action list.
         """
         self.env.refresh_level_initial_states()
+        visible_level = effective_analysis_level(
+            self.game_dir,
+            frontier_level=load_frontier_level_from_arc_state() or int(self.env.current_level),
+        )
+        current_level = int(visible_level) if visible_level is not None else int(self.env.current_level)
+        levels_completed = max(0, current_level - 1)
+        available_model_levels = [int(v) for v in self.env.available_model_levels]
+        if visible_level is not None:
+            available_model_levels = [lvl for lvl in available_model_levels if int(lvl) <= int(visible_level)]
         return {
             "state": str(self.env.state),
-            "current_level": int(self.env.current_level),
-            "levels_completed": int(self.env.levels_completed),
+            "current_level": current_level,
+            "levels_completed": levels_completed,
             "win_levels": int(self.env.win_levels),
             "guid": getattr(self.env, "guid", None),
-            "available_model_levels": [int(v) for v in self.env.available_model_levels],
+            "available_model_levels": available_model_levels,
             "full_reset": bool(getattr(self.env, "full_reset", False)),
         }
 

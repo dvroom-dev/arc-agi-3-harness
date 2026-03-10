@@ -117,13 +117,29 @@ def test_main_exec_prints_script_stdout(monkeypatch, capsys) -> None:
         arc_repl,
         "_send_request",
         lambda cwd, conversation_id, request: (
-            {"ok": True, "action": "exec", "script_stdout": "hello\n"},
+            {
+                "ok": True,
+                "action": "exec",
+                "script_stdout": "hello\n",
+                "state": "NOT_FINISHED",
+                "current_level": 1,
+                "levels_completed": 0,
+                "steps_executed": 1,
+                "trace_file": "trace.md",
+                "artifacts": {
+                    "after_state_hex": "ABCD",
+                    "diff_hex": "..CD",
+                },
+            },
             False,
         ),
     )
     rc = arc_repl.main()
     assert rc == 0
-    assert "hello" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "hello" in out
+    assert "<arc_repl_result>" in out
+    assert "\"after_state_hex\": \"ABCD\"" in out
 
 
 def test_main_exec_error_prints_stderr(monkeypatch, capsys) -> None:

@@ -83,6 +83,49 @@ def test_model_status_implicitly_syncs_to_arc_frontier_level(tmp_path: Path) -> 
     assert payload["available_model_levels"] == [1, 2]
 
 
+def test_model_status_hides_frontier_level_while_analysis_pin_is_active(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["0123", "4567"])
+    _write_hex(game_dir / "level_2" / "initial_state.hex", ["89AB", "CDEF"])
+    (game_dir / ".analysis_level_pin.json").write_text(
+        json.dumps({"level": 1, "phase": "theory_passed"}, indent=2)
+    )
+    arc_state_dir = tmp_path / "arc"
+    arc_state_dir.mkdir(parents=True, exist_ok=True)
+    (arc_state_dir / "state.json").write_text(
+        json.dumps({"current_level": 2, "levels_completed": 1}, indent=2)
+    )
+
+    proc = _run_model_with_env(
+        game_dir,
+        ["status", "--game-id", "ls20"],
+        extra_env={"ARC_STATE_DIR": str(arc_state_dir)},
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is True
+    assert payload["current_level"] == 1
+    assert payload["levels_completed"] == 0
+    assert payload["available_model_levels"] == [1]
+
+
+def test_model_discovers_level_initial_state_via_level_current_symlink(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_current" / "initial_state.hex", ["0123", "4567"])
+    (game_dir / "level_current" / "meta.json").write_text(
+        json.dumps({"schema_version": "arc_repl.level_current.v1", "level": 1}, indent=2)
+    )
+    (game_dir / "level_1").symlink_to("level_current", target_is_directory=True)
+
+    proc = _run_model_with_env(game_dir, ["status", "--game-id", "ls20"], extra_env={})
+    assert proc.returncode == 0, proc.stdout
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is True
+    assert payload["available_model_levels"] == [1]
+
+
 def test_model_status_errors_when_frontier_level_has_no_initial_grid(tmp_path: Path) -> None:
     game_dir = tmp_path / "game_ls20"
     _copy_model_templates(game_dir)
@@ -172,3 +215,37 @@ def test_compare_sequences_uses_pinned_solved_level_until_theory_and_code_model_
     assert payload["level"] == 1
     assert payload["analysis_level_pinned"] is True
     assert not (game_dir / ".analysis_level_pin.json").exists()
+
+
+def test_sync_workspace_level_view_uses_pinned_level(tmp_path: Path) -> None:
+    from arc_model_runtime.utils import sync_workspace_level_view
+
+    game_dir = tmp_path / "game_ls20"
+    game_dir.mkdir(parents=True, exist_ok=True)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["0000", "0000"])
+    _write_hex(game_dir / "level_2" / "initial_state.hex", ["1111", "1111"])
+    (game_dir / ".analysis_level_pin.json").write_text(
+        json.dumps({"level": 1, "phase": "pending_theory"}, indent=2)
+    )
+    arc_state_dir = tmp_path / "arc"
+    artifacts_root = arc_state_dir / "game_artifacts" / "game_ls20"
+    _write_hex(artifacts_root / "level_1" / "initial_state.hex", ["0000", "0000"])
+    _write_hex(artifacts_root / "level_2" / "initial_state.hex", ["1111", "1111"])
+
+    old = os.environ.get("ARC_STATE_DIR")
+    os.environ["ARC_STATE_DIR"] = str(arc_state_dir)
+    try:
+        visible = sync_workspace_level_view(game_dir, game_id="ls20", frontier_level=2)
+    finally:
+        if old is None:
+            os.environ.pop("ARC_STATE_DIR", None)
+        else:
+            os.environ["ARC_STATE_DIR"] = old
+
+    assert visible == 1
+    meta = json.loads((game_dir / "level_current" / "meta.json").read_text())
+    assert meta["level"] == 1
+    assert meta["frontier_level"] == 2
+    assert meta["analysis_level_pinned"] is True
+    assert (game_dir / "level_1").exists()
+    assert not (game_dir / "level_2").exists()

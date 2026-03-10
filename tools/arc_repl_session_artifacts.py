@@ -6,6 +6,7 @@ import re
 import shutil
 
 import numpy as np
+from arc_model_runtime.utils import effective_analysis_level
 
 try:
     from arc_repl_session_sequences import (
@@ -133,7 +134,10 @@ def _materialize_level_current_view(
     artifacts_game_dir: Path,
     current_level: int,
 ) -> None:
-    src = artifacts_game_dir / f"level_{int(current_level)}"
+    visible_level = effective_analysis_level(agent_game_dir, frontier_level=int(current_level))
+    if visible_level is None:
+        visible_level = int(current_level)
+    src = artifacts_game_dir / f"level_{int(visible_level)}"
     if not src.exists() or not src.is_dir():
         return
 
@@ -147,7 +151,9 @@ def _materialize_level_current_view(
             {
                 "schema_version": "arc_repl.level_current.v1",
                 "game_id": str(session.game_id),
-                "level": int(current_level),
+                "level": int(visible_level),
+                "frontier_level": int(current_level),
+                "analysis_level_pinned": int(visible_level) != int(current_level),
                 "source": str(src),
             },
             indent=2,
@@ -164,7 +170,7 @@ def _materialize_level_current_view(
         if child.name.startswith("level_"):
             _remove_path(child)
 
-    compat_level = agent_game_dir / f"level_{int(current_level)}"
+    compat_level = agent_game_dir / f"level_{int(visible_level)}"
     _remove_path(compat_level)
     try:
         compat_level.symlink_to(level_current.name, target_is_directory=True)
@@ -200,6 +206,8 @@ def _write_level_turn_files(
 
     before_grid = np.array(pre_pixels if pre_pixels is not None else final_pixels, copy=True)
     after_grid = np.array(final_pixels, copy=True)
+    before_rows = ["".join(f"{int(v):X}" for v in row) for row in before_grid]
+    after_rows = ["".join(f"{int(v):X}" for v in row) for row in after_grid]
     write_hex_grid(turn_dir / "before_state.hex", before_grid)
     write_hex_grid(turn_dir / "after_state.hex", after_grid)
     write_hex_grid(level_dir / "current_state.hex", after_grid)
@@ -286,6 +294,28 @@ def _write_level_turn_files(
         artifacts_game_dir=artifacts_game_dir,
         current_level=current_level,
     )
+    try:
+        turn_dir_rel = str(turn_dir.relative_to(session.cwd))
+    except Exception:
+        turn_dir_rel = str(turn_dir)
+    session.latest_turn_artifacts = {
+        "level": int(level_number),
+        "tool_turn": int(session.turn),
+        "turn_dir": turn_dir_rel,
+        "changed_pixels": int(changed_pixels),
+        "before_state_hex_rows": before_rows,
+        "before_state_hex": "\n".join(before_rows),
+        "after_state_hex_rows": after_rows,
+        "after_state_hex": "\n".join(after_rows),
+        "diff_hex_rows": diff_rows,
+        "diff_hex": "\n".join(diff_rows),
+        "files": {
+            "before_state_hex": f"{turn_dir_rel}/before_state.hex",
+            "after_state_hex": f"{turn_dir_rel}/after_state.hex",
+            "diff_hex": f"{turn_dir_rel}/diff.hex",
+            "meta_json": f"{turn_dir_rel}/meta.json",
+        },
+    }
 
 
 

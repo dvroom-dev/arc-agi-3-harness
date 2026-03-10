@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from arc_model_runtime.utils import write_analysis_level_pin
+from arc_model_runtime.utils import sync_workspace_level_view, write_analysis_level_pin
 from arc_repl_component_sync import refresh_component_mismatch
 
 LEVEL_COMPLETE_MODEL_MISMATCH_MARKER = "__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__"
@@ -274,14 +274,19 @@ def run_exec_compare_intercept(cwd: Path, result: object) -> str | None:
             phase="pending_theory",
             reason="level_complete",
         )
+        current_level = _current_level_from_result(result)
+        if current_level is not None:
+            sync_workspace_level_view(
+                cwd,
+                game_id=game_id,
+                frontier_level=int(current_level),
+            )
 
     compare_file = level_dir / "sequence_compare" / "current_compare.md"
     try:
         compare_rel = str(compare_file.relative_to(artifacts_dir))
     except Exception:
         compare_rel = str(compare_file)
-    if mismatch and int(target_level) == 1 and levels_completed <= 0:
-        return None
     if mismatch:
         marker = (
             LEVEL_COMPLETE_MODEL_MISMATCH_MARKER

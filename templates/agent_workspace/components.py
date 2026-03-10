@@ -50,3 +50,24 @@ def make_component(
 ) -> ComponentBox:
     """Helper for detector implementations."""
     return ComponentBox(kind=kind, bbox=(top, left, bottom, right), attrs=dict(attrs))
+
+
+# Example detector style:
+# - return one ComponentBox per independently moving/recoloring/consumable region
+# - avoid one giant umbrella bbox when separate regions can change independently
+#
+# def find_all_feature_x(grid: np.ndarray) -> list[ComponentBox]:
+#     boxes: list[ComponentBox] = []
+#     for top, left, bottom, right in find_connected_regions(grid, colors={"C", "9"}):
+#         boxes.append(
+#             make_component(
+#                 "feature_x",
+#                 top=top,
+#                 left=left,
+#                 bottom=bottom,
+#                 right=right,
+#             )
+#         )
+#     return boxes
+#
+# COMPONENT_REGISTRY["feature_x"] = find_all_feature_x

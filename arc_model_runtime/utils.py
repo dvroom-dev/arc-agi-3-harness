@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -72,6 +73,22 @@ def clear_analysis_level_pin(game_dir: Path) -> None:
     analysis_level_pin_path(game_dir).unlink(missing_ok=True)
 
 
+def effective_analysis_level(game_dir: Path, frontier_level: int | None = None) -> int | None:
+    frontier = int(frontier_level) if frontier_level is not None else load_frontier_level_from_arc_state()
+    if frontier is None:
+        return None
+    pin = load_analysis_level_pin(game_dir)
+    if not isinstance(pin, dict):
+        return frontier
+    try:
+        pinned_level = int(pin.get("level"))
+    except Exception:
+        return frontier
+    if pinned_level > 0 and pinned_level < frontier:
+        return pinned_level
+    return frontier
+
+
 def arc_state_json_path() -> Path | None:
     state_dir = str(os.getenv("ARC_STATE_DIR", "") or "").strip()
     if not state_dir:
@@ -115,6 +132,18 @@ def _state_artifacts_root_for_active_game() -> Path | None:
         return None
     safe = sanitize_game_id(game_id)
     return Path(state_dir).expanduser() / "game_artifacts" / f"game_{safe}"
+
+
+def _remove_path(path: Path) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink() or path.is_file():
+        try:
+            path.unlink()
+        except Exception:
+            pass
+        return
+    shutil.rmtree(path, ignore_errors=True)
 
 
 def _level_current_matches(level_current: Path, level: int) -> bool:
@@ -161,13 +190,29 @@ def _iter_level_directories(game_dir: Path) -> list[Path]:
     return [dirs[k] for k in sorted(dirs)]
 
 
+def _level_number_for_dir(level_dir: Path) -> int | None:
+    match = _LEVEL_DIR_RE.match(level_dir.name)
+    if match:
+        return int(match.group(1))
+    if level_dir.name == "level_current":
+        for meta_name in ("meta.json", "initial_state.meta.json"):
+            meta_path = level_dir / meta_name
+            if not meta_path.exists():
+                continue
+            try:
+                payload = json.loads(meta_path.read_text())
+                return int(payload.get("level"))
+            except Exception:
+                continue
+    return None
+
+
 def discover_level_initial_states(game_dir: Path) -> dict[int, np.ndarray]:
     out: dict[int, np.ndarray] = {}
     for level_dir in _iter_level_directories(game_dir):
-        match = _LEVEL_DIR_RE.match(level_dir.name)
-        if not match:
+        level = _level_number_for_dir(level_dir)
+        if level is None:
             continue
-        level = int(match.group(1))
         init_file = level_dir / "initial_state.hex"
         if not init_file.exists():
             continue
@@ -189,6 +234,56 @@ def resolve_level_dir(game_dir: Path, level: int) -> Path | None:
         if _level_current_matches(level_current, int(level)):
             return level_current
     return None
+
+
+def sync_workspace_level_view(game_dir: Path, *, game_id: str, frontier_level: int) -> int | None:
+    visible_level = effective_analysis_level(game_dir, frontier_level=frontier_level)
+    if visible_level is None:
+        return None
+    safe_game = sanitize_game_id(game_id)
+    state_dir = str(os.getenv("ARC_STATE_DIR", "") or "").strip()
+    if not state_dir:
+        return None
+    artifacts_root = Path(state_dir).expanduser() / "game_artifacts" / f"game_{safe_game}"
+    src = artifacts_root / f"level_{int(visible_level)}"
+    if not src.exists() or not src.is_dir():
+        return None
+
+    level_current = game_dir / "level_current"
+    temp = game_dir / ".level_current.tmp"
+    _remove_path(temp)
+    shutil.copytree(src, temp)
+    (temp / "meta.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "arc_repl.level_current.v1",
+                "game_id": str(game_id),
+                "level": int(visible_level),
+                "frontier_level": int(frontier_level),
+                "analysis_level_pinned": int(visible_level) != int(frontier_level),
+                "source": str(src),
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _remove_path(level_current)
+    temp.rename(level_current)
+
+    for child in game_dir.iterdir():
+        if child.name == "level_current":
+            continue
+        if child.name.startswith("level_"):
+            _remove_path(child)
+
+    compat_level = game_dir / f"level_{int(visible_level)}"
+    _remove_path(compat_level)
+    try:
+        compat_level.symlink_to(level_current.name, target_is_directory=True)
+    except Exception:
+        shutil.copytree(level_current, compat_level)
+    return int(visible_level)
 
 
 def diff_payload(before: np.ndarray, after: np.ndarray) -> dict:

@@ -16,6 +16,8 @@ Coverage guardrail:
 - Keep `components.py` detectors broad enough that `python3 inspect_components.py --coverage --level <n>` passes before leaving theory mode.
 - Use neutral feature names until a semantic role is proven by evidence.
 - Do not assume a feature is unique; track multiple copies explicitly.
+- Rule of thumb: if a region can move independently, recolor independently, or be consumed independently, it should usually be its own detected component rather than part of one giant bounding box.
+- Prefer multiple specific detectors over one broad umbrella detector when the broad box would hide which sub-part actually changed.
 
 # Available Real-Game Actions (exclude RESET)
   - ACTION#: what it appears to do

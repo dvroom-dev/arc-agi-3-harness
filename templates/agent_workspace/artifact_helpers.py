@@ -302,10 +302,18 @@ def inspect_current_mismatch(game_dir: str | Path) -> dict[str, Any]:
     compare_payload = load_current_compare(game_dir)
     mismatch = first_mismatch_report(compare_payload)
     if not mismatch:
+        compare_summary = summarize_current_compare(game_dir)
+        if not bool(compare_summary.get("all_match")):
+            return {
+                "status": "error",
+                "message": "current_compare.json is not clean but has no mismatched report",
+                "compare": compare_summary,
+                "mismatch": None,
+            }
         return {
             "status": "clean",
             "message": "current_compare.json has no mismatched report",
-            "compare": summarize_current_compare(game_dir),
+            "compare": compare_summary,
             "mismatch": None,
         }
     level = int(mismatch.get("level") or compare_payload.get("level") or 0)
