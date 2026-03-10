@@ -35,6 +35,14 @@ prompt_parts:
         - `python3 inspect_components.py --current-mismatch` writes `component_mismatch.json` / `component_mismatch.md` using component bounding boxes instead of raw grid diffs.
         - `model.py` is harness-owned runtime glue. Do not edit it.
         - Outside theory mode, prefer these component summaries over direct hex-grid or diff inspection.
+        - Detector rule of thumb: if a region can move independently, recolor independently, or be consumed independently, it should usually be its own detected component rather than part of one giant bounding box.
+        - Prefer multiple specific detectors over one broad umbrella detector when the broad box would hide which sub-part actually changed.
+  official_grid_schema:
+    - literal: |
+        Official ARC game-schema grid structure:
+        - Dimensions: Maximum 64x64 grid size
+        - Cell Values: Integer values 0-15 representing different states/colors
+        - Coordinate System: (0,0) at top-left, (x,y) format
   arc_repl_probe_runtime:
     - literal: |
         `arc_repl` acts on the real game.
@@ -73,7 +81,6 @@ supervisor:
     1) All levels of the current game are complete.
     2) The run is irrecoverably blocked by errors.
   review_timeout_ms: 300000
-  cadence_time_ms: 300000
   cadence_interrupt_policy: boundary
   disable_synthetic_check_supervisor_on_rule_failure: false
   context_carryover_limit_bytes: 98304
@@ -96,10 +103,10 @@ supervisor:
       - "Do not assign semantic roles to a feature unless action-linked evidence supports that role. Use neutral feature names until the role is proven."
       - "Do not assume a feature is unique unless evidence shows only one copy matters; prefer reasoning that can track multiple copies."
       - "After any frontier level completes and the game continues, prefer routing next to `theory` so the agent finalizes the solved level before taking more real-game actions."
-      - "If `current_compare.md` shows divergence and current mode is not `code_model`, route to `code_model` with the compare file as concrete evidence, except on level 1 before the first completion where `explore_and_solve` owns discovery."
+      - "If `current_compare.md` shows divergence and current mode is not `code_model`, route to `code_model` with the compare file as concrete evidence, including level 1 before the first completion."
       - "Keepalive interrupt protocol (`__ARC_INTERCEPT_IDLE_KEEPALIVE__`): capture `prior_mode` as the mode active when marker is detected; on level 1 use `explore_and_solve` for exactly one real-game action; otherwise use the smallest allowed real-game replay/probe mode; then on the next supervisor pass, return to `prior_mode` via `resume_mode_head` once that one action is evidenced."
       - "During keepalive interrupt handling, do not ask for broad analysis or file churn; require a single valid `arc_repl` game action and concise evidence only."
-      - "If intercept marker is __ARC_INTERCEPT_COMPARE_MISMATCH__, route to `code_model` via `resume_mode_head`, attach compare results, and require compare parity across all explored current-level sequences before further real-game progression. Do not use this path for level 1 before the first completion."
+      - "If intercept marker is __ARC_INTERCEPT_COMPARE_MISMATCH__, route to `code_model` via `resume_mode_head`, attach compare results, and require compare parity across all explored current-level sequences before further real-game progression, including level 1 before the first completion."
       - "If intercept marker is __ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__, route to `theory` first to finalize solved-level components and coverage, then route to `code_model` and require model parity repair against the pinned solved level before level advancement continues."
       - "If intercept marker is __ARC_INTERCEPT_RESET_LEVEL__, evaluate whether reset usage is appropriate for the current mode and recent evidence, then decide whether to continue or intervene with corrective guidance."
       - "When a solved-level compare pin is active, keep compare targeted to the solved level until theory coverage passes and code_model exits with compare clean."
@@ -156,8 +163,7 @@ supervisor:
                    - If using `mode_payload.user_message` (fork/resume path), manually wrap message in:
                      `<supervisor-command trigger="agent_tool_intercept"> ... </supervisor-command>`.
               2) If marker is `__ARC_INTERCEPT_COMPARE_MISMATCH__`:
-                 - If current ARC level is 1 and no level has been completed yet, stay out of `code_model`; use `explore_and_solve` or `theory` instead.
-                 - Otherwise use `resume_mode_head` to mode `code_model`.
+                 - Always use `resume_mode_head` to mode `code_model`, including level 1 before first completion.
                  - Put the compare output/details from the intercepted tool response into the resume message.
                  - Instruct the agent to patch model code, rerun compare, and repeat until compare is clean across all explored current-level sequences.
               3) If marker is `__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__`:
@@ -165,10 +171,11 @@ supervisor:
                  - Require fresh component coverage on the solved level before any `code_model` turn.
                  - After theory passes, route to `code_model` and keep compare focused on the pinned solved level until it is clean.
               4) If marker is `__ARC_INTERCEPT_COMPARE_CLEAN__`:
-                 - If current mode is `code_model`:
-                   - If the model now includes a concrete level-completion mechanism and `play.py`/`play_lib.py` contain a plausible deterministic attempt, use `resume_mode_head` to `solve_model`.
-                   - Otherwise use `resume_mode_head` to `theory`.
+                 - Treat compare-clean as a mandatory supervisor checkpoint after a covered real-game action or compare refresh.
                  - If current mode is `solve_model`, do not treat compare-clean alone as sufficient. Stay in `solve_model` unless the model-side `play.py` proof actually solves the level; otherwise route to `theory` only when the agent can name the missing evidence that blocks solution search.
+                 - Otherwise use `resume_mode_head` to `theory`.
+                 - Put the compare-clean details into the handoff and explicitly name the single highest-value next question to answer.
+                 - The supervisor message must tell the agent what to explore next: one concrete unanswered mechanic/completion question and one minimal next real-game probe or solve attempt.
                  - Inject concise guidance that compare-clean means model parity is clean for explored sequences, not that the level is solved.
               4) If marker is `__ARC_INTERCEPT_RESET_LEVEL__`:
                  - Judge whether the reset is appropriate for the current mode and evidence state.
@@ -222,13 +229,15 @@ agent:
           - Do not assume a conversation spans multiple games.
 
           # Game clues (keep these in mind)
-          - These games are designed to be easy for humans and hard for AI.
-          - Level 1 is usually simple; avoid complex early theories.
-          - Later levels usually build on earlier mechanics and add one twist.
-          - Mechanics/features usually carry over across levels; positions often do not.
-          - Define features by visual form/behavior, not single colors.
-          - Assume visible features matter; if a frontier feature is unexplained, you probably cannot solve that level efficiently yet.
-          - GAME_OVER can reset progress; track causes and prevention theories.
+          - These games are designed to be easy for humans and hard for AI. They often rotate features 90, 180, or 270 degrees to disguise them. They also present features at different sizes / scales to make them difficult to identify programatically.
+          - These games resemble common puzzles and spatial IQ tests.
+          - The first level of a game will be simple, do not over-complicate your theories. Each subsequent level will add some twist, but they always build on rules established in earlier levels.
+          - Assume mechanics and features are reused across levels, but do not assume feature positions carry over.
+          - Define features by visual form/behavior (possibly multi-color, multi-part), not single colors or exact positions.
+          - Some games divide the game's space conceptually between the game map and a HUD. The primary distinction is that elements in the map usually have direct spacial relationships with other map elements but not HUD elements.
+          - Assume all features in the game state are important to understanding and solving the game. If a feature is unexplained, you probably can't efficiently solve the level yet.
+          - Certain conditions can trigger GAME_OVER which resets the game; track causes and prevention theories.
+          - A common game over mechanic is a limit to the number of actions that can be taken in a level. If so there will be some visual game state feature representing this limit. Running `arc_repl reset_level` can avoid GAME_OVER at the cost of level progress.
 
           # Workspace and paths
           - Your current working directory is the active game workspace (`.`).
@@ -318,8 +327,23 @@ modes:
             - Edit
             - MultiEdit
             - Write
+        mock:
+          allow:
+            - Bash
+            - Glob
+            - Grep
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
       provider_filesystem:
         claude:
+          allow_new_files: false
+          write:
+            allow:
+              - theory.md
+              - components.py
+        mock:
           allow_new_files: false
           write:
             allow:
@@ -335,12 +359,17 @@ modes:
             You may read any workspace file, but you may only edit `theory.md` and `components.py`.
             Do not use `arc_repl` in this mode.
             The only Python command allowed here is `python3 inspect_components.py ...` for component coverage/mismatch checks.
-            Use raw `.hex`, sequence metadata, and compare artifacts to define components and map every visible pixel to named elements.
+             Use raw `.hex`, sequence metadata, and compare artifacts to define components and map every visible pixel to named elements.
+             Detector rule of thumb: if a region can move independently, recolor independently, or be consumed independently, it should usually be its own detected component rather than part of one giant bounding box.
+             Prefer multiple specific detectors over one broad umbrella detector when the broad box would hide which sub-part actually changed.
+            Provider `Read` output adds line numbers and can show a blank numbered trailing line; infer grid dimensions only from non-empty hex rows or from `component_coverage.*`, not from the rendered line count.
             Use neutral feature names until evidence proves a stronger role.
+            If a solved-level compare pin is active, stay strictly scoped to that pinned level. Do not record frontier-level observations, components, or hypotheses until the pin is cleared.
             Do not exhaustively restate stable geometry. After one initial survey, only reopen a file if it answers a specific open question or verifies a concrete handoff.
             If you can already name the smallest next step, switch modes promptly instead of continuing broad analysis.
         - prompt_part: artifact_read_path
         - prompt_part: component_model_runtime
+        - prompt_part: official_grid_schema
         - prompt_part: available_actions_context
     user_message:
       operation: append
@@ -351,7 +380,9 @@ modes:
             - update `theory.md` with components, action effects, completion candidates, and unknowns;
             - keep `components.py` detectors broad enough that every visible pixel in every seen state for the active level lies inside at least one component bounding box;
             - run `python3 inspect_components.py --coverage --level <LEVEL>` before leaving theory mode;
+            - use `component_coverage.*` as the canonical source for observed grid shapes; do not count rendered `Read` line numbers to infer dimensions;
             - record the available non-RESET actions from the prompt or existing artifacts; do not propose read-only action-discovery probes;
+            - if a solved-level compare pin is active, keep `theory.md` and `components.py` scoped to the pinned solved level only;
             - on level 1 before the first completion, decide whether the next step is `explore_and_solve`;
             - on later levels, decide whether the next step is `code_model`, `solve_model`, or `recover`;
             - if switching, include a concrete handoff message with exact files/evidence to inspect or the exact probe to run.
@@ -414,8 +445,23 @@ modes:
             - Edit
             - MultiEdit
             - Write
+        mock:
+          allow:
+            - Bash
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
       provider_filesystem:
         claude:
+          allow_new_files: false
+          read:
+            allow:
+              - theory.md
+          write:
+            allow:
+              - theory.md
+        mock:
           allow_new_files: false
           read:
             allow:
@@ -442,6 +488,7 @@ modes:
             - write the observed outcome and its likely implication into `theory.md`;
             - then switch_mode promptly.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
+            For actionful probes, inspect the returned `artifacts.after_state_hex` and `artifacts.diff_hex` first before reopening on-disk turn artifacts.
             Do not use read-only `arc_repl` calls as inspection tools.
             Do not inspect Python runtime objects inside the probe script; the `arc_repl` response and next-mode artifacts are the inspection surface.
             You may read raw state artifacts in this mode because level-1 discovery depends on them.
@@ -513,8 +560,38 @@ modes:
             - Edit
             - MultiEdit
             - Write
+        mock:
+          allow:
+            - Bash
+            - Glob
+            - Grep
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
       provider_filesystem:
         claude:
+          allow_new_files: false
+          read:
+            allow:
+              - theory.md
+              - model.py
+              - components.py
+              - model_lib.py
+              - play.py
+              - play_lib.py
+              - inspect_components.py
+              - component_coverage.json
+              - component_coverage.md
+              - component_mismatch.json
+              - component_mismatch.md
+          write:
+            allow:
+              - theory.md
+              - model_lib.py
+              - play.py
+              - play_lib.py
+        mock:
           allow_new_files: false
           read:
             allow:
@@ -546,6 +623,7 @@ modes:
             Keep component definitions in `components.py` and reusable mechanics/helpers in `model_lib.py`.
             Do not do route planning here; only patch component detectors and state transitions needed to explain observed diffs.
             Use `theory.md`, `components.py`, `component_mismatch.*`, `component_coverage.*`, and compare summaries as the primary evidence surface here.
+            If a solved-level compare pin is active, stay scoped to the pinned solved level and ignore frontier-level artifacts until the pin clears.
             Do not read raw `.hex`, `diff.hex`, or sequence metadata directly in this mode.
             Runtime/harness internals are out of scope: do not read or edit any file under `/config/tools/`.
         - prompt_part: model_runtime
@@ -630,8 +708,37 @@ modes:
             - Edit
             - MultiEdit
             - Write
+        mock:
+          allow:
+            - Bash
+            - Glob
+            - Grep
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
       provider_filesystem:
         claude:
+          allow_new_files: false
+          read:
+            allow:
+              - theory.md
+              - model.py
+              - components.py
+              - model_lib.py
+              - play.py
+              - play_lib.py
+              - inspect_components.py
+              - component_coverage.json
+              - component_coverage.md
+              - component_mismatch.json
+              - component_mismatch.md
+          write:
+            allow:
+              - theory.md
+              - play.py
+              - play_lib.py
+        mock:
           allow_new_files: false
           read:
             allow:
@@ -723,8 +830,25 @@ modes:
             - Edit
             - MultiEdit
             - Write
+        mock:
+          allow:
+            - Bash
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
       provider_filesystem:
         claude:
+          allow_new_files: false
+          read:
+            allow:
+              - theory.md
+              - play.py
+              - play_lib.py
+          write:
+            allow:
+              - theory.md
+        mock:
           allow_new_files: false
           read:
             allow:
