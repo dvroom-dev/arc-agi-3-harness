@@ -245,13 +245,14 @@ export interface AgentConversationBranch {
   mode: string | null;
   label: string;
   conversationId: string;
-  forkId: string;
+  forkId: string | null;
   parentId?: string | null;
   createdAt: string;
   active: boolean;
   actionSummary?: string | null;
   initialUserPreview: string | null;
   lastAssistantPreview: string | null;
+  memberForkIds?: string[];
 }
 
 export type { RunLaunchParams, StoredRunParams };

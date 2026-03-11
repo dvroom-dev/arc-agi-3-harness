@@ -270,6 +270,7 @@ Do not trust run names alone. Inspect the artifacts.
 The `ui/` subproject is a Next.js App Router app for inspecting and launching harness runs. When working inside `ui/`, also follow [`ui/AGENTS.md`](/home/dvroom/projs/arc-agi-harness/ui/AGENTS.md).
 
 UI-specific rules:
+- After UI changes, verify behavior in the actual running UI, not just by reading code or API output.
 - Keep benchmark logic authoritative on the server side. UI components may render scores, params, run state, and history, but canonical computation should stay in server routes or shared backend helpers.
 - Do not duplicate scoring rules or run-state inference in browser-only code when the backend already has a canonical source.
 - UI affordances that expose run metadata must use real artifacts and explicit fallbacks; do not fabricate confidence when logs, scorecards, or traces are missing.

@@ -103,30 +103,74 @@ export async function listAgentConversationBranches(
     };
   });
 
-  const mergedBranches = [...baseBranches];
-
-  const visibleBranches = filterVisibleAgentBranches(mergedBranches);
+  const visibleBranches = filterVisibleAgentBranches(baseBranches);
 
   if (visibleBranches.length === 0) {
     return loadConversationForkBranchFallback(runId);
   }
 
-  visibleBranches.sort((a, b) => (parseTime(a.createdAt) ?? 0) - (parseTime(b.createdAt) ?? 0));
-  const modeCounts = new Map<string, number>();
-  for (const branch of visibleBranches) {
+  const grouped = new Map<
+    string,
+    {
+      mode: string;
+      conversationId: string;
+      createdAt: string;
+      active: boolean;
+      initialUserPreview: string | null;
+      lastAssistantPreview: string | null;
+      memberForkIds: string[];
+      latestForkId: string;
+      latestParentId: string | null;
+    }
+  >();
+  for (const branch of visibleBranches.sort((a, b) => (parseTime(a.createdAt) ?? 0) - (parseTime(b.createdAt) ?? 0))) {
     const mode = branch.mode?.trim() || "agent";
-    modeCounts.set(mode, (modeCounts.get(mode) ?? 0) + 1);
+    const groupKey = `${branch.conversationId}:${mode}`;
+    const existing = grouped.get(groupKey);
+    if (!existing) {
+      grouped.set(groupKey, {
+        mode,
+        conversationId: branch.conversationId,
+        createdAt: branch.createdAt,
+        active: branch.active,
+        initialUserPreview: branch.initialUserPreview,
+        lastAssistantPreview: branch.lastAssistantPreview,
+        memberForkIds: [branch.forkId],
+        latestForkId: branch.forkId,
+        latestParentId: branch.parentId ?? null,
+      });
+      continue;
+    }
+    existing.active = existing.active || branch.active;
+    existing.lastAssistantPreview = branch.lastAssistantPreview || existing.lastAssistantPreview;
+    existing.memberForkIds.push(branch.forkId);
+    existing.latestForkId = branch.forkId;
+    existing.latestParentId = branch.parentId ?? null;
+  }
+
+  const groups = [...grouped.entries()].sort((a, b) => (parseTime(a[1].createdAt) ?? 0) - (parseTime(b[1].createdAt) ?? 0));
+  const modeConversationCounts = new Map<string, number>();
+  for (const [, group] of groups) {
+    modeConversationCounts.set(group.mode, (modeConversationCounts.get(group.mode) ?? 0) + 1);
   }
   const seenPerMode = new Map<string, number>();
-  const branches = visibleBranches.map((branch) => {
-    const mode = branch.mode?.trim() || "agent";
-    const nextIndex = (seenPerMode.get(mode) ?? 0) + 1;
-    seenPerMode.set(mode, nextIndex);
-    const totalForMode = modeCounts.get(mode) ?? 1;
+  const branches = groups.map(([groupKey, group]) => {
+    const nextIndex = (seenPerMode.get(group.mode) ?? 0) + 1;
+    seenPerMode.set(group.mode, nextIndex);
+    const totalForMode = modeConversationCounts.get(group.mode) ?? 1;
     return {
-      ...branch,
-      label: totalForMode > 1 ? `${mode} (${nextIndex})` : mode,
-      active: branch.active,
+      key: groupKey,
+      mode: group.mode,
+      label: totalForMode > 1 ? `${group.mode} (${nextIndex})` : group.mode,
+      conversationId: group.conversationId,
+      forkId: group.latestForkId,
+      parentId: group.latestParentId,
+      createdAt: group.createdAt,
+      active: group.active,
+      actionSummary: "supervise:start",
+      initialUserPreview: group.initialUserPreview,
+      lastAssistantPreview: group.lastAssistantPreview,
+      memberForkIds: group.memberForkIds,
     } satisfies AgentConversationBranch;
   });
 
@@ -155,24 +199,34 @@ async function readAgentBranchSkeletonDocument(
       loadRawEvents(runId, conversationId),
       loadInterventions(runId, conversationId),
     ]);
-    const branch = storedBranches.find((entry) => entry.key === branchKey);
+    const [conversationId, mode] = branchKey.split(":", 2);
+    const groupedBranches = storedBranches
+      .filter(
+        (entry) =>
+          entry.conversationId === conversationId && (entry.mode?.trim() || "agent") === (mode || "agent")
+      )
+      .sort((a, b) => (parseTime(a.createdAt) ?? 0) - (parseTime(b.createdAt) ?? 0));
+    const branch = groupedBranches.at(-1);
     if (!branch) throw new Error("branch not found");
     const seedBlocks = sliceBranchDocumentSeed(branch.documentText);
-    const { eventWindow, interventionWindow } = eventsInWindow(
-      rawEvents,
-      interventions,
-      branch.createdAt,
-      branch.nextCreatedAt
-    );
-    const eventBlocks = [
-      ...eventWindow.flatMap((event) => rawEventToBlocks(event)),
-      ...interventionWindow.map((entry) => interventionBlock(entry)),
-    ];
+    const eventBlocks: ConversationBlock[] = [];
+    for (const groupBranch of groupedBranches) {
+      const { eventWindow, interventionWindow } = eventsInWindow(
+        rawEvents,
+        interventions,
+        groupBranch.createdAt,
+        groupBranch.nextCreatedAt
+      );
+      eventBlocks.push(
+        ...eventWindow.flatMap((event) => rawEventToBlocks(event)),
+        ...interventionWindow.map((entry) => interventionBlock(entry))
+      );
+    }
     const windowed = sliceBlocks(eventBlocks, options);
     const seedEventCount = seedBlocks.filter((block) => block.kind !== "frontmatter").length;
     return {
       blocks: [...seedBlocks, ...windowed.blocks],
-      source: `${branch.mode || "agent"} branch`,
+      source: `${branch.mode || "agent"} conversation`,
       totalLines:
         branch.documentText.split("\n").length +
         eventBlocks.reduce((sum, block) => sum + block.content.split("\n").length, 0),
