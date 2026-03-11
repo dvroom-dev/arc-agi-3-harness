@@ -95,7 +95,7 @@ supervisor:
       - "Prefer continue unless there is a clear, evidence-backed correction to make."
       - "When switching to theory or explore_and_solve, prefer resume_mode_head over fork_new_conversation so cross-mode context is preserved. Only fork a new theory/explore_and_solve conversation after a game-state discontinuity (reset_level, level_complete, game_complete, game_over)."
       - "When choosing `resume_mode_head` or `fork_new_conversation`, always include a concrete handoff message: what was learned, why the mode is changing, and the exact next action or verification target."
-      - "Any handoff into `explore_and_solve` must include either: (a) a short ordered list of named feature targets to probe, or (b) one or more concrete solution theories to test. Do not hand off to `explore_and_solve` with only generic advice like 'keep exploring'."
+      - "Any handoff into `explore_and_solve` must include exactly one target class: either (a) a short ordered list of named feature targets to probe, or (b) one concrete solution theory to test. Do not mix feature-target probing with a multi-step solution plan in the same handoff."
       - "If the trigger is an agent `switch_mode` request that you accept or redirect into another mode, include the agent's full latest assistant message in the handoff context so the next mode does not lose its plan."
       - "For rule enforcement decisions, cite concrete evidence pointers (turn/tool/output/file)."
       - "If evidence is ambiguous, request one minimal discriminating check instead of broad re-analysis."
@@ -170,7 +170,7 @@ supervisor:
                  - Treat the mismatch marker as an immediate `code_model` routing signal.
                  - Use `resume_mode_head` to `code_model` (or `fork_new_conversation` in `code_model` if a fresh branch is required).
                  - Put the compare output/details from the intercepted tool response into the handoff.
-                 - Do not send the agent into broad re-analysis; the next stop should be `code_model` unless solved-level cleanup explicitly requires `theory` first.
+                 - Do not send the agent into broad re-analysis; the next stop must be `code_model` unless solved-level cleanup explicitly requires `theory` first.
               3) If marker is `__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__`:
                  - Route to `theory` first with a handoff that the solved level is pinned for cleanup.
                  - Require fresh component coverage on the solved level before any `code_model` turn.
@@ -182,7 +182,7 @@ supervisor:
                  - Otherwise use `resume_mode_head` to `theory`.
                  - Put the compare-clean details into the handoff and explicitly name the single highest-value next question to answer.
                  - The supervisor message must tell the agent what to explore next: one concrete unanswered mechanic/completion question and one minimal next real-game probe or solve attempt.
-                 - If the next step will be `explore_and_solve`, the handoff must name either explicit feature targets to probe or explicit solution theories to test.
+                 - If the next step will be `explore_and_solve`, the handoff must name exactly one target class: either explicit feature targets to probe or one concrete solution theory to test.
                  - Inject concise guidance that compare-clean means model parity is clean for explored sequences, not that the level is solved.
               4) If marker is `__ARC_INTERCEPT_RESET_LEVEL__`:
                  - Judge whether the reset is appropriate for the current mode and evidence state.
@@ -393,7 +393,7 @@ modes:
             - record the available non-RESET actions from the prompt or existing artifacts; do not propose read-only action-discovery probes;
             - if a solved-level compare pin is active, keep `theory.md` and `components.py` scoped to the pinned solved level only;
             - on level 1 before the first completion, decide whether the next step is `explore_and_solve`;
-            - if switching to `explore_and_solve`, hand off either a short ordered list of named feature targets to probe or one or more concrete solution theories to test next;
+            - if switching to `explore_and_solve`, hand off exactly one target class: either a short ordered list of named feature targets to probe next or one concrete solution theory to test next;
             - on later levels, decide whether the next step is `code_model`, `solve_model`, or `recover`;
             - if switching, include a concrete handoff message with exact files/evidence to inspect or the exact probe to run.
             Read these agent-workspace files as needed instead of relying on inlined contents:
@@ -413,7 +413,7 @@ modes:
         - "In theory mode, after an initial survey, reread only the files needed for one specific unresolved question or handoff."
         - "In theory mode, when reading a full-grid file such as `current_state.hex`, read it whole once before any targeted reread; use offset/limit reads only for a specific unresolved question."
         - "In theory mode, use raw `.hex`/`.diff` evidence to define named components and keep every visible pixel accounted for by component bounding boxes."
-        - "On level 1 before the first completion, if a real-game probe or solution attempt is needed, switch_mode to `explore_and_solve` with either a short ordered list of named feature targets to probe or one or more concrete solution theories to test."
+        - "On level 1 before the first completion, if a real-game probe or solution attempt is needed, switch_mode to `explore_and_solve` with exactly one target class: either a short ordered list of named feature targets to probe or one concrete solution theory to test."
         - "On level 2+, if new components or changed semantics require mechanics work, switch_mode to `code_model` with explicit patch targets."
         - "On level 2+, if no new components are needed and only solution search remains, switch_mode to `solve_model`."
       violations:
@@ -431,7 +431,7 @@ modes:
       - "Keepalive requires exactly one real-game action."
     stop_when:
       - "Level 1 completes; switch_mode to theory for post-completion cleanup."
-      - "All handed-off feature targets are answered or falsified, or all handed-off solution theories are tested, and the result is recorded; switch_mode to theory or recover as appropriate."
+      - "All handed-off feature targets are answered or falsified, or the single handed-off solution theory is tested, and the result is recorded; switch_mode to theory or recover as appropriate."
       - "A solved-level regression requires replay; switch_mode to recover."
     tools:
       allow_builtin:
@@ -497,7 +497,7 @@ modes:
             Active game: `${vars.game_id}`.
             Explore-and-solve is level-1 only:
             - perform the minimal real-game probe or likely solution attempt named in the handoff you received;
-            - stay focused on those named feature targets or solution theories until they are answered or falsified;
+            - stay focused only on the single handed-off target class until every named feature target is answered/falsified or the single handed-off solution theory is tested;
             - write the observed outcome and its likely implication into `theory.md`;
             - then switch_mode promptly.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
@@ -511,14 +511,14 @@ modes:
       operation: append
       requirements:
         - "Use explore_and_solve only on level 1 before the first completion."
-        - "In explore_and_solve, perform the minimum real-game action sequence needed to answer the handed-off feature targets or test the handed-off level-1 solution theory."
-        - "Do not exit explore_and_solve until every handed-off feature target has been answered or falsified, or every handed-off solution theory has been tested and recorded."
+        - "In explore_and_solve, perform the minimum real-game action sequence needed to answer the handed-off feature targets or test the single handed-off level-1 solution theory."
+        - "Do not exit explore_and_solve until every handed-off feature target has been answered or falsified, or the single handed-off solution theory has been tested and recorded."
         - "After each real-game probe or solution attempt, update `theory.md` before switching modes."
       violations:
         - "Using explore_and_solve on level 2+."
         - "Creating new files or scripts in explore_and_solve."
         - "Broadening explore_and_solve to new unhanded-off targets or free-form map wandering without first switching back for a new handoff."
-        - "Exiting explore_and_solve before the handed-off feature targets or solution theories have been answered, falsified, or tested."
+        - "Exiting explore_and_solve before the handed-off feature targets or the single handed-off solution theory has been answered, falsified, or tested."
         - "Reading workspace files unrelated to the current level evidence in explore_and_solve."
         - "Using explore_and_solve for broad analysis instead of a concrete probe or solution attempt."
 
@@ -532,7 +532,6 @@ modes:
       - "If a solved-level compare pin is active and compare is clean for the pinned solved level, switch_mode to theory so the supervisor can certify solved-level wrap-up complete and only then release the run to the frontier level."
       - "Compare is clean across all explored current-level sequences and the model now includes a concrete current-level completion mechanism; switch_mode to solve_model."
       - "Compare is clean across all explored current-level sequences but the completion mechanism remains unknown; switch_mode to theory."
-      - "Missing real-game evidence blocks implementation; switch_mode to theory."
     tools:
       allow_builtin:
         - shell
@@ -642,6 +641,7 @@ modes:
             If a solved-level compare pin is active, stay scoped to the pinned solved level and ignore frontier-level artifacts until the pin clears.
             Do not read raw `.hex`, `diff.hex`, or sequence metadata directly in this mode.
             Runtime/harness internals are out of scope: do not read or edit any file under `/config/tools/`.
+            If compare is red and you have one exact blocker, stay in `code_model` and report that blocker precisely; do not bounce back to `theory` while parity remains red.
         - prompt_part: model_runtime
     user_message:
       operation: append
@@ -659,6 +659,7 @@ modes:
                - switch_mode to `solve_model` if completion logic now exists;
                - otherwise switch_mode to `theory`.
             6) if compare is still red and a repair is blocked, stay in `code_model` and produce a precise blocker report with exact file/line evidence and the smallest required fix; do not switch out of `code_model` while parity remains red.
+            7) if there is one exact blocker preventing parity repair, ask the supervisor to escalate or resolve that blocker from `code_model`; do not switch back to `theory` until compare is clean.
             Read these agent-workspace files as needed; prefer component summaries over raw grid artifacts:
             - `theory.md`
             - `model.py`
@@ -675,6 +676,7 @@ modes:
         - "Do not leave code_model while compare is still red for the active level or pinned solved level."
         - "If a solved-level compare pin is active, stay scoped to the pinned solved level and do not attempt frontier-level planning or solving."
         - "End each code_model turn with model-file edits, theory updates, or a switch_mode call."
+        - "If compare is red and a single exact blocker remains, stay in code_model and report the blocker instead of switching back to theory."
       violations:
         - "Using any `arc_repl` command in code_model."
         - "Reading raw `.hex`, `diff.hex`, or sequence metadata directly in code_model."
