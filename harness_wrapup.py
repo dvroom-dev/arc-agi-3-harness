@@ -18,6 +18,15 @@ def _read_json_if_exists(path: Path) -> dict[str, Any] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _int_or_none(value: Any) -> int | None:
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except Exception:
+        return None
+
+
 def load_super_active_mode_impl(runtime) -> str | None:
     payload = _read_json_if_exists(runtime.run_dir / "super" / "state.json")
     if not isinstance(payload, dict):
@@ -72,8 +81,59 @@ def load_wrapup_status_impl(runtime) -> dict[str, Any]:
     }
 
 
+def validate_wrapup_surfaces_impl(runtime) -> None:
+    status = load_wrapup_status_impl(runtime)
+    if not bool(status["active"]):
+        return
+
+    game_dir = runtime.active_agent_dir()
+    pinned_level = int(status["pinned_level"])
+    frontier_level = int(status["frontier_level"])
+
+    level_current_meta = _read_json_if_exists(game_dir / "level_current" / "meta.json") or {}
+    model_status = _read_json_if_exists(game_dir / "model_status.json") or {}
+    model_state = model_status.get("state") if isinstance(model_status.get("state"), dict) else {}
+    compare = _read_json_if_exists(game_dir / "current_compare.json") or {}
+
+    level_current_level = _int_or_none(level_current_meta.get("level"))
+    level_current_frontier = _int_or_none(level_current_meta.get("frontier_level"))
+    level_current_pinned = level_current_meta.get("analysis_level_pinned")
+    model_current_level = _int_or_none(model_state.get("current_level"))
+    model_levels_completed = _int_or_none(model_state.get("levels_completed"))
+    model_available_levels = model_state.get("available_model_levels")
+    compare_level = _int_or_none(compare.get("level"))
+
+    errors: list[str] = []
+    if level_current_level != pinned_level:
+        errors.append(f"level_current.level={level_current_level} expected={pinned_level}")
+    if level_current_frontier != frontier_level:
+        errors.append(f"level_current.frontier_level={level_current_frontier} expected={frontier_level}")
+    if level_current_pinned is not True:
+        errors.append(f"level_current.analysis_level_pinned={level_current_pinned} expected=True")
+    if model_current_level != pinned_level:
+        errors.append(f"model_status.state.current_level={model_current_level} expected={pinned_level}")
+    if model_levels_completed != max(0, pinned_level - 1):
+        errors.append(
+            "model_status.state.levels_completed="
+            f"{model_levels_completed} expected={max(0, pinned_level - 1)}"
+        )
+    if isinstance(model_available_levels, list):
+        leaked = [lvl for lvl in model_available_levels if int(lvl) > pinned_level]
+        if leaked:
+            errors.append(f"model_status.state.available_model_levels leaked frontier levels {leaked}")
+    if compare and compare_level != pinned_level:
+        errors.append(f"current_compare.level={compare_level} expected={pinned_level}")
+
+    if errors:
+        raise RuntimeError(
+            "solved-level wrap-up surface validation failed while pin is active: "
+            + "; ".join(errors)
+        )
+
+
 def certify_or_block_wrapup_transition_impl(runtime) -> None:
     status = load_wrapup_status_impl(runtime)
+    validate_wrapup_surfaces_impl(runtime)
     if not bool(status["active"]):
         return
 
