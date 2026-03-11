@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import type { ConversationBlock } from "@/lib/conversation";
 import { runDir } from "@/lib/paths";
+import { loadStoredConversationBranches } from "@/lib/agentConversationStore.server";
 
 export interface RawEventEntry {
   ts: string;
@@ -16,6 +17,7 @@ export interface InterventionEntry {
   actionSummary: string | null;
   forkSummary: string | null;
   reason: string | null;
+  nextMode: string | null;
 }
 
 function parseTime(value: string | null | undefined): number | null {
@@ -86,6 +88,14 @@ export async function loadInterventions(
     "index.json"
   );
   try {
+    const storedBranches = await loadStoredConversationBranches(runId, conversationId);
+    const childModeByParentId = new Map<string, string | null>();
+    for (const branch of storedBranches) {
+      if (branch.actionSummary !== "supervise:start" || !branch.parentId) continue;
+      if (!childModeByParentId.has(branch.parentId)) {
+        childModeByParentId.set(branch.parentId, branch.mode ?? null);
+      }
+    }
     const payload = JSON.parse(await fs.readFile(indexPath, "utf-8")) as {
       forks?: Array<Record<string, unknown>>;
     };
@@ -108,6 +118,8 @@ export async function loadInterventions(
           actionSummary,
           forkSummary: typeof fork.forkSummary === "string" ? fork.forkSummary : null,
           reason,
+          nextMode:
+            typeof fork.id === "string" ? childModeByParentId.get(fork.id) ?? null : null,
         } satisfies InterventionEntry;
       })
       .filter((entry): entry is InterventionEntry => Boolean(entry))
@@ -311,13 +323,17 @@ export function rawEventToBlocks(event: RawEventEntry): ConversationBlock[] {
 }
 
 export function interventionBlock(entry: InterventionEntry): ConversationBlock {
+  const actionText = entry.nextMode
+    ? `switch_mode to ${entry.nextMode}`
+    : entry.forkSummary || "(none)";
   const lines = [
     `mode: ${entry.actionSummary?.includes("hard") ? "hard" : "soft"}`,
     "trigger: supervisor_intervention",
     `decision: ${entry.actionSummary || "(unknown)"}`,
-    `action: ${entry.forkSummary || "(none)"}`,
+    `action: ${actionText}`,
     `resume: true`,
     `reasons: ${entry.reason || "(none)"}`,
+    `next_mode: ${entry.nextMode || "(none)"}`,
   ];
   return {
     kind: "text",

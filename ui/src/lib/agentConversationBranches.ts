@@ -12,11 +12,6 @@ export interface BranchVisibilityCandidate {
 export function filterVisibleAgentBranches<T extends BranchVisibilityCandidate>(
   branches: T[]
 ): T[] {
-  const branchByKey = new Map(
-    branches
-      .filter((branch): branch is T & { key: string } => typeof branch.key === "string" && branch.key.length > 0)
-      .map((branch) => [branch.key, branch])
-  );
   const modeHasActivity = new Map<string, boolean>();
   for (const branch of branches) {
     const mode = branch.mode?.trim() || "agent";
@@ -36,25 +31,16 @@ export function filterVisibleAgentBranches<T extends BranchVisibilityCandidate>(
       branch.assistantTurns > 0 ||
       branch.toolCallCount > 0 ||
       branch.toolResultCount > 0;
-    const isCheckpointOnly =
-      !hasActivity && (branch.actionSummary === "mode checkpoint" || branch.actionSummary === "continue (hard)");
-    if (isCheckpointOnly) return false;
-    const childStartBranch = typeof branch.key === "string"
-      ? branches.find((candidate) =>
-          candidate.parentId === branch.key &&
-          (candidate.mode?.trim() || "agent") === mode &&
-          candidate.actionSummary === "supervise:start" &&
-          (candidate.assistantTurns > 0 ||
-            candidate.toolCallCount > 0 ||
-            candidate.toolResultCount > 0)
-        )
-      : null;
-    const isForkShellOnly =
-      !hasActivity &&
-      branch.actionSummary === "fork (hard)" &&
-      childStartBranch !== null &&
-      branchByKey.has(childStartBranch.key as string);
-    if (isForkShellOnly) return false;
+    const actionSummary = branch.actionSummary ?? null;
+    const isControlPlaneBranch =
+      actionSummary === "mode checkpoint" ||
+      actionSummary === "continue (hard)" ||
+      actionSummary === "fork (hard)" ||
+      actionSummary === "fork (soft)";
+    if (isControlPlaneBranch) return false;
+    if (actionSummary && actionSummary !== "supervise:start" && !branch.active && !hasActivity) {
+      return false;
+    }
     if (hasActivity) return true;
     if (modeHasActivity.get(mode)) return false;
     if (seenSeedOnlyMode.has(mode)) return false;
