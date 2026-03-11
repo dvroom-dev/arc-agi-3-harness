@@ -50,8 +50,18 @@ export function GameView({ runId }: GameViewProps) {
             {state.levels_completed}/{state.win_levels || 7} completed
           </span>
           <span className="text-zinc-500">
-            {state.total_steps} steps
+            {state.total_steps} total steps
           </span>
+          {typeof state.current_attempt_steps === "number" ? (
+            <span className="text-zinc-600 text-xs">
+              attempt: {state.current_attempt_steps}
+            </span>
+          ) : null}
+          {typeof state.total_resets === "number" ? (
+            <span className="text-zinc-600 text-xs">
+              resets: {state.total_resets}
+            </span>
+          ) : null}
           {state.last_action && (
             <span className="text-zinc-600 text-xs">
               last: {state.last_action}

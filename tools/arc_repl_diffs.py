@@ -183,6 +183,7 @@ def write_machine_state(
     game_id: str,
     last_action: str,
     step_snapshots: list[tuple[str, np.ndarray]],
+    history_events: list[dict] | None = None,
 ) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     scorecard_id = str(os.getenv("ARC_SCORECARD_ID", "") or "").strip() or None
@@ -192,6 +193,16 @@ def write_machine_state(
     else:
         grids = np.empty((0, 64, 64), dtype=np.int8)
     np.save(directory / "all_grids.npy", grids)
+    if isinstance(history_events, list):
+        total_run_steps = sum(
+            1 for event in history_events if str(event.get("kind", "")).strip() == "step"
+        )
+        total_run_resets = sum(
+            1 for event in history_events if str(event.get("kind", "")).strip() == "reset"
+        )
+    else:
+        total_run_steps = len(step_snapshots)
+        total_run_resets = 0
     state = {
         "game_id": game_id,
         "scorecard_id": scorecard_id,
@@ -204,7 +215,9 @@ def write_machine_state(
         "last_action": last_action,
         "full_reset": bool(getattr(frame, "full_reset", False)),
         **frame_action_metadata(frame),
-        "total_steps": len(step_snapshots),
+        "total_steps": total_run_steps,
+        "current_attempt_steps": len(step_snapshots),
+        "total_resets": total_run_resets,
         "steps": [desc for desc, _ in step_snapshots],
     }
     (directory / "state.json").write_text(json.dumps(state, indent=2))
@@ -295,4 +308,3 @@ def write_game_state(
         lines.append("".join(f"{int(v):X}" for v in row))
     lines.append("```")
     path.write_text("\n".join(lines) + "\n")
-

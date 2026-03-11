@@ -76,6 +76,7 @@ def write_state_artifacts(
         game_id=session.game_id,
         last_action=action_label,
         step_snapshots=step_snapshots,
+        history_events=session.events,
     )
     trace_path = session.deps._write_turn_trace(
         arc_dir=session.arc_dir,

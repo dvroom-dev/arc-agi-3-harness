@@ -23,6 +23,8 @@ export interface GameState {
   levels_completed: number;
   win_levels: number;
   total_steps: number;
+  current_attempt_steps?: number;
+  total_resets?: number;
   steps: string[];
   available_actions: number[];
   last_action: string;

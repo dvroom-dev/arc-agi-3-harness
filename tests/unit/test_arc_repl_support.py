@@ -181,6 +181,10 @@ def test_write_state_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         game_id="ls20",
         last_action="status",
         step_snapshots=[],
+        history_events=[
+            {"kind": "step", "action": "ACTION1", "levels_completed": 0},
+            {"kind": "reset"},
+        ],
     )
     arc_repl_diffs.write_game_state(
         tmp_path / "arc" / "game-state.md",
@@ -194,5 +198,8 @@ def test_write_state_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         pre_turn_pixels=None,
         step_results=[],
     )
-    assert (tmp_path / "arc" / "state.json").exists()
+    state_payload = json.loads((tmp_path / "arc" / "state.json").read_text())
+    assert state_payload["total_steps"] == 1
+    assert state_payload["current_attempt_steps"] == 0
+    assert state_payload["total_resets"] == 1
     assert (tmp_path / "arc" / "game-state.md").exists()
