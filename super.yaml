@@ -68,6 +68,15 @@ prompt_parts:
     - literal: |
         `model.py` acts on your model/simulator.
         Valid `model.py` commands are: `status`, `reset_level`, `exec`, `set_level`, `compare_sequences`, `exec_file`, `shutdown`.
+        `model.py` is a CLI, not a Python scratchpad. Do not append ad hoc Python expressions or treat subcommands like an inline REPL.
+        Good examples:
+        - `python3 model.py status --game-id "${vars.game_id}"`
+        - `python3 model.py compare_sequences --game-id "${vars.game_id}"`
+        - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`
+        Bad examples:
+        - `python3 model.py print(1+1)`
+        - `python3 model.py status grid=env.grid`
+        - `python3 model.py compare_sequences ... ; print(...)`
         Use `python3 inspect_components.py --current-mismatch` to summarize the first compare mismatch in component terms.
         Use `python3 inspect_components.py --coverage --level LEVEL` to verify that component bounding boxes cover every seen state for the current level.
         When using provider file-edit tools, read the file first, then edit/write it.
@@ -418,6 +427,7 @@ modes:
             Provider `Read` output adds line numbers and can show a blank numbered trailing line; infer grid dimensions only from non-empty hex rows or from `component_coverage.*`, not from the rendered line count.
             Use neutral feature names until evidence proves a stronger role.
             In `components.py`, keep detector names and component kinds neutral and structural; record semantic meaning only in `theory.md`.
+            `components.py` is primarily theory-owned. Define or revise `find_all_*` detectors here; `code_model` may patch detector details only when compare cannot be interpreted correctly without that detector fix.
             If a solved-level compare pin is active, stay strictly scoped to that pinned level. Do not record frontier-level observations, components, or hypotheses until the pin is cleared.
             Do not exhaustively restate stable geometry. After one initial survey, only reopen a file if it answers a specific open question or verifies a concrete handoff.
             If you can already name the smallest next step, switch modes promptly instead of continuing broad analysis.
@@ -434,13 +444,14 @@ modes:
             - update `theory.md` with components, action effects, completion candidates, and unknowns;
             - keep `components.py` detectors broad enough that every visible pixel in every seen state for the active level lies inside at least one component bounding box;
             - keep `components.py` names neutral; if you think a component is a player/cursor/target/goal, record that only as a role hypothesis in `theory.md` with evidence;
+            - maintain the `# Explore Plan` section in `theory.md`; it is the only handoff surface for `explore_and_solve`;
             - run `python3 inspect_components.py --coverage --level <LEVEL>` before leaving theory mode;
             - use `component_coverage.*` as the canonical source for observed grid shapes; do not count rendered `Read` line numbers to infer dimensions;
             - record the available non-RESET actions from the prompt or existing artifacts; do not propose read-only action-discovery probes;
             - if a solved-level compare pin is active, keep `theory.md` and `components.py` scoped to the pinned solved level only;
             - while a solved-level compare pin is active, do not use or request `arc_repl`; theory remains read-only and mutations belong only in `explore_and_solve`;
-            - on level 1 before the first completion, decide the next feature target to probe in the real game;
-            - if switching to `explore_and_solve` on level 1, hand off exactly one short ordered list of named feature targets to probe next; do not hand off a solution theory from theory mode;
+            - on level 1 before the first completion, speculate as needed from the visible state, but mark speculation clearly in `theory.md` and turn it into exactly one target class in `# Explore Plan`;
+            - on level 1, develop a completion theory in `theory.md`, but hand off to `explore_and_solve` only through the single current `# Explore Plan` target class;
             - on later levels, decide whether the next step is `code_model`, `solve_model`, or `recover`;
             - if switching, include a concrete handoff message with exact files/evidence to inspect or the exact probe to run.
             Read these agent-workspace files as needed instead of relying on inlined contents:
@@ -461,8 +472,9 @@ modes:
         - "In theory mode, after an initial survey, reread only the files needed for one specific unresolved question or handoff."
         - "In theory mode, when reading a full-grid file such as `current_state.hex`, read it whole once before any targeted reread; use offset/limit reads only for a specific unresolved question."
         - "In theory mode, use raw `.hex`/`.diff` evidence to define named components and keep every visible pixel accounted for by component bounding boxes."
-        - "On level 1 before the first completion, if a real-game probe is needed, switch_mode to `explore_and_solve` with exactly one short ordered list of named feature targets to probe."
-        - "Do not hand off a level-1 solution theory from theory mode; level-1 solving should emerge from iterative target probing and later theory updates, not from a theory-authored route plan."
+        - "On level 1 before the first completion, if a real-game probe is needed, switch_mode to `explore_and_solve` only after writing a fresh `# Explore Plan` section in `theory.md` with exactly one target class."
+        - "Use speculation in theory mode when evidence is incomplete, but label it clearly as a hypothesis and keep the active `# Explore Plan` scoped to one target class."
+        - "Develop a level-1 completion theory in `theory.md`, but do not hand off a broad route plan; `explore_and_solve` should only receive the current `# Explore Plan` target class and its probe sequence."
         - "On level 2+, if new components or changed semantics require mechanics work, switch_mode to `code_model` with explicit patch targets."
         - "On level 2+, if no new components are needed and only solution search remains, switch_mode to `code_model` with that conclusion so code_model can decide whether solve_model is actually ready."
         - "When leaving a pinned solved-level wrap-up from theory, include `mode_payload.wrapup_certified=true` and `mode_payload.wrapup_level=<pinned level>` on the switch_mode call."
@@ -547,11 +559,12 @@ modes:
         - literal: |
             Active game: `${vars.game_id}`.
             Explore-and-solve is level-1 only:
-            - perform the minimal real-game probes needed to answer the handed-off feature targets;
-            - stay focused only on the handed-off feature targets until every named target is answered or falsified;
+            - read the current `# Explore Plan` section in `theory.md` first and treat it as the entire contract for this turn;
+            - perform the minimal real-game probes needed to answer that one handed-off target class;
+            - stay focused only on that handed-off target class until it is answered or falsified;
             - write the observed outcome and its likely implication into `theory.md`;
             - then switch_mode promptly.
-            Do not invent a new route plan or solution theory in this mode unless the handed-off feature targets themselves directly require a single immediate completion attempt.
+            Do not invent a new route plan, feature target, or solution theory in this mode. If the current `# Explore Plan` is exhausted, switch back to theory.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
             For actionful probes, inspect the returned `artifacts.after_state_hex` and `artifacts.diff_hex` first before reopening on-disk turn artifacts.
             Do not use read-only `arc_repl` calls as inspection tools.
@@ -565,17 +578,17 @@ modes:
       operation: append
       requirements:
         - "Use explore_and_solve only on level 1 before the first completion."
-        - "In explore_and_solve, perform the minimum real-game action sequence needed to answer the handed-off feature targets."
-        - "Do not exit explore_and_solve until every handed-off feature target has been answered or falsified and recorded."
+        - "In explore_and_solve, read the current `# Explore Plan` section in `theory.md` and perform only the minimum real-game action sequence needed to answer that target class."
+        - "Do not exit explore_and_solve until the current `# Explore Plan` target class has been answered or falsified and recorded."
         - "Do not switch back to theory from explore_and_solve without new real-game evidence from this explore turn, unless a supervisor or policy blocker prevented action execution."
-        - "Do not turn explore_and_solve into free-form route planning or broad solution search; stay inside the handed-off feature targets."
+        - "Do not turn explore_and_solve into free-form route planning or broad solution search; stay inside the current `# Explore Plan` target class."
         - "After each real-game probe or solution attempt, update `theory.md` before switching modes."
         - "When leaving this mode, invoke the `switch_mode` tool directly; do not use Bash placeholders or prose-only switch requests."
       violations:
         - "Using explore_and_solve on level 2+."
         - "Creating new files or scripts in explore_and_solve."
-        - "Broadening explore_and_solve to new unhanded-off targets or free-form map wandering without first switching back for a new handoff."
-        - "Exiting explore_and_solve before the handed-off feature targets have been answered or falsified."
+        - "Broadening explore_and_solve to new unhanded-off targets or free-form map wandering without first switching back for a new `# Explore Plan`."
+        - "Exiting explore_and_solve before the current `# Explore Plan` target class has been answered or falsified."
         - "Returning to theory from explore_and_solve without new real-game evidence from the current explore turn, unless a supervisor or policy blocker prevented action execution."
         - "Using explore_and_solve to invent or refine a route plan instead of probing the handed-off targets."
         - "Reading workspace files unrelated to the current level evidence in explore_and_solve."
@@ -694,8 +707,14 @@ modes:
             Mode: code_model.
             Goal: patch `model_lib.py` and related model files until they match explored real-game evidence.
             Do not use `arc_repl` in this mode.
-            `model.py` is harness-owned runtime glue. Do not edit it.
+            `model.py` is harness-owned runtime glue. Do not edit it or use it as a Python scratchpad.
             Keep component definitions in `components.py` and reusable mechanics/helpers in `model_lib.py`.
+            `components.py` is primarily theory-owned; only update it here if a missing or incorrect detector makes compare impossible to interpret. Prefer repairing mechanics in `model_lib.py`.
+            Valid `model.py` usage here is limited to CLI subcommands such as:
+            - `python3 model.py status --game-id "${vars.game_id}"`
+            - `python3 model.py compare_sequences --game-id "${vars.game_id}"`
+            - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`
+            Never append ad hoc Python expressions or scratch commands onto `model.py` invocations.
             Do not do route planning here; only patch component detectors and state transitions needed to explain observed diffs.
             Use `theory.md`, `components.py`, `component_mismatch.*`, `component_coverage.*`, and compare summaries as the primary evidence surface here.
             If a solved-level compare pin is active, stay scoped to the pinned solved level and ignore frontier-level artifacts until the pin clears.
