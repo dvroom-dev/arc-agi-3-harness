@@ -106,6 +106,7 @@ Personal guardrail:
 - Always run `make test` before committing.
 - If UI files changed, also run `cd ui && npm run lint`.
 - If either required check fails, do not commit until fixed.
+- Once required validation passes for the changes you made, commit them in the same pass; do not leave validated code changes uncommitted.
 
 ### Final Generalization Rule
 
