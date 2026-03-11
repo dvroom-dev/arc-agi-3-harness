@@ -246,10 +246,10 @@ def _write_text_atomic(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
-def _refresh_component_mismatch(session) -> None:
+def _refresh_component_mismatch(session) -> str | None:
     inspect_script = session.game_dir / "inspect_components.py"
     if not inspect_script.exists():
-        raise RuntimeError(f"missing component helper: {inspect_script}")
+        return f"missing component helper: {inspect_script}"
     proc = subprocess.run(
         [sys.executable, str(inspect_script), "--current-mismatch"],
         cwd=str(session.game_dir),
@@ -259,7 +259,8 @@ def _refresh_component_mismatch(session) -> None:
     )
     if proc.returncode != 0:
         detail = (proc.stderr or proc.stdout or "").strip()
-        raise RuntimeError(f"inspect_components --current-mismatch failed: {detail}")
+        return f"inspect_components --current-mismatch failed: {detail}"
+    return None
 
 
 def _persist_current_compare(session, payload: dict[str, Any]) -> None:
@@ -297,7 +298,15 @@ def _persist_current_compare(session, payload: dict[str, Any]) -> None:
         _write_text_atomic(compare_dir / "current_compare.json", json_text)
         _write_text_atomic(compare_dir / "current_compare.md", md_text)
 
-    _refresh_component_mismatch(session)
+    mismatch_refresh_error = _refresh_component_mismatch(session)
+    if mismatch_refresh_error:
+        summary_payload["component_mismatch_refresh_error"] = mismatch_refresh_error
+        json_text = json.dumps(summary_payload, indent=2) + "\n"
+        _write_text_atomic(session.game_dir / "current_compare.json", json_text)
+        _write_text_atomic(level_current / "current_compare.json", json_text)
+        if level_compare is not None:
+            compare_dir = level_compare / "sequence_compare"
+            _write_text_atomic(compare_dir / "current_compare.json", json_text)
 
 
 def compare_sequences(
@@ -307,7 +316,6 @@ def compare_sequences(
     sequence_id: str | None,
     include_reset_ended: bool = False,
     include_level_regressions: bool = False,
-    clear_level_pin_on_clean: bool = False,
 ) -> tuple[dict, int]:
     pin = load_analysis_level_pin(session.game_dir)
     pinned_level = None
@@ -424,27 +432,17 @@ def compare_sequences(
         "all_match": bool(diverged == 0),
         "analysis_level_pinned": bool(pinned_level is not None),
         "analysis_level_pin": pin,
-        "clear_level_pin_on_clean": bool(clear_level_pin_on_clean),
         "include_reset_ended": bool(include_reset_ended),
         "include_level_regressions": bool(include_level_regressions),
         "reports": reports,
         **session.get_status_state(),
     }
     _persist_current_compare(session, payload)
-    if (
-        bool(clear_level_pin_on_clean)
-        and bool(payload["all_match"])
-        and isinstance(pin, dict)
-        and int(pin.get("level", -1)) == int(target_level)
-    ):
-        phase = str(pin.get("phase", "") or "").strip()
-        if phase == "theory_passed":
-            clear_analysis_level_pin(session.game_dir)
-        else:
-            update_analysis_level_pin(
-                session.game_dir,
-                {"last_compare_all_match": True, "last_compare_level": int(target_level)},
-            )
+    if bool(payload["all_match"]) and isinstance(pin, dict) and int(pin.get("level", -1)) == int(target_level):
+        update_analysis_level_pin(
+            session.game_dir,
+            {"last_compare_all_match": True, "last_compare_level": int(target_level)},
+        )
     frontier_level = load_frontier_level_from_arc_state()
     if frontier_level is not None:
         sync_workspace_level_view(

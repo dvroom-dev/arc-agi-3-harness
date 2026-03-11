@@ -32,11 +32,6 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="include sequences that contain levels_completed regression events",
     )
-    compare_cmd.add_argument(
-        "--clear-level-pin-on-clean",
-        action="store_true",
-        help="clear the solved-level compare pin if compare is clean",
-    )
     file_cmd = sub.add_parser("exec_file")
     file_cmd.add_argument("--game-id", default="game")
     file_cmd.add_argument("script_path")
@@ -92,7 +87,6 @@ def run_model_cli(hooks: ModelHooks, *, game_dir: Path, argv: list[str] | None =
             sequence_id=args.sequence,
             include_reset_ended=bool(args.include_reset_ended),
             include_level_regressions=bool(args.include_level_regressions),
-            clear_level_pin_on_clean=bool(args.clear_level_pin_on_clean),
         )
         return _emit(payload, session=session, action_name="compare_sequences", code=code)
     if args.action == "exec":

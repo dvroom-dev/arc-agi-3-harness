@@ -160,7 +160,7 @@ def test_compare_sequences_uses_pinned_solved_level_until_theory_and_code_model_
     arc_state_dir.mkdir(parents=True, exist_ok=True)
     (arc_state_dir / "state.json").write_text(json.dumps({"current_level": 2, "levels_completed": 1}, indent=2))
     (game_dir / ".analysis_level_pin.json").write_text(
-        json.dumps({"level": 1, "phase": "theory_passed"}, indent=2)
+        json.dumps({"level": 1, "phase": "pending_theory"}, indent=2)
     )
 
     step_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
@@ -206,7 +206,7 @@ def test_compare_sequences_uses_pinned_solved_level_until_theory_and_code_model_
 
     proc = _run_model_with_env(
         game_dir,
-        ["compare_sequences", "--game-id", "ls20", "--clear-level-pin-on-clean"],
+        ["compare_sequences", "--game-id", "ls20"],
         extra_env={"ARC_STATE_DIR": str(arc_state_dir)},
     )
     assert proc.returncode == 0, proc.stderr
@@ -214,7 +214,10 @@ def test_compare_sequences_uses_pinned_solved_level_until_theory_and_code_model_
     assert payload["ok"] is True
     assert payload["level"] == 1
     assert payload["analysis_level_pinned"] is True
-    assert not (game_dir / ".analysis_level_pin.json").exists()
+    pin = json.loads((game_dir / ".analysis_level_pin.json").read_text())
+    assert pin["phase"] == "pending_theory"
+    assert pin["last_compare_all_match"] is True
+    assert pin["last_compare_level"] == 1
 
 
 def test_sync_workspace_level_view_uses_pinned_level(tmp_path: Path) -> None:

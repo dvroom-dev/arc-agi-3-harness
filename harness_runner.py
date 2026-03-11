@@ -13,6 +13,7 @@ from harness_runner_args import resolve_arc_base_url, resolve_game_ids, session_
 from harness_runner_regression import _classify_level_drop
 from harness_runner_super_cycle import noop_super_cycle_error
 from harness_runtime import HarnessRuntime
+from harness_wrapup import certify_or_block_wrapup_transition_impl
 from harness_scorecard_helpers import close_shared_scorecard, open_shared_scorecard, run_scorecard_session_preflight, validate_scorecard_owner_check
 
 
@@ -121,7 +122,7 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
                 env=runtime.super_env,
             )
             runtime.recover_session_file_from_workspace(reason="post-new", force=True)
-            runtime.sync_active_conversation_id_from_session()
+            runtime.sync_active_conversation_id_from_session(); certify_or_block_wrapup_transition_impl(runtime)
             monitor = runtime.monitor_snapshot()
             runtime.log(
                 "[harness] monitor sources: "
@@ -234,7 +235,7 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
                 history_len_before_resume = processed_history_len
                 head_before_resume = runtime.load_conversation_head_metadata()
                 stdout = runtime.resume_super()
-                runtime.sync_active_conversation_id_from_session()
+                runtime.sync_active_conversation_id_from_session(); certify_or_block_wrapup_transition_impl(runtime)
                 if not stdout.strip():
                     runtime.log(
                         "[harness] super returned empty assistant response; "

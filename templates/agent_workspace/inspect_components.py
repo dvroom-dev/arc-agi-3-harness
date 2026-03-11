@@ -349,17 +349,6 @@ def run_component_coverage(game_dir: Path, *, level: int | None) -> tuple[dict[s
 
     json_path, md_path = _component_report_paths(game_dir)
     _write_json_and_markdown(json_path, md_path, payload, _component_coverage_markdown(payload))
-    if payload["status"] == "pass":
-        pin_payload = artifact_helpers.load_analysis_level_pin(game_dir)
-        if isinstance(pin_payload, dict) and int(pin_payload.get("level", -1)) == int(level_value):
-            artifact_helpers.write_analysis_level_pin(
-                game_dir,
-                {
-                    **pin_payload,
-                    "phase": "theory_passed",
-                    "coverage_checked_level": int(level_value),
-                },
-            )
     return payload, 0 if payload["status"] == "pass" else 1
 
 

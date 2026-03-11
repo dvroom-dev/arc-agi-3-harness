@@ -95,6 +95,7 @@ supervisor:
       - "Prefer continue unless there is a clear, evidence-backed correction to make."
       - "When switching to theory or explore_and_solve, prefer resume_mode_head over fork_new_conversation so cross-mode context is preserved. Only fork a new theory/explore_and_solve conversation after a game-state discontinuity (reset_level, level_complete, game_complete, game_over)."
       - "When choosing `resume_mode_head` or `fork_new_conversation`, always include a concrete handoff message: what was learned, why the mode is changing, and the exact next action or verification target."
+      - "Any handoff into `explore_and_solve` must include either: (a) a short ordered list of named feature targets to probe, or (b) one or more concrete solution theories to test. Do not hand off to `explore_and_solve` with only generic advice like 'keep exploring'."
       - "If the trigger is an agent `switch_mode` request that you accept or redirect into another mode, include the agent's full latest assistant message in the handoff context so the next mode does not lose its plan."
       - "For rule enforcement decisions, cite concrete evidence pointers (turn/tool/output/file)."
       - "If evidence is ambiguous, request one minimal discriminating check instead of broad re-analysis."
@@ -103,14 +104,17 @@ supervisor:
       - "Do not assign semantic roles to a feature unless action-linked evidence supports that role. Use neutral feature names until the role is proven."
       - "Do not assume a feature is unique unless evidence shows only one copy matters; prefer reasoning that can track multiple copies."
       - "After any frontier level completes and the game continues, prefer routing next to `theory` so the agent finalizes the solved level before taking more real-game actions."
-      - "If `current_compare.md` shows divergence and current mode is not `code_model`, route to `code_model` with the compare file as concrete evidence, including level 1 before the first completion."
+      - "If `current_compare.md` shows divergence and current mode is not `code_model`, treat that as an immediate model-repair signal. Route next to `code_model` unless solved-level cleanup explicitly requires `theory` first."
+      - "Treat compare divergence as a major control signal. Outside `code_model`, `__ARC_INTERCEPT_COMPARE_MISMATCH__` should route immediately to `code_model` rather than keeping the agent in `explore_and_solve` or `theory`."
       - "Keepalive interrupt protocol (`__ARC_INTERCEPT_IDLE_KEEPALIVE__`): capture `prior_mode` as the mode active when marker is detected; on level 1 use `explore_and_solve` for exactly one real-game action; otherwise use the smallest allowed real-game replay/probe mode; then on the next supervisor pass, return to `prior_mode` via `resume_mode_head` once that one action is evidenced."
       - "During keepalive interrupt handling, do not ask for broad analysis or file churn; require a single valid `arc_repl` game action and concise evidence only."
-      - "If intercept marker is __ARC_INTERCEPT_COMPARE_MISMATCH__, route to `code_model` via `resume_mode_head`, attach compare results, and require compare parity across all explored current-level sequences before further real-game progression, including level 1 before the first completion."
+      - "If intercept marker is __ARC_INTERCEPT_COMPARE_MISMATCH__, route immediately to `code_model`, attach compare results, and require compare parity across all explored current-level sequences before further real-game progression."
+      - "For `__ARC_INTERCEPT_COMPARE_MISMATCH__`, do not broaden exploration and do not keep the agent in `explore_and_solve`; the next mode should be `code_model` unless solved-level cleanup explicitly requires `theory` first."
       - "If intercept marker is __ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__, route to `theory` first to finalize solved-level components and coverage, then route to `code_model` and require model parity repair against the pinned solved level before level advancement continues."
       - "If intercept marker is __ARC_INTERCEPT_RESET_LEVEL__, evaluate whether reset usage is appropriate for the current mode and recent evidence, then decide whether to continue or intervene with corrective guidance."
-      - "When a solved-level compare pin is active, keep compare targeted to the solved level until theory coverage passes and code_model exits with compare clean."
-      - "In `code_model`, if compare output is unchanged across repeated runs and no new mismatch evidence is produced, direct a mode switch to `theory` or `explore_and_solve` for the smallest missing-evidence step (do not keep re-checking the same compare output)."
+      - "When a solved-level compare pin is active, keep all visible state, compare work, and model work targeted to the pinned solved level until the supervisor explicitly certifies wrap-up complete."
+      - "While a solved-level compare pin is active, only `theory` and `code_model` are valid next modes. Do not route to `explore_and_solve` or `solve_model` until the supervisor certifies wrap-up complete."
+      - "Coverage helpers and compare helpers provide evidence only; they do not certify solved-level wrap-up on their own."
   tool_interception:
     rules:
       - name: idle-keepalive
@@ -163,19 +167,22 @@ supervisor:
                    - If using `mode_payload.user_message` (fork/resume path), manually wrap message in:
                      `<supervisor-command trigger="agent_tool_intercept"> ... </supervisor-command>`.
               2) If marker is `__ARC_INTERCEPT_COMPARE_MISMATCH__`:
-                 - Always use `resume_mode_head` to mode `code_model`, including level 1 before first completion.
-                 - Put the compare output/details from the intercepted tool response into the resume message.
-                 - Instruct the agent to patch model code, rerun compare, and repeat until compare is clean across all explored current-level sequences.
+                 - Treat the mismatch marker as an immediate `code_model` routing signal.
+                 - Use `resume_mode_head` to `code_model` (or `fork_new_conversation` in `code_model` if a fresh branch is required).
+                 - Put the compare output/details from the intercepted tool response into the handoff.
+                 - Do not send the agent into broad re-analysis; the next stop should be `code_model` unless solved-level cleanup explicitly requires `theory` first.
               3) If marker is `__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__`:
                  - Route to `theory` first with a handoff that the solved level is pinned for cleanup.
                  - Require fresh component coverage on the solved level before any `code_model` turn.
                  - After theory passes, route to `code_model` and keep compare focused on the pinned solved level until it is clean.
+                 - Once theory coverage passes and pinned-level compare is clean, the supervisor must explicitly certify solved-level wrap-up complete by routing out of the wrap-up envelope; helper scripts do not clear the pin by themselves.
               4) If marker is `__ARC_INTERCEPT_COMPARE_CLEAN__`:
                  - Treat compare-clean as a mandatory supervisor checkpoint after a covered real-game action or compare refresh.
                  - If current mode is `solve_model`, do not treat compare-clean alone as sufficient. Stay in `solve_model` unless the model-side `play.py` proof actually solves the level; otherwise route to `theory` only when the agent can name the missing evidence that blocks solution search.
                  - Otherwise use `resume_mode_head` to `theory`.
                  - Put the compare-clean details into the handoff and explicitly name the single highest-value next question to answer.
                  - The supervisor message must tell the agent what to explore next: one concrete unanswered mechanic/completion question and one minimal next real-game probe or solve attempt.
+                 - If the next step will be `explore_and_solve`, the handoff must name either explicit feature targets to probe or explicit solution theories to test.
                  - Inject concise guidance that compare-clean means model parity is clean for explored sequences, not that the level is solved.
               4) If marker is `__ARC_INTERCEPT_RESET_LEVEL__`:
                  - Judge whether the reset is appropriate for the current mode and evidence state.
@@ -360,6 +367,8 @@ modes:
             Do not use `arc_repl` in this mode.
             The only Python command allowed here is `python3 inspect_components.py ...` for component coverage/mismatch checks.
              Use raw `.hex`, sequence metadata, and compare artifacts to define components and map every visible pixel to named elements.
+            When reading a full-grid artifact like `current_state.hex`, read the whole file in one `Read` call first. These files are small enough to inspect whole.
+            Do not page through different offsets of the same full-grid file unless a specific unresolved question requires a targeted reread after that first full read.
              Detector rule of thumb: if a region can move independently, recolor independently, or be consumed independently, it should usually be its own detected component rather than part of one giant bounding box.
              Prefer multiple specific detectors over one broad umbrella detector when the broad box would hide which sub-part actually changed.
             Provider `Read` output adds line numbers and can show a blank numbered trailing line; infer grid dimensions only from non-empty hex rows or from `component_coverage.*`, not from the rendered line count.
@@ -384,6 +393,7 @@ modes:
             - record the available non-RESET actions from the prompt or existing artifacts; do not propose read-only action-discovery probes;
             - if a solved-level compare pin is active, keep `theory.md` and `components.py` scoped to the pinned solved level only;
             - on level 1 before the first completion, decide whether the next step is `explore_and_solve`;
+            - if switching to `explore_and_solve`, hand off either a short ordered list of named feature targets to probe or one or more concrete solution theories to test next;
             - on later levels, decide whether the next step is `code_model`, `solve_model`, or `recover`;
             - if switching, include a concrete handoff message with exact files/evidence to inspect or the exact probe to run.
             Read these agent-workspace files as needed instead of relying on inlined contents:
@@ -401,12 +411,14 @@ modes:
         - "In theory mode, keep `components.py` synchronized with the named elements in `theory.md`."
         - "Before leaving theory mode, run `python3 inspect_components.py --coverage --level <active level>` and ensure it passes for the current level."
         - "In theory mode, after an initial survey, reread only the files needed for one specific unresolved question or handoff."
+        - "In theory mode, when reading a full-grid file such as `current_state.hex`, read it whole once before any targeted reread; use offset/limit reads only for a specific unresolved question."
         - "In theory mode, use raw `.hex`/`.diff` evidence to define named components and keep every visible pixel accounted for by component bounding boxes."
-        - "On level 1 before the first completion, if a real-game probe or solution attempt is needed, switch_mode to `explore_and_solve` with one concrete plan."
+        - "On level 1 before the first completion, if a real-game probe or solution attempt is needed, switch_mode to `explore_and_solve` with either a short ordered list of named feature targets to probe or one or more concrete solution theories to test."
         - "On level 2+, if new components or changed semantics require mechanics work, switch_mode to `code_model` with explicit patch targets."
         - "On level 2+, if no new components are needed and only solution search remains, switch_mode to `solve_model`."
       violations:
         - "Repeatedly rereading full-grid or stable artifact files in theory mode without a new specific question."
+        - "Reading different offsets of the same full-grid file in theory mode after a full read, without naming a specific unresolved question that requires it."
         - "Using `arc_repl` or any Python execution other than `python3 inspect_components.py ...` in theory mode."
         - "Leaving theory mode without a fresh passing `component_coverage.json` for the active level."
         - "Writing any file other than `theory.md` or `components.py` in theory mode."
@@ -419,7 +431,7 @@ modes:
       - "Keepalive requires exactly one real-game action."
     stop_when:
       - "Level 1 completes; switch_mode to theory for post-completion cleanup."
-      - "A real-game probe has been executed and the result is recorded; switch_mode to theory or recover as appropriate."
+      - "All handed-off feature targets are answered or falsified, or all handed-off solution theories are tested, and the result is recorded; switch_mode to theory or recover as appropriate."
       - "A solved-level regression requires replay; switch_mode to recover."
     tools:
       allow_builtin:
@@ -484,7 +496,8 @@ modes:
         - literal: |
             Active game: `${vars.game_id}`.
             Explore-and-solve is level-1 only:
-            - perform the minimal real-game probe or likely solution attempt you already planned;
+            - perform the minimal real-game probe or likely solution attempt named in the handoff you received;
+            - stay focused on those named feature targets or solution theories until they are answered or falsified;
             - write the observed outcome and its likely implication into `theory.md`;
             - then switch_mode promptly.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
@@ -498,11 +511,14 @@ modes:
       operation: append
       requirements:
         - "Use explore_and_solve only on level 1 before the first completion."
-        - "In explore_and_solve, perform the minimum real-game action sequence needed to answer the current probe question or test a likely level-1 solution."
+        - "In explore_and_solve, perform the minimum real-game action sequence needed to answer the handed-off feature targets or test the handed-off level-1 solution theory."
+        - "Do not exit explore_and_solve until every handed-off feature target has been answered or falsified, or every handed-off solution theory has been tested and recorded."
         - "After each real-game probe or solution attempt, update `theory.md` before switching modes."
       violations:
         - "Using explore_and_solve on level 2+."
         - "Creating new files or scripts in explore_and_solve."
+        - "Broadening explore_and_solve to new unhanded-off targets or free-form map wandering without first switching back for a new handoff."
+        - "Exiting explore_and_solve before the handed-off feature targets or solution theories have been answered, falsified, or tested."
         - "Reading workspace files unrelated to the current level evidence in explore_and_solve."
         - "Using explore_and_solve for broad analysis instead of a concrete probe or solution attempt."
 
@@ -513,7 +529,7 @@ modes:
       - "Theory identifies concrete model changes from existing evidence."
       - "A solved-level compare pin is active and solved-level parity must be repaired before advancing."
     stop_when:
-      - "If a solved-level compare pin is active, compare is clean for the pinned solved level; switch_mode to theory so the next frontier level can begin from a clean post-completion state."
+      - "If a solved-level compare pin is active and compare is clean for the pinned solved level, switch_mode to theory so the supervisor can certify solved-level wrap-up complete and only then release the run to the frontier level."
       - "Compare is clean across all explored current-level sequences and the model now includes a concrete current-level completion mechanism; switch_mode to solve_model."
       - "Compare is clean across all explored current-level sequences but the completion mechanism remains unknown; switch_mode to theory."
       - "Missing real-game evidence blocks implementation; switch_mode to theory."
@@ -636,13 +652,13 @@ modes:
             1) inspect `theory.md`, `components.py`, and `component_mismatch.md`;
             2) run `python3 inspect_components.py --current-mismatch`;
             3) name changed elements, match them to `theory.md`, and patch only the missing mechanics or completion transitions in `model_lib.py`/`play.py`/`play_lib.py`;
-            4) run `python3 model.py compare_sequences --clear-level-pin-on-clean` with no explicit level so the runtime can honor any solved-level compare pin and release it only after theory has passed and compare is clean;
+            4) run `python3 model.py compare_sequences` with no explicit level so the runtime can honor any solved-level compare pin and keep work focused on the pinned solved level while wrap-up is active;
             5) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes;
             5) if compare is clean across all explored current-level sequences:
-               - if a solved-level compare pin is active, switch_mode to `theory`;
+               - if a solved-level compare pin is active, switch_mode to `theory` so the supervisor can certify solved-level wrap-up complete;
                - switch_mode to `solve_model` if completion logic now exists;
                - otherwise switch_mode to `theory`.
-            6) if compare still lacks enough evidence to patch confidently, switch_mode to `theory`.
+            6) if compare is still red and a repair is blocked, stay in `code_model` and produce a precise blocker report with exact file/line evidence and the smallest required fix; do not switch out of `code_model` while parity remains red.
             Read these agent-workspace files as needed; prefer component summaries over raw grid artifacts:
             - `theory.md`
             - `model.py`
@@ -656,6 +672,8 @@ modes:
     agent_rules:
       operation: append
       requirements:
+        - "Do not leave code_model while compare is still red for the active level or pinned solved level."
+        - "If a solved-level compare pin is active, stay scoped to the pinned solved level and do not attempt frontier-level planning or solving."
         - "End each code_model turn with model-file edits, theory updates, or a switch_mode call."
       violations:
         - "Using any `arc_repl` command in code_model."
@@ -667,6 +685,7 @@ modes:
     description: "For level 2+, solve in the model, then replay the same solution once in the real game."
     start_when:
       - "Model parity is sufficient for current level execution planning."
+      - "No solved-level compare pin is active; solved-level wrap-up must already be supervisor-certified complete."
     stop_when:
       - "The model proof succeeds and the same `play.py` replay completes the level in the real game; switch_mode to theory for post-completion cleanup if the game continues."
       - "Model proof or real-game replay exposes a model bug or parity failure; switch_mode to code_model with evidence."
@@ -764,6 +783,7 @@ modes:
         - literal: |
             Mode: solve_model.
             Goal: on level 2+, make `play.py` solve the current level from start in the model, then replay that same plan once in the real game.
+            Never enter this mode while a solved-level compare pin is active; solved-level wrap-up must be supervisor-certified complete first.
             Do not read raw `.hex`, `diff.hex`, or sequence metadata directly in this mode.
         - prompt_part: model_runtime
         - prompt_part: arc_repl_playback_runtime
@@ -794,6 +814,7 @@ modes:
       operation: append
       requirements:
         - "When model proof succeeds, mark the level SOLVED in `theory.md` with concise evidence."
+        - "Do not enter or remain in solve_model while a solved-level compare pin is active."
       violations:
         - "Using any `arc_repl` command other than one deterministic `arc_repl exec_file ./play.py` replay after model proof succeeds."
         - "Reading raw `.hex`, `diff.hex`, or sequence metadata directly in solve_model."

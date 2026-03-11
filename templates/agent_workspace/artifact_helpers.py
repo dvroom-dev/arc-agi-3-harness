@@ -7,6 +7,7 @@ They do not add game-specific heuristics.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -44,6 +45,28 @@ def coerce_path(path_like: str | Path) -> Path:
     return path_like if isinstance(path_like, Path) else Path(path_like)
 
 
+def display_path(game_dir: str | Path, path: str | Path) -> str:
+    game_dir = coerce_path(game_dir)
+    path = coerce_path(path)
+    try:
+        return str(path.relative_to(game_dir))
+    except ValueError:
+        return str(path)
+
+
+def _safe_slug(value: str) -> str:
+    text = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in str(value or "").strip())
+    return text.strip("._") or "game"
+
+
+def _state_artifacts_root(game_dir: str | Path) -> Path | None:
+    state_dir = str(os.getenv("ARC_STATE_DIR", "") or "").strip()
+    game_id = str(os.getenv("ARC_ACTIVE_GAME_ID", "") or "").strip()
+    if not state_dir or not game_id:
+        return None
+    return Path(state_dir).expanduser() / "game_artifacts" / f"game_{_safe_slug(game_id)}"
+
+
 def load_json(path: str | Path) -> dict[str, Any]:
     return json.loads(coerce_path(path).read_text())
 
@@ -61,7 +84,16 @@ def load_hex_grid(path: str | Path) -> np.ndarray:
 
 
 def level_dir(game_dir: str | Path, level: int) -> Path:
-    return coerce_path(game_dir) / f"level_{int(level)}"
+    game_dir = coerce_path(game_dir)
+    workspace_level = game_dir / f"level_{int(level)}"
+    if workspace_level.exists():
+        return workspace_level
+    artifacts_root = _state_artifacts_root(game_dir)
+    if artifacts_root is not None:
+        artifact_level = artifacts_root / f"level_{int(level)}"
+        if artifact_level.exists():
+            return artifact_level
+    return workspace_level
 
 
 def current_level_dir(game_dir: str | Path) -> Path:
@@ -276,7 +308,7 @@ def summarize_sequence_step(
     return {
         "level": int(level),
         "sequence_id": sequence_id,
-        "sequence_file": str(sequence_json_path(game_dir, level, sequence_id).relative_to(game_dir)),
+        "sequence_file": display_path(game_dir, sequence_json_path(game_dir, level, sequence_id)),
         "sequence_action_count": int(sequence_payload.get("action_count", 0) or 0),
         "sequence_end_reason": sequence_payload.get("end_reason"),
         "step": {
@@ -289,10 +321,10 @@ def summarize_sequence_step(
             "state_after": step.get("state_after"),
             "levels_completed_before": step.get("levels_completed_before"),
             "levels_completed_after": step.get("levels_completed_after"),
-            "before_state_hex": str(before_path.relative_to(game_dir)),
-            "after_state_hex": str(after_path.relative_to(game_dir)),
-            "diff_hex": str(diff_path.relative_to(game_dir)),
-            "meta_json": str(meta_path.relative_to(game_dir)),
+            "before_state_hex": display_path(game_dir, before_path),
+            "after_state_hex": display_path(game_dir, after_path),
+            "diff_hex": display_path(game_dir, diff_path),
+            "meta_json": display_path(game_dir, meta_path),
         },
     }
 

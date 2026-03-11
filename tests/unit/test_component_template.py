@@ -63,7 +63,7 @@ def test_component_coverage_helper_reports_uncovered_pixels(tmp_path: Path) -> N
     assert (game_dir / "component_coverage.md").exists()
 
 
-def test_component_coverage_advances_analysis_level_pin_phase(tmp_path: Path) -> None:
+def test_component_coverage_does_not_advance_analysis_level_pin_phase(tmp_path: Path) -> None:
     game_dir = tmp_path / "game_ls20"
     _copy_model_templates(game_dir)
     _write_hex(game_dir / "level_1" / "initial_state.hex", ["0000", "0000", "0000", "0000"])
@@ -99,8 +99,8 @@ def test_component_coverage_advances_analysis_level_pin_phase(tmp_path: Path) ->
     payload = json.loads(proc.stdout)
     assert payload["observed_shapes"] == ["4x4"]
     pin = json.loads((game_dir / ".analysis_level_pin.json").read_text())
-    assert pin["phase"] == "theory_passed"
-    assert pin["coverage_checked_level"] == 1
+    assert pin["phase"] == "pending_theory"
+    assert "coverage_checked_level" not in pin
 
 
 def test_component_mismatch_helper_reads_wrapped_current_compare_payload(tmp_path: Path) -> None:
@@ -209,3 +209,87 @@ def test_component_mismatch_helper_errors_when_compare_is_red_without_report(tmp
     payload = json.loads(proc.stdout)
     assert payload["status"] == "error"
     assert "not clean" in payload["message"]
+
+
+def test_component_mismatch_helper_falls_back_to_canonical_level_artifacts(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    state_dir = tmp_path / "arc_state"
+    canonical_level = state_dir / "game_artifacts" / "game_ls20" / "level_1"
+    canonical_step = canonical_level / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
+    canonical_step.mkdir(parents=True, exist_ok=True)
+    _write_hex(canonical_level / "initial_state.hex", ["4444", "4444", "4444", "4444"])
+    _write_hex(canonical_step / "before_state.hex", ["4444", "4444", "4444", "4444"])
+    _write_hex(canonical_step / "after_state.hex", ["4444", "4994", "4994", "4444"])
+    _write_hex(canonical_step / "diff.hex", ["....", ".99.", ".99.", "...."])
+    (canonical_step / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
+    (canonical_level / "sequences" / "seq_0001.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "arc_repl.level_sequence.v1",
+                "game_id": "ls20",
+                "level": 1,
+                "sequence_id": "seq_0001",
+                "action_count": 1,
+                "actions": [
+                    {
+                        "local_step": 1,
+                        "action_index": 1,
+                        "tool_turn": 1,
+                        "step_in_call": 1,
+                        "call_action": "exec",
+                        "action_name": "ACTION1",
+                        "state_before": "NOT_FINISHED",
+                        "state_after": "NOT_FINISHED",
+                        "level_before": 1,
+                        "level_after": 1,
+                        "levels_completed_before": 0,
+                        "levels_completed_after": 0,
+                        "files": {
+                            "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
+                            "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
+                            "diff_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/diff.hex",
+                            "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
+                        },
+                    }
+                ],
+            },
+            indent=2,
+        )
+    )
+
+    (game_dir / "current_compare.json").write_text(
+        json.dumps(
+            {
+                "level": 1,
+                "all_match": False,
+                "reports": [
+                    {
+                        "level": 1,
+                        "sequence_id": "seq_0001",
+                        "matched": False,
+                        "divergence_step": 1,
+                        "divergence_reason": "after_state_mismatch",
+                    }
+                ],
+            },
+            indent=2,
+        )
+    )
+
+    env = dict(os.environ)
+    env["ARC_CONFIG_DIR"] = str((game_dir.parent / "config").resolve())
+    env["ARC_STATE_DIR"] = str(state_dir.resolve())
+    env["ARC_ACTIVE_GAME_ID"] = "ls20"
+    proc = subprocess.run(
+        [sys.executable, str(game_dir / "inspect_components.py"), "--current-mismatch"],
+        cwd=game_dir,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["status"] == "mismatch"
+    assert payload["sequence"]["sequence_id"] == "seq_0001"
