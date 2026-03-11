@@ -448,6 +448,7 @@ modes:
         - "In theory mode, when reading a full-grid file such as `current_state.hex`, read it whole once before any targeted reread; use offset/limit reads only for a specific unresolved question."
         - "In theory mode, use raw `.hex`/`.diff` evidence to define named components and keep every visible pixel accounted for by component bounding boxes."
         - "On level 1 before the first completion, if a real-game probe or solution attempt is needed, switch_mode to `explore_and_solve` with exactly one target class: either a short ordered list of named feature targets to probe or one concrete solution theory to test."
+        - "If theory hands off a concrete level-1 solution theory, it must already be executable from the current state; do not hand off a plan that still requires further theory-side path verification from the same unchanged state."
         - "On level 2+, if new components or changed semantics require mechanics work, switch_mode to `code_model` with explicit patch targets."
         - "On level 2+, if no new components are needed and only solution search remains, switch_mode to `solve_model`."
         - "When leaving this mode, invoke the `switch_mode` tool directly; do not use Bash placeholders or prose-only switch requests."
@@ -550,6 +551,8 @@ modes:
         - "Use explore_and_solve only on level 1 before the first completion."
         - "In explore_and_solve, perform the minimum real-game action sequence needed to answer the handed-off feature targets or test the single handed-off level-1 solution theory."
         - "Do not exit explore_and_solve until every handed-off feature target has been answered or falsified, or the single handed-off solution theory has been tested and recorded."
+        - "Do not switch back to theory from explore_and_solve without new real-game evidence from this explore turn, unless a supervisor or policy blocker prevented action execution."
+        - "If the handoff is a concrete solution theory, execute that solution attempt from the current state before leaving explore_and_solve; do not return to theory just to re-verify the same plan against the same unchanged state."
         - "After each real-game probe or solution attempt, update `theory.md` before switching modes."
         - "When leaving this mode, invoke the `switch_mode` tool directly; do not use Bash placeholders or prose-only switch requests."
       violations:
@@ -557,6 +560,8 @@ modes:
         - "Creating new files or scripts in explore_and_solve."
         - "Broadening explore_and_solve to new unhanded-off targets or free-form map wandering without first switching back for a new handoff."
         - "Exiting explore_and_solve before the handed-off feature targets or the single handed-off solution theory has been answered, falsified, or tested."
+        - "Returning to theory from explore_and_solve without new real-game evidence from the current explore turn, unless a supervisor or policy blocker prevented action execution."
+        - "Handing a concrete solution theory back to theory for more verification from the same unchanged state, instead of executing or falsifying it."
         - "Reading workspace files unrelated to the current level evidence in explore_and_solve."
         - "Using explore_and_solve for broad analysis instead of a concrete probe or solution attempt."
 
