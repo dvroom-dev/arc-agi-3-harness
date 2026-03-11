@@ -40,6 +40,9 @@ class Hooks(ModelHooks):
         cfg = model_lib.get_level_config(level)
         env.turn_budget = int(getattr(cfg, "turn_budget", 100))
         env.grid = env.initial_grid_for_level(level)
+        initializer = getattr(model_lib, "init_level", None)
+        if callable(initializer):
+            initializer(env, int(level), cfg=cfg)
 
     def apply_action(
         self,
@@ -52,24 +55,13 @@ class Hooks(ModelHooks):
         # Generic action receiver (all levels).
         env.turn += 1
         env.turn_budget -= 1
-
-        level_handler = getattr(self, f"_apply_level_{int(env.current_level)}", None)
+        applier = getattr(model_lib, "apply_action", None)
+        if callable(applier):
+            applier(env, action, data=data, reasoning=reasoning)
+            return
+        level_handler = getattr(model_lib, f"apply_level_{int(env.current_level)}", None)
         if callable(level_handler):
             level_handler(env, action, data=data, reasoning=reasoning)
-
-    def _apply_level_1(
-        self,
-        env,
-        action: GameAction,
-        *,
-        data: dict | None = None,
-        reasoning: str | None = None,
-    ) -> None:
-        """Stub level-1 mechanics entrypoint.
-
-        Fill this using evidence from real game + sequence files.
-        """
-        _ = env, action, data, reasoning
 
     def is_level_complete(self, env) -> bool:
         # Delegate completion condition to model_lib for easy iteration.

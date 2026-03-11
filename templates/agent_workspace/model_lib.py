@@ -29,6 +29,28 @@ def get_level_config(level: int) -> LevelConfig | None:
     return LEVEL_REGISTRY.get(int(level))
 
 
+def init_level(env, level: int, *, cfg: LevelConfig | None = None) -> None:
+    """Optional level init hook called by the harness-owned model entrypoint.
+
+    Use this to initialize per-level derived state. `model.py` already loads the
+    canonical initial grid from disk and passes control here.
+    """
+    _ = env, level, cfg
+
+
+def apply_action(env, action, *, data: dict | None = None, reasoning: str | None = None) -> None:
+    """Generic mechanics entrypoint called by the harness-owned model entrypoint.
+
+    Implement this function for most games. If you prefer, you can instead
+    define `apply_level_<n>(...)` helpers below and dispatch from here.
+    """
+    level_handler = globals().get(f"apply_level_{int(env.current_level)}")
+    if callable(level_handler):
+        level_handler(env, action, data=data, reasoning=reasoning)
+        return
+    _ = env, action, data, reasoning
+
+
 # ---------------------------------------------------------------------------
 # Feature definitions template (fill with evidence-backed entries).
 #
@@ -76,6 +98,20 @@ def load_initial_grid(game_dir: str | Path, level: int) -> np.ndarray | None:
 
 # ---------------------------------------------------------------------------
 # Example helpers/mechanics (commented out by default):
+#
+# def init_level(env, level, *, cfg=None):
+#     _ = cfg
+#     if level == 1:
+#         env.some_cached_cells = []
+#
+# def apply_action(env, action, *, data=None, reasoning=None):
+#     if env.current_level == 1:
+#         apply_level_1(env, action, data=data, reasoning=reasoning)
+#
+# def apply_level_1(env, action, *, data=None, reasoning=None):
+#     _ = data, reasoning
+#     feature_positions = get_feature_positions(env.grid)
+#     apply_example_mechanic(env, feature_positions, action)
 #
 # def find_all_feature_x(grid):
 #     \"\"\"Return every observed copy of feature_x, not just the first one.\"\"\"
