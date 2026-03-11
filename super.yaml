@@ -413,6 +413,7 @@ modes:
             - `component_coverage.md`
             - `component_mismatch.md`
         - prompt_part: supervisor_context_block
+        - prompt_part: switch_mode_usage
     agent_rules:
       operation: append
       requirements:
@@ -425,6 +426,7 @@ modes:
         - "On level 1 before the first completion, if a real-game probe or solution attempt is needed, switch_mode to `explore_and_solve` with exactly one target class: either a short ordered list of named feature targets to probe or one concrete solution theory to test."
         - "On level 2+, if new components or changed semantics require mechanics work, switch_mode to `code_model` with explicit patch targets."
         - "On level 2+, if no new components are needed and only solution search remains, switch_mode to `solve_model`."
+        - "When leaving this mode, invoke the `switch_mode` tool directly; do not use Bash placeholders or prose-only switch requests."
       violations:
         - "Repeatedly rereading full-grid or stable artifact files in theory mode without a new specific question."
         - "Reading different offsets of the same full-grid file in theory mode after a full read, without naming a specific unresolved question that requires it."
@@ -517,6 +519,7 @@ modes:
             You may read raw state artifacts in this mode because level-1 discovery depends on them.
             Only write `theory.md` in this mode.
         - prompt_part: supervisor_context_block
+        - prompt_part: switch_mode_usage
     agent_rules:
       operation: append
       requirements:
@@ -524,6 +527,7 @@ modes:
         - "In explore_and_solve, perform the minimum real-game action sequence needed to answer the handed-off feature targets or test the single handed-off level-1 solution theory."
         - "Do not exit explore_and_solve until every handed-off feature target has been answered or falsified, or the single handed-off solution theory has been tested and recorded."
         - "After each real-game probe or solution attempt, update `theory.md` before switching modes."
+        - "When leaving this mode, invoke the `switch_mode` tool directly; do not use Bash placeholders or prose-only switch requests."
       violations:
         - "Using explore_and_solve on level 2+."
         - "Creating new files or scripts in explore_and_solve."
@@ -682,6 +686,7 @@ modes:
             - `component_coverage.md`
             - `component_mismatch.md`
         - prompt_part: supervisor_context_block
+        - prompt_part: switch_mode_usage
     agent_rules:
       operation: append
       requirements:
@@ -825,6 +830,7 @@ modes:
             - `component_coverage.md`
             - `component_mismatch.md`
         - prompt_part: supervisor_context_block
+        - prompt_part: switch_mode_usage
     agent_rules:
       operation: append
       requirements:
@@ -915,10 +921,12 @@ modes:
             - `play.py`
             - `play_lib.py`
         - prompt_part: supervisor_context_block
+        - prompt_part: switch_mode_usage
     agent_rules:
       operation: append
       requirements:
         - "Use known solver branches in `play.py` for replay before inventing new routes."
+        - "When leaving this mode, invoke the `switch_mode` tool directly; do not use Bash placeholders or prose-only switch requests."
       violations:
         - "Doing broad exploratory probing in recover mode."
         - "Reading raw `.hex`, `diff.hex`, or sequence metadata directly in recover mode."
@@ -941,5 +949,30 @@ tools:
     - check_supervisor
     - paginate_tool_response
     - switch_mode
+
+prompt_parts:
+  switch_mode_usage:
+    operation: append
+    parts:
+      - literal: |
+          To leave a mode, call the `switch_mode` tool directly. Do not simulate a mode switch with Bash, `echo`, placeholder commands, or plain prose.
+
+          Required arguments:
+          - `target_mode`: destination mode name
+          - `reason`: one-sentence justification
+          - `mode_payload` (optional object): structured handoff details
+
+          Example tool call:
+          ```tool_call name=switch_mode
+          {
+            "target_mode": "explore_and_solve",
+            "reason": "component coverage passes and one concrete level-1 solution theory is ready to test",
+            "mode_payload": {
+              "solution_theory": "move the controllable block to the named marker via the bottom-left corridor"
+            }
+          }
+          ```
+
+          If the provider shows the tool as `mcp__super_custom_tools__switch_mode`, that is still the same `switch_mode` tool.
 
 cycle_limit: 1
