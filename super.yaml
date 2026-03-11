@@ -243,6 +243,18 @@ supervisor:
             <supervisor-command trigger="cadence">
             {{message}}
             </supervisor-command>
+    agent_error:
+      supervisor_prompt:
+        operation: append
+        parts:
+          - literal: |
+              Error recovery should be conservative.
+
+              Priorities:
+              1) If the errored turn produced no assistant output, no tool calls, and no tool results, treat it as a startup/runtime failure rather than a theory/explore mistake.
+              2) If two consecutive reviews show that same empty-error pattern, prefer `stop_and_return` instead of repeated recovery loops.
+              3) Only use `append_message_and_continue` for `agent_error` when the transcript contains concrete new error text or partial work that the next turn can directly recover from.
+              4) Do not keep the run alive on repeated empty `agent_error` turns just to ask the agent to retry the same startup path again.
 
 agent:
   system_message:
@@ -333,7 +345,7 @@ modes:
     stop_when:
       - "On level 1 before the first completion, component coverage passes for the active level, the passing coverage report is fresh in this theory turn, and there is exactly one concrete feature-target probe to run next; switch_mode to explore_and_solve."
       - "On level 2+, new components or changed component semantics are identified and concrete state-transition patches are clear from existing evidence; switch_mode to code_model."
-      - "On level 2+, no new components are needed and only model-side solution search remains; switch_mode to solve_model."
+      - "On level 2+, if theory concludes no new components are needed and only solution search remains, switch_mode to code_model with that conclusion so code_model can verify parity and then hand off to solve_model if appropriate."
       - "A solved-level regression requires replay; switch_mode to recover."
     tools:
       allow_builtin:
@@ -452,7 +464,7 @@ modes:
         - "On level 1 before the first completion, if a real-game probe is needed, switch_mode to `explore_and_solve` with exactly one short ordered list of named feature targets to probe."
         - "Do not hand off a level-1 solution theory from theory mode; level-1 solving should emerge from iterative target probing and later theory updates, not from a theory-authored route plan."
         - "On level 2+, if new components or changed semantics require mechanics work, switch_mode to `code_model` with explicit patch targets."
-        - "On level 2+, if no new components are needed and only solution search remains, switch_mode to `solve_model`."
+        - "On level 2+, if no new components are needed and only solution search remains, switch_mode to `code_model` with that conclusion so code_model can decide whether solve_model is actually ready."
         - "When leaving a pinned solved-level wrap-up from theory, include `mode_payload.wrapup_certified=true` and `mode_payload.wrapup_level=<pinned level>` on the switch_mode call."
         - "When leaving this mode, invoke the `switch_mode` tool directly; do not use Bash placeholders or prose-only switch requests."
       violations:
@@ -969,11 +981,11 @@ modes:
 mode_state_machine:
   initial_mode: theory
   transitions:
-    theory: [explore_and_solve, code_model, solve_model, recover, theory]
-    explore_and_solve: [theory, code_model, recover, explore_and_solve]
-    code_model: [solve_model, theory, recover, code_model]
-    solve_model: [code_model, theory, recover, solve_model]
-    recover: [theory, solve_model, code_model, recover]
+    theory: [explore_and_solve, code_model]
+    explore_and_solve: [theory, code_model, recover]
+    code_model: [theory, solve_model, recover]
+    solve_model: [code_model, theory, recover]
+    recover: [theory, code_model, solve_model]
 
 tools:
   allow_builtin:
