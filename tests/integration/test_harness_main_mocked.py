@@ -274,7 +274,7 @@ def test_harness_recovers_session_md_from_workspace_store_before_resume(
             out.write_text(recovered_doc["text"])
             return ""
         if mode == "resume":
-            session_path = Path(args[1])
+            session_path = root / ".ctxs" / "t-recover" / "session.md"
             seen_resume_doc["text"] = session_path.read_text()
             arc_state_dir = root / "runs" / "t-recover" / "supervisor" / "arc"
             (arc_state_dir / "state.json").write_text(

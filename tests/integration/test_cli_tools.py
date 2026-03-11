@@ -116,7 +116,7 @@ def test_run_super_preserves_output_in_stream_mode(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(harness, "_run_super_streaming", fake_stream)
     result = harness.run_super(
-        ["resume", "x", "--output", str(tmp_path / "s.md")],
+        ["resume", "--workspace", str(tmp_path), "--output", str(tmp_path / "s.md")],
         stream=True,
         cwd=tmp_path,
     )

@@ -451,9 +451,8 @@ class HarnessRuntime:
         self.log(f"[harness] super agent-dir: {self.active_agent_dir()}")
         resume_args: list[str] = [
             "resume",
-            str(self.session_file),
-            "--config", str(self.super_config),
             "--workspace", str(self.run_dir),
+            "--config", str(self.super_config),
             "--config-dir", str(self.run_config_dir),
             "--agent-dir", str(self.active_agent_dir()),
             "--supervisor-dir", str(self.supervisor_dir),

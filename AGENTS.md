@@ -140,7 +140,7 @@ Know where state actually lives.
 
 Important runtime behavior:
 - The harness starts a run with `super new ... --cycle-limit 1`.
-- It advances one supervised cycle at a time with repeated `super resume <session.md> ...`.
+- It advances one supervised cycle at a time with repeated `super resume --workspace <run-dir> ...`.
 - In streaming mode, the harness intentionally removes `--output` from the `super` subprocess command, streams full stdout live, and writes the transcript file itself afterward.
 - Consequence: live stdout/stderr is the earliest progress signal; do not wait only for `session.md` checkpoints.
 
