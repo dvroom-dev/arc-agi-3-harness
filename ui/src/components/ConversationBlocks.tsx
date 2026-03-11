@@ -56,6 +56,31 @@ function parseKeyValueLines(content: string) {
   return rows.length >= 4 ? rows : [];
 }
 
+function humanizeSupervisorDecision(rows: Array<{ key: string; value: string }>) {
+  const map = new Map(rows.map((row) => [row.key, row.value]));
+  const decision = map.get("decision");
+  const action = map.get("action");
+  const nextMode = map.get("next_mode");
+  const trigger = map.get("trigger");
+
+  let summary = "Supervisor updated the run state.";
+  if (decision === "resume_mode_head" && nextMode && nextMode !== "(none)") {
+    summary = `Switched mode to ${nextMode} by resuming the existing conversation.`;
+  } else if (decision === "fork_new_conversation" && nextMode && nextMode !== "(none)") {
+    summary = `Switched mode to ${nextMode} by starting a new conversation.`;
+  } else if (action === "continue") {
+    summary = "Kept the run in the current mode.";
+  } else if (action) {
+    summary = action;
+  }
+
+  return {
+    summary,
+    trigger: trigger && trigger !== "(none)" ? trigger : null,
+    nextMode: nextMode && nextMode !== "(none)" ? nextMode : null,
+  };
+}
+
 export function isSupervisorDecisionBlock(content: string) {
   const rows = parseKeyValueLines(content);
   if (rows.length === 0) return false;
@@ -302,6 +327,7 @@ export function ToolBlock({ runId, block }: { runId: string; block: Conversation
 
 export function SupervisorDecisionBlock({ content }: { content: string }) {
   const rows = parseKeyValueLines(content);
+  const details = humanizeSupervisorDecision(rows);
   return (
     <div className="rounded-lg border border-cyan-900/70 bg-cyan-950/15 p-3">
       <div className="mb-3">
@@ -309,8 +335,17 @@ export function SupervisorDecisionBlock({ content }: { content: string }) {
           supervisor decision
         </span>
       </div>
+      <div className="mb-3 rounded border border-cyan-950/60 bg-black/10 px-3 py-2">
+        <div className="text-sm font-semibold text-cyan-50">{details.summary}</div>
+        <div className="mt-1 text-xs text-cyan-200/80">
+          {details.nextMode ? `Next mode: ${details.nextMode}` : "No mode change"}
+          {details.trigger ? ` · Trigger: ${details.trigger}` : ""}
+        </div>
+      </div>
       <div className="grid gap-2">
-        {rows.map((row) => (
+        {rows
+          .filter((row) => row.key !== "mode")
+          .map((row) => (
           <div
             key={row.key}
             className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 rounded border border-cyan-950/60 bg-black/10 px-3 py-2"

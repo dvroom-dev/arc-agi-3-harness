@@ -14,6 +14,7 @@ import {
 } from "@/lib/agentConversationEvents.server";
 import {
   loadConversationForkBranchFallback,
+  activeSessionInfo,
 } from "@/lib/agentConversationSession.server";
 import { filterVisibleAgentBranches } from "@/lib/agentConversationBranches";
 import type { AgentConversationBranch } from "@/lib/types";
@@ -63,9 +64,24 @@ export async function listAgentConversationBranches(
     loadRawEvents(runId, conversationId),
     loadInterventions(runId, conversationId),
   ]);
+  const activeSession = await activeSessionInfo(runId);
   if (storedBranches.length === 0) {
     return loadConversationForkBranchFallback(runId);
   }
+  const branchByForkId = new Map(storedBranches.map((fork) => [fork.forkId, fork]));
+  const effectiveActiveForkId = (() => {
+    if (!activeSession.forkId) return null;
+    const sessionBranch = branchByForkId.get(activeSession.forkId);
+    if (!sessionBranch || sessionBranch.actionSummary !== "fork (hard)") return activeSession.forkId;
+    const childStart = storedBranches.find(
+      (candidate) =>
+        candidate.parentId === sessionBranch.forkId &&
+        candidate.mode === sessionBranch.mode &&
+        candidate.actionSummary === "supervise:start"
+    );
+    return childStart?.forkId ?? activeSession.forkId;
+  })();
+
   const baseBranches = storedBranches.map((fork) => {
     const { eventWindow } = eventsInWindow(rawEvents, interventions, fork.createdAt, fork.nextCreatedAt);
     const activity = countBranchActivity(eventWindow);
@@ -75,8 +91,10 @@ export async function listAgentConversationBranches(
       label: fork.mode ?? "agent",
       conversationId: fork.conversationId,
       forkId: fork.forkId,
+      parentId: fork.parentId,
       createdAt: fork.createdAt,
-      active: fork.active,
+      active: fork.forkId === effectiveActiveForkId || (!effectiveActiveForkId && fork.active),
+      actionSummary: fork.actionSummary,
       assistantTurns: activity.assistantTurns,
       toolCallCount: activity.toolCallCount,
       toolResultCount: activity.toolResultCount,

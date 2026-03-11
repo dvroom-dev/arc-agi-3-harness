@@ -39,6 +39,7 @@ export interface StoredConversationBranch {
   createdAt: string;
   mode: string | null;
   active: boolean;
+  actionSummary: string | null;
   documentText: string;
   initialUserPreview: string | null;
   nextCreatedAt: string | null;
@@ -179,6 +180,10 @@ export async function loadStoredConversationBranches(
       createdAt: fork.createdAt,
       mode: frontmatterValue(documentText, "mode"),
       active: fork.id === activeForkId,
+      actionSummary:
+        typeof forkMap.get(fork.id)?.actionSummary === "string"
+          ? forkMap.get(fork.id)?.actionSummary ?? null
+          : null,
       documentText,
       initialUserPreview: firstUserPreview(documentText),
       nextCreatedAt: forks[idx + 1]?.createdAt ?? null,

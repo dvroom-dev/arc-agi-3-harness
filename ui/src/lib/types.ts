@@ -246,8 +246,10 @@ export interface AgentConversationBranch {
   label: string;
   conversationId: string;
   forkId: string;
+  parentId?: string | null;
   createdAt: string;
   active: boolean;
+  actionSummary?: string | null;
   initialUserPreview: string | null;
   lastAssistantPreview: string | null;
 }
