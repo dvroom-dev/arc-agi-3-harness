@@ -13,6 +13,7 @@ experiments/
 environment_files/
 .env
 *.log
+.coverage
 .ui-run-launcher.json
 
 # Local benchmark scratch/config variants
