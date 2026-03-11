@@ -180,8 +180,11 @@ export function ConversationView({
             type="button"
             onClick={() =>
               setWindowState((current) => ({
-                runId,
-                hiddenEvents: Math.max(0, ((current.runId === runId ? current.hiddenEvents : null) ?? 0) - loadEarlierCount),
+                viewKey,
+                hiddenEvents: Math.max(
+                  0,
+                  ((current.viewKey === viewKey ? current.hiddenEvents : null) ?? 0) - loadEarlierCount
+                ),
               }))
             }
             disabled={showingAll}
@@ -192,7 +195,7 @@ export function ConversationView({
           {!showingAll ? (
             <button
               type="button"
-              onClick={() => setWindowState({ runId, hiddenEvents: 0 })}
+              onClick={() => setWindowState({ viewKey, hiddenEvents: 0 })}
               className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-300"
             >
               {`Load all ${missingEvents}`}

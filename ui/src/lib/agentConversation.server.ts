@@ -16,7 +16,10 @@ import {
   loadConversationForkBranchFallback,
   activeSessionInfo,
 } from "@/lib/agentConversationSession.server";
-import { filterVisibleAgentBranches } from "@/lib/agentConversationBranches";
+import {
+  buildAgentConversationEpisodes,
+  findAgentConversationEpisode,
+} from "@/lib/agentConversationBranches";
 import type { AgentConversationBranch } from "@/lib/types";
 
 interface AgentConversationDocument {
@@ -103,78 +106,13 @@ export async function listAgentConversationBranches(
     };
   });
 
-  const visibleBranches = filterVisibleAgentBranches(baseBranches);
+  const episodes = buildAgentConversationEpisodes(baseBranches);
 
-  if (visibleBranches.length === 0) {
+  if (episodes.length === 0) {
     return loadConversationForkBranchFallback(runId);
   }
 
-  const grouped = new Map<
-    string,
-    {
-      mode: string;
-      conversationId: string;
-      createdAt: string;
-      active: boolean;
-      initialUserPreview: string | null;
-      lastAssistantPreview: string | null;
-      memberForkIds: string[];
-      latestForkId: string;
-      latestParentId: string | null;
-    }
-  >();
-  for (const branch of visibleBranches.sort((a, b) => (parseTime(a.createdAt) ?? 0) - (parseTime(b.createdAt) ?? 0))) {
-    const mode = branch.mode?.trim() || "agent";
-    const groupKey = `${branch.conversationId}:${mode}`;
-    const existing = grouped.get(groupKey);
-    if (!existing) {
-      grouped.set(groupKey, {
-        mode,
-        conversationId: branch.conversationId,
-        createdAt: branch.createdAt,
-        active: branch.active,
-        initialUserPreview: branch.initialUserPreview,
-        lastAssistantPreview: branch.lastAssistantPreview,
-        memberForkIds: [branch.forkId],
-        latestForkId: branch.forkId,
-        latestParentId: branch.parentId ?? null,
-      });
-      continue;
-    }
-    existing.active = existing.active || branch.active;
-    existing.lastAssistantPreview = branch.lastAssistantPreview || existing.lastAssistantPreview;
-    existing.memberForkIds.push(branch.forkId);
-    existing.latestForkId = branch.forkId;
-    existing.latestParentId = branch.parentId ?? null;
-  }
-
-  const groups = [...grouped.entries()].sort((a, b) => (parseTime(a[1].createdAt) ?? 0) - (parseTime(b[1].createdAt) ?? 0));
-  const modeConversationCounts = new Map<string, number>();
-  for (const [, group] of groups) {
-    modeConversationCounts.set(group.mode, (modeConversationCounts.get(group.mode) ?? 0) + 1);
-  }
-  const seenPerMode = new Map<string, number>();
-  const branches = groups.map(([groupKey, group]) => {
-    const nextIndex = (seenPerMode.get(group.mode) ?? 0) + 1;
-    seenPerMode.set(group.mode, nextIndex);
-    const totalForMode = modeConversationCounts.get(group.mode) ?? 1;
-    return {
-      key: groupKey,
-      mode: group.mode,
-      label: totalForMode > 1 ? `${group.mode} (${nextIndex})` : group.mode,
-      conversationId: group.conversationId,
-      forkId: group.latestForkId,
-      parentId: group.latestParentId,
-      createdAt: group.createdAt,
-      active: group.active,
-      actionSummary: "supervise:start",
-      initialUserPreview: group.initialUserPreview,
-      lastAssistantPreview: group.lastAssistantPreview,
-      memberForkIds: group.memberForkIds,
-    } satisfies AgentConversationBranch;
-  });
-
-  return { branches };
+  return { branches: episodes };
 }
 
 async function readAgentBranchSkeletonDocument(
@@ -199,12 +137,29 @@ async function readAgentBranchSkeletonDocument(
       loadRawEvents(runId, conversationId),
       loadInterventions(runId, conversationId),
     ]);
-    const [conversationId, mode] = branchKey.split(":", 2);
+    const baseBranches = storedBranches.map((fork) => {
+      const { eventWindow } = eventsInWindow(rawEvents, interventions, fork.createdAt, fork.nextCreatedAt);
+      const activity = countBranchActivity(eventWindow);
+      return {
+        key: fork.key,
+        mode: fork.mode ?? null,
+        active: fork.active,
+        conversationId: fork.conversationId,
+        forkId: fork.forkId,
+        parentId: fork.parentId,
+        createdAt: fork.createdAt,
+        actionSummary: fork.actionSummary,
+        assistantTurns: activity.assistantTurns,
+        toolCallCount: activity.toolCallCount,
+        toolResultCount: activity.toolResultCount,
+        initialUserPreview: fork.initialUserPreview,
+        lastAssistantPreview: activity.lastAssistantPreview,
+      };
+    });
+    const episode = findAgentConversationEpisode(buildAgentConversationEpisodes(baseBranches), branchKey);
+    if (!episode) throw new Error("branch not found");
     const groupedBranches = storedBranches
-      .filter(
-        (entry) =>
-          entry.conversationId === conversationId && (entry.mode?.trim() || "agent") === (mode || "agent")
-      )
+      .filter((entry) => episode.memberForkIds.includes(entry.forkId))
       .sort((a, b) => (parseTime(a.createdAt) ?? 0) - (parseTime(b.createdAt) ?? 0));
     const branch = groupedBranches.at(-1);
     if (!branch) throw new Error("branch not found");
