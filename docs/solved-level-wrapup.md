@@ -53,8 +53,8 @@ active visible level for theory/code-model work until the pin is cleared.
 
 ## Supervisor Certification Conditions
 
-The supervisor should only clear solved-level wrap-up when all required solved
-level work is done.
+The supervisor should only certify solved-level wrap-up when all required
+solved-level work is done.
 
 Typical certification requirements:
 - `theory.md` reflects the solved-level mechanics actually observed
@@ -64,6 +64,13 @@ Typical certification requirements:
 
 If any of those are missing, the supervisor must keep the run pinned and resume
 the appropriate wrap-up mode.
+
+Certification is explicit:
+- when leaving solved-level wrap-up, the supervisor must switch to the next mode
+  with `mode_payload.wrapup_certified=true`
+- and `mode_payload.wrapup_level=<solved level>`
+- the harness will not clear the pin without those fields, even if helper
+  evidence is otherwise ready
 
 ## Mode Responsibilities During Wrap-Up
 

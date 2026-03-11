@@ -35,6 +35,22 @@ def load_super_active_mode_impl(runtime) -> str | None:
     return mode or None
 
 
+def load_super_active_mode_payload_impl(runtime) -> dict[str, str]:
+    payload = _read_json_if_exists(runtime.run_dir / "super" / "state.json")
+    if not isinstance(payload, dict):
+        return {}
+    raw = payload.get("activeModePayload")
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, str] = {}
+    for key, value in raw.items():
+        key_text = str(key or "").strip()
+        if not key_text:
+            continue
+        out[key_text] = str(value or "").strip()
+    return out
+
+
 def load_wrapup_status_impl(runtime) -> dict[str, Any]:
     game_dir = runtime.active_agent_dir()
     pin = load_analysis_level_pin(game_dir)
@@ -141,6 +157,7 @@ def certify_or_block_wrapup_transition_impl(runtime) -> None:
     if not target_mode or target_mode in {"theory", "code_model"}:
         return
 
+    target_mode_payload = load_super_active_mode_payload_impl(runtime)
     if not bool(status["ready_to_certify"]):
         raise RuntimeError(
             "cannot leave solved-level wrap-up while pin is active: "
@@ -151,6 +168,17 @@ def certify_or_block_wrapup_transition_impl(runtime) -> None:
             f"compare_clean={status['compare_clean']} "
             f"compare_level={status['compare_level']} "
             f"component_mismatch_ok={status['component_mismatch_ok']}"
+        )
+
+    certified = str(target_mode_payload.get("wrapup_certified") or "").strip().lower() == "true"
+    certified_level = _int_or_none(target_mode_payload.get("wrapup_level"))
+    if not certified or certified_level != int(status["pinned_level"]):
+        raise RuntimeError(
+            "cannot leave solved-level wrap-up without explicit supervisor certification: "
+            f"target_mode={target_mode} "
+            f"wrapup_certified={target_mode_payload.get('wrapup_certified')} "
+            f"wrapup_level={target_mode_payload.get('wrapup_level')} "
+            f"expected_level={status['pinned_level']}"
         )
 
     prior_arc_state_dir = os.environ.get("ARC_STATE_DIR")

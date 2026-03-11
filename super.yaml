@@ -136,6 +136,7 @@ supervisor:
       - "When a solved-level compare pin is active, keep all visible state, compare work, and model work targeted to the pinned solved level until the supervisor explicitly certifies wrap-up complete."
       - "While a solved-level compare pin is active, only `theory` and `code_model` are valid next modes. Do not route to `explore_and_solve` or `solve_model` until the supervisor certifies wrap-up complete."
       - "Coverage helpers and compare helpers provide evidence only; they do not certify solved-level wrap-up on their own."
+      - "Wrap-up certification is explicit, not implied. When leaving a pinned solved-level wrap-up, include `mode_payload.wrapup_certified=true` and `mode_payload.wrapup_level=<pinned level>` on the switch to the next mode."
   tool_interception:
     rules:
       - name: idle-keepalive
@@ -425,6 +426,7 @@ modes:
             - use `component_coverage.*` as the canonical source for observed grid shapes; do not count rendered `Read` line numbers to infer dimensions;
             - record the available non-RESET actions from the prompt or existing artifacts; do not propose read-only action-discovery probes;
             - if a solved-level compare pin is active, keep `theory.md` and `components.py` scoped to the pinned solved level only;
+            - while a solved-level compare pin is active, do not use or request `arc_repl`; theory remains read-only and mutations belong only in `explore_and_solve`;
             - on level 1 before the first completion, decide the next feature target to probe in the real game;
             - if switching to `explore_and_solve` on level 1, hand off exactly one short ordered list of named feature targets to probe next; do not hand off a solution theory from theory mode;
             - on later levels, decide whether the next step is `code_model`, `solve_model`, or `recover`;
@@ -451,6 +453,7 @@ modes:
         - "Do not hand off a level-1 solution theory from theory mode; level-1 solving should emerge from iterative target probing and later theory updates, not from a theory-authored route plan."
         - "On level 2+, if new components or changed semantics require mechanics work, switch_mode to `code_model` with explicit patch targets."
         - "On level 2+, if no new components are needed and only solution search remains, switch_mode to `solve_model`."
+        - "When leaving a pinned solved-level wrap-up from theory, include `mode_payload.wrapup_certified=true` and `mode_payload.wrapup_level=<pinned level>` on the switch_mode call."
         - "When leaving this mode, invoke the `switch_mode` tool directly; do not use Bash placeholders or prose-only switch requests."
       violations:
         - "Repeatedly rereading full-grid or stable artifact files in theory mode without a new specific question."
@@ -723,6 +726,7 @@ modes:
       requirements:
         - "Do not leave code_model while compare is still red for the active level or pinned solved level."
         - "If a solved-level compare pin is active, stay scoped to the pinned solved level and do not attempt frontier-level planning or solving."
+        - "When leaving a pinned solved-level wrap-up from code_model, include `mode_payload.wrapup_certified=true` and `mode_payload.wrapup_level=<pinned level>` on the switch_mode call."
         - "End each code_model turn with model-file edits, theory updates, or a switch_mode call."
         - "If compare is red and a single exact blocker remains, stay in code_model and report the blocker instead of switching back to theory."
       violations:
