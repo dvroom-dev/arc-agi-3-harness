@@ -87,6 +87,32 @@ function parseToolBlock(block: ConversationBlock) {
   };
 }
 
+function buildSingleLinePreview(content: string) {
+  const normalized = content.replace(/\r/g, "");
+  const preview = normalized
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return preview || "(empty)";
+}
+
+function OneLinePreview({
+  content,
+  textClassName,
+}: {
+  content: string;
+  textClassName: string;
+}) {
+  return (
+    <div className={`overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-6 ${textClassName}`}>
+      {content}
+    </div>
+  );
+}
+
 export function ContentPreview({
   content,
   textClassName,
@@ -138,15 +164,9 @@ function ToolResultBody({
   const [loading, setLoading] = useState(false);
   const [fullBody, setFullBody] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const isTruncated = inlineBody.includes("<truncated inline output>");
-  const hasExternalRef =
-    inlineBody.includes("<full results at ") ||
-    inlineBody.includes("paginate_tool_response") ||
-    /<page \d+ of \d+/.test(inlineBody);
-  const lines = inlineBody.split("\n");
-  const isLong = isTruncated || lines.length > 14 || inlineBody.length > 1800;
-  const isExpandable = isLong || hasExternalRef;
-  const preview = isLong ? lines.slice(0, 14).join("\n") : inlineBody;
+  const hasBody = inlineBody.trim().length > 0;
+  const isExpandable = hasBody;
+  const preview = buildSingleLinePreview(inlineBody);
 
   async function handleToggle() {
     if (expanded) {
@@ -179,13 +199,17 @@ function ToolResultBody({
     }
   }
 
-  const displayed = expanded || !isLong ? fullBody || inlineBody : preview;
+  const displayed = expanded ? fullBody || inlineBody : preview;
 
   return (
     <div>
-      <pre className={`whitespace-pre-wrap text-[11px] leading-6 ${textClassName}`}>
-        {expanded || !isLong ? displayed : `${displayed}\n...`}
-      </pre>
+      {expanded ? (
+        <pre className={`whitespace-pre-wrap text-[11px] leading-6 ${textClassName}`}>
+          {displayed}
+        </pre>
+      ) : (
+        <OneLinePreview content={displayed} textClassName={textClassName} />
+      )}
       {loadError ? (
         <div className="mt-2 text-[10px] text-red-300">{loadError}</div>
       ) : null}
@@ -224,6 +248,10 @@ export function FileCard({ title, content }: { title?: string; content: string }
 export function ToolBlock({ runId, block }: { runId: string; block: ConversationBlock }) {
   const tone = toolTone(block.kind as "tool_call" | "tool_result");
   const parsed = parseToolBlock(block);
+  const [expanded, setExpanded] = useState(false);
+  const preview = buildSingleLinePreview(parsed.body);
+  const hasBody = parsed.body.trim().length > 0;
+  const isExpandable = hasBody;
   return (
     <div className={`rounded-lg border p-3 ${tone.panel}`}>
       <div className="mb-3 flex items-center gap-2">
@@ -238,7 +266,9 @@ export function ToolBlock({ runId, block }: { runId: string; block: Conversation
           </span>
         ) : null}
       </div>
-      <div className="mb-2 text-[11px] font-semibold text-zinc-200">{parsed.summary}</div>
+      <div className="mb-2 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold text-zinc-200">
+        {parsed.summary}
+      </div>
       {block.kind === "tool_result" ? (
         <ToolResultBody
           runId={runId}
@@ -247,7 +277,24 @@ export function ToolBlock({ runId, block }: { runId: string; block: Conversation
           textClassName={tone.text}
         />
       ) : (
-        <ContentPreview content={parsed.body} textClassName={tone.text} previewLines={12} />
+        <div>
+          {expanded ? (
+            <pre className={`whitespace-pre-wrap text-[11px] leading-6 ${tone.text}`}>
+              {parsed.body}
+            </pre>
+          ) : (
+            <OneLinePreview content={preview} textClassName={tone.text} />
+          )}
+          {isExpandable ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((value) => !value)}
+              className="mt-2 rounded border border-zinc-700 bg-zinc-900/80 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
+            >
+              {expanded ? "Show less" : "Show full"}
+            </button>
+          ) : null}
+        </div>
       )}
     </div>
   );

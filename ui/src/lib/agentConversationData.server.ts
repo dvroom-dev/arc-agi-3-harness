@@ -11,6 +11,9 @@ export interface RunHistoryForkSummaryFile {
   initialUserPreview?: string;
   lastAssistantPreview?: string;
   skeletonPath?: string;
+  assistantTurns?: number;
+  toolCallCount?: number;
+  toolResultCount?: number;
 }
 
 export async function preferredConversationId(runId: string): Promise<string | null> {

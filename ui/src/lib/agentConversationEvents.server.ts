@@ -1,0 +1,389 @@
+import fs from "fs/promises";
+import path from "path";
+import type { ConversationBlock } from "@/lib/conversation";
+import { runDir } from "@/lib/paths";
+
+export interface RawEventEntry {
+  ts: string;
+  provider: string | null;
+  itemKind: string | null;
+  itemSummary: string | null;
+  raw: Record<string, unknown>;
+}
+
+export interface InterventionEntry {
+  ts: string;
+  actionSummary: string | null;
+  forkSummary: string | null;
+  reason: string | null;
+}
+
+function parseTime(value: string | null | undefined): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export async function loadRawEvents(
+  runId: string,
+  conversationId: string | null
+): Promise<RawEventEntry[]> {
+  if (!conversationId) return [];
+  const rawEventsPath = path.join(
+    runDir(runId),
+    ".ai-supervisor",
+    "conversations",
+    conversationId,
+    "raw_events",
+    "events.ndjson"
+  );
+  let lines: string[] = [];
+  try {
+    lines = (await fs.readFile(rawEventsPath, "utf-8")).split("\n").filter(Boolean);
+  } catch {
+    return [];
+  }
+
+  const events: RawEventEntry[] = [];
+  for (const line of lines) {
+    try {
+      const payload = JSON.parse(line) as {
+        ts?: string;
+        provider?: string;
+        item_kind?: string;
+        item_summary?: string;
+        raw?: Record<string, unknown>;
+      };
+      if (typeof payload.ts !== "string" || !payload.raw || typeof payload.raw !== "object") {
+        continue;
+      }
+      events.push({
+        ts: payload.ts,
+        provider: typeof payload.provider === "string" ? payload.provider : null,
+        itemKind: typeof payload.item_kind === "string" ? payload.item_kind : null,
+        itemSummary: typeof payload.item_summary === "string" ? payload.item_summary : null,
+        raw: payload.raw,
+      });
+    } catch {
+      // Ignore malformed lines.
+    }
+  }
+
+  events.sort((a, b) => (parseTime(a.ts) ?? 0) - (parseTime(b.ts) ?? 0));
+  return events;
+}
+
+export async function loadInterventions(
+  runId: string,
+  conversationId: string | null
+): Promise<InterventionEntry[]> {
+  if (!conversationId) return [];
+  const indexPath = path.join(
+    runDir(runId),
+    ".ai-supervisor",
+    "conversations",
+    conversationId,
+    "index.json"
+  );
+  try {
+    const payload = JSON.parse(await fs.readFile(indexPath, "utf-8")) as {
+      forks?: Array<Record<string, unknown>>;
+    };
+    if (!Array.isArray(payload.forks)) return [];
+    return payload.forks
+      .map((fork) => {
+        const actionSummary = typeof fork.actionSummary === "string" ? fork.actionSummary : null;
+        if (actionSummary !== "fork (hard)" && actionSummary !== "fork (soft)") return null;
+        const ts = typeof fork.createdAt === "string" ? fork.createdAt : null;
+        if (!ts) return null;
+        const reason =
+          Array.isArray(fork.actions) &&
+          fork.actions[0] &&
+          typeof fork.actions[0] === "object" &&
+          typeof (fork.actions[0] as { reasoning?: unknown }).reasoning === "string"
+            ? (fork.actions[0] as { reasoning: string }).reasoning
+            : null;
+        return {
+          ts,
+          actionSummary,
+          forkSummary: typeof fork.forkSummary === "string" ? fork.forkSummary : null,
+          reason,
+        } satisfies InterventionEntry;
+      })
+      .filter((entry): entry is InterventionEntry => Boolean(entry))
+      .sort((a, b) => (parseTime(a.ts) ?? 0) - (parseTime(b.ts) ?? 0));
+  } catch {
+    return [];
+  }
+}
+
+function contentText(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return "";
+      if ((entry as { type?: unknown }).type === "text") {
+        const text = (entry as { text?: unknown }).text;
+        return typeof text === "string" ? text : "";
+      }
+      if ((entry as { type?: unknown }).type === "thinking") {
+        const thinking = (entry as { thinking?: unknown }).thinking;
+        return typeof thinking === "string" ? thinking : "";
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
+}
+
+function toolBlockContent(summary: string, status: string, body: string) {
+  return [`summary: ${summary}`, `status: ${status}`, "", body.trim()].join("\n").trim();
+}
+
+export function rawEventToBlocks(event: RawEventEntry): ConversationBlock[] {
+  const blocks: ConversationBlock[] = [];
+  if (event.raw.type === "system" && event.raw.subtype === "init") {
+    const tools = Array.isArray(event.raw.tools)
+      ? event.raw.tools.filter((tool): tool is string => typeof tool === "string")
+      : [];
+    const lines = [
+      `provider: ${event.provider || "unknown"}`,
+      `model: ${typeof event.raw.model === "string" ? event.raw.model : "unknown"}`,
+      `session_id: ${typeof event.raw.session_id === "string" ? event.raw.session_id : "unknown"}`,
+      `enabled_tools: ${tools.join(", ") || "(none)"}`,
+    ];
+    blocks.push({
+      kind: "text",
+      content: lines.join("\n"),
+      raw: lines.join("\n"),
+    });
+    return blocks;
+  }
+
+  const message =
+    event.raw.message && typeof event.raw.message === "object"
+      ? (event.raw.message as { content?: unknown })
+      : null;
+  const content = message?.content;
+
+  if (event.itemKind === "tool_call") {
+    let summary = event.itemSummary || "tool_call";
+    let body = "";
+    if (Array.isArray(content)) {
+      const toolUse = content.find(
+        (entry) =>
+          entry &&
+          typeof entry === "object" &&
+          (entry as { type?: unknown }).type === "tool_use"
+      ) as
+        | { name?: unknown; input?: unknown }
+        | undefined;
+      if (toolUse) {
+        const name = typeof toolUse.name === "string" ? toolUse.name : summary;
+        summary = name;
+        body =
+          typeof toolUse.input === "string"
+            ? toolUse.input
+            : JSON.stringify(toolUse.input ?? {}, null, 2);
+      }
+    }
+    blocks.push({
+      kind: "tool_call",
+      content: toolBlockContent(summary, "ok", body || summary),
+      raw: summary,
+    });
+    return blocks;
+  }
+
+  if (event.itemKind === "tool_result" || event.itemKind === "tool_error") {
+    const summary = event.itemSummary || event.itemKind || "tool_result";
+    let body = contentText(content);
+    let toolUseId: string | null = null;
+    if (Array.isArray(content)) {
+      const toolResult = content.find(
+        (entry) =>
+          entry &&
+          typeof entry === "object" &&
+          (entry as { type?: unknown }).type === "tool_result"
+      ) as { tool_use_id?: unknown } | undefined;
+      if (toolResult && typeof toolResult.tool_use_id === "string") {
+        toolUseId = toolResult.tool_use_id;
+      }
+    }
+    if (!body && typeof event.raw.tool_use_result === "string") {
+      body = event.raw.tool_use_result;
+    } else if (!body && event.raw.tool_use_result && typeof event.raw.tool_use_result === "object") {
+      body = JSON.stringify(event.raw.tool_use_result, null, 2);
+    }
+    blocks.push({
+      kind: "tool_result",
+      content: toolBlockContent(
+        toolUseId ? `${summary} ${toolUseId}` : summary,
+        event.itemKind === "tool_error" ? "error" : "ok",
+        body || summary
+      ),
+      raw: summary,
+    });
+    return blocks;
+  }
+
+  if (event.itemKind === "assistant_meta") {
+    const body =
+      contentText(
+        event.raw.message && typeof event.raw.message === "object"
+          ? (event.raw.message as { content?: unknown }).content
+          : null
+      ) ||
+      (typeof event.raw.text === "string" ? event.raw.text.trim() : "") ||
+      event.itemSummary ||
+      "assistant_reasoning";
+    if (body) {
+      blocks.push({
+        kind: "chat",
+        role: "assistant",
+        content: `Reasoning summary:\n${body}`,
+        raw: body,
+      });
+    }
+    return blocks;
+  }
+
+  if (event.raw.type === "assistant") {
+    const text = contentText(content);
+    if (text) {
+      blocks.push({
+        kind: "chat",
+        role: "assistant",
+        content: text,
+        raw: text,
+      });
+    }
+    return blocks;
+  }
+
+  if (event.raw.type === "assistant_message") {
+    const text =
+      (typeof event.raw.text === "string" ? event.raw.text.trim() : "") ||
+      contentText(
+        event.raw.message && typeof event.raw.message === "object"
+          ? (event.raw.message as { content?: unknown }).content
+          : null
+      );
+    if (text) {
+      blocks.push({
+        kind: "chat",
+        role: "assistant",
+        content: text,
+        raw: text,
+      });
+    }
+    return blocks;
+  }
+
+  if (event.raw.type === "result") {
+    const result = typeof event.raw.result === "string" ? event.raw.result.trim() : "";
+    if (result) {
+      blocks.push({
+        kind: "chat",
+        role: "assistant",
+        content: result,
+        raw: result,
+      });
+    }
+    return blocks;
+  }
+
+  if (event.raw.type === "user") {
+    const text = contentText(content);
+    if (text) {
+      blocks.push({
+        kind: "chat",
+        role: "user",
+        content: text,
+        raw: text,
+      });
+    }
+  }
+
+  return blocks;
+}
+
+export function interventionBlock(entry: InterventionEntry): ConversationBlock {
+  const lines = [
+    `mode: ${entry.actionSummary?.includes("hard") ? "hard" : "soft"}`,
+    "trigger: supervisor_intervention",
+    `decision: ${entry.actionSummary || "(unknown)"}`,
+    `action: ${entry.forkSummary || "(none)"}`,
+    `resume: true`,
+    `reasons: ${entry.reason || "(none)"}`,
+  ];
+  return {
+    kind: "text",
+    content: lines.join("\n"),
+    raw: lines.join("\n"),
+  };
+}
+
+export function countBranchActivity(events: RawEventEntry[]) {
+  let assistantTurns = 0;
+  let toolCallCount = 0;
+  let toolResultCount = 0;
+  let lastAssistantPreview: string | null = null;
+
+  for (const event of events) {
+    if (event.itemKind === "tool_call") toolCallCount += 1;
+    if (event.itemKind === "tool_result" || event.itemKind === "tool_error") toolResultCount += 1;
+    if (event.itemKind === "assistant_meta") {
+      const text =
+        contentText(
+          event.raw.message && typeof event.raw.message === "object"
+            ? (event.raw.message as { content?: unknown }).content
+            : null
+        ) ||
+        (typeof event.raw.text === "string" ? event.raw.text.trim() : "");
+      if (text) {
+        assistantTurns += 1;
+        lastAssistantPreview = text.replace(/\s+/g, " ").trim().slice(0, 240);
+      }
+    } else if (event.raw.type === "assistant" || event.raw.type === "assistant_message") {
+      const text = contentText(
+        event.raw.message && typeof event.raw.message === "object"
+          ? (event.raw.message as { content?: unknown }).content
+          : null
+      ) || (typeof event.raw.text === "string" ? event.raw.text.trim() : "");
+      if (text) {
+        assistantTurns += 1;
+        lastAssistantPreview = text.replace(/\s+/g, " ").trim().slice(0, 240);
+      }
+    } else if (event.raw.type === "result") {
+      const result = typeof event.raw.result === "string" ? event.raw.result.trim() : "";
+      if (result) {
+        assistantTurns += 1;
+        lastAssistantPreview = result.replace(/\s+/g, " ").trim().slice(0, 240);
+      }
+    }
+  }
+
+  return { assistantTurns, toolCallCount, toolResultCount, lastAssistantPreview };
+}
+
+export function eventsInWindow(
+  rawEvents: RawEventEntry[],
+  interventions: InterventionEntry[],
+  startAt: string,
+  endAt: string | null
+) {
+  const start = parseTime(startAt);
+  const end = parseTime(endAt);
+  const eventWindow = rawEvents.filter((event) => {
+    const ts = parseTime(event.ts);
+    return ts !== null && ts >= start && (endAt === null || ts < end);
+  });
+  const interventionWindow = interventions.filter((entry) => {
+    const ts = parseTime(entry.ts);
+    return ts !== null && ts >= start && (endAt === null || ts < end);
+  });
+  return { eventWindow, interventionWindow };
+}
