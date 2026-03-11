@@ -73,6 +73,27 @@ prompt_parts:
         When using provider file-edit tools, read the file first, then edit/write it.
         Do not use private/underscored internals.
     - prompt_part: component_model_runtime
+  switch_mode_usage:
+    - literal: |
+        To leave a mode, call the `switch_mode` tool directly. Do not simulate a mode switch with Bash, `echo`, placeholder commands, or plain prose.
+
+        Required arguments:
+        - `target_mode`: destination mode name
+        - `reason`: one-sentence justification
+        - `mode_payload` (optional object): structured handoff details
+
+        Example tool call:
+        ```tool_call name=switch_mode
+        {
+          "target_mode": "explore_and_solve",
+          "reason": "component coverage passes and one concrete level-1 solution theory is ready to test",
+          "mode_payload": {
+            "solution_theory": "move the controllable block to the named marker via the bottom-left corridor"
+          }
+        }
+        ```
+
+        If the provider shows the tool as `mcp__super_custom_tools__switch_mode`, that is still the same `switch_mode` tool.
 
 supervisor:
   enabled: true
@@ -270,6 +291,7 @@ agent:
           - If the current mode does not mention a runtime/tool family, do not assume it is allowed.
           - When using provider file-edit tools, read the file first, then edit/write it. Do not try to write a file the provider has not read in the current turn.
           - Do not assign semantic roles to a feature until evidence supports that role.
+          - In code and detector identifiers, use neutral structural names first. Keep semantic guesses in `theory.md` only until action-linked evidence proves the role.
           - Do not assume a feature is unique unless evidence supports uniqueness.
           - If a supervisor command includes `KEEPALIVE_RETURN_MODE=<mode>`, treat it as an interrupt:
             execute exactly the required real-game action, report concise evidence, and stop.
@@ -382,6 +404,7 @@ modes:
              Prefer multiple specific detectors over one broad umbrella detector when the broad box would hide which sub-part actually changed.
             Provider `Read` output adds line numbers and can show a blank numbered trailing line; infer grid dimensions only from non-empty hex rows or from `component_coverage.*`, not from the rendered line count.
             Use neutral feature names until evidence proves a stronger role.
+            In `components.py`, keep detector names and component kinds neutral and structural; record semantic meaning only in `theory.md`.
             If a solved-level compare pin is active, stay strictly scoped to that pinned level. Do not record frontier-level observations, components, or hypotheses until the pin is cleared.
             Do not exhaustively restate stable geometry. After one initial survey, only reopen a file if it answers a specific open question or verifies a concrete handoff.
             If you can already name the smallest next step, switch modes promptly instead of continuing broad analysis.
@@ -397,6 +420,7 @@ modes:
             Deliverables for this mode:
             - update `theory.md` with components, action effects, completion candidates, and unknowns;
             - keep `components.py` detectors broad enough that every visible pixel in every seen state for the active level lies inside at least one component bounding box;
+            - keep `components.py` names neutral; if you think a component is a player/cursor/target/goal, record that only as a role hypothesis in `theory.md` with evidence;
             - run `python3 inspect_components.py --coverage --level <LEVEL>` before leaving theory mode;
             - use `component_coverage.*` as the canonical source for observed grid shapes; do not count rendered `Read` line numbers to infer dimensions;
             - record the available non-RESET actions from the prompt or existing artifacts; do not propose read-only action-discovery probes;
@@ -949,30 +973,5 @@ tools:
     - check_supervisor
     - paginate_tool_response
     - switch_mode
-
-prompt_parts:
-  switch_mode_usage:
-    operation: append
-    parts:
-      - literal: |
-          To leave a mode, call the `switch_mode` tool directly. Do not simulate a mode switch with Bash, `echo`, placeholder commands, or plain prose.
-
-          Required arguments:
-          - `target_mode`: destination mode name
-          - `reason`: one-sentence justification
-          - `mode_payload` (optional object): structured handoff details
-
-          Example tool call:
-          ```tool_call name=switch_mode
-          {
-            "target_mode": "explore_and_solve",
-            "reason": "component coverage passes and one concrete level-1 solution theory is ready to test",
-            "mode_payload": {
-              "solution_theory": "move the controllable block to the named marker via the bottom-left corridor"
-            }
-          }
-          ```
-
-          If the provider shows the tool as `mcp__super_custom_tools__switch_mode`, that is still the same `switch_mode` tool.
 
 cycle_limit: 1

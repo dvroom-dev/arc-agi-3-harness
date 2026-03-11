@@ -3,6 +3,10 @@
 Theory mode owns this file.
 Define evidence-backed visible components here and keep every visible pixel in
 every seen state covered by at least one component bounding box.
+Use neutral code names only. Do not encode semantic roles such as player,
+cursor, target, goal, exit, enemy, or HUD into component identifiers unless
+action-linked evidence has already proven that role. Semantic guesses belong in
+`theory.md`, not in this file.
 """
 
 from __future__ import annotations
@@ -25,6 +29,7 @@ ComponentDetector = Callable[[np.ndarray], list[ComponentBox]]
 
 # Theory mode should keep this registry broad enough that every visible pixel in
 # every seen state lies inside at least one component bounding box.
+# Component `kind` names should stay neutral and structural rather than semantic.
 COMPONENT_REGISTRY: dict[str, ComponentDetector] = {}
 
 
@@ -55,6 +60,8 @@ def make_component(
 # Example detector style:
 # - return one ComponentBox per independently moving/recoloring/consumable region
 # - avoid one giant umbrella bbox when separate regions can change independently
+# - prefer neutral names like `feature_x`, `cluster_a`, `shape_1`, `marker_b`
+#   rather than semantic names like `player`, `target`, `goal`, or `cursor`
 #
 # def find_all_feature_x(grid: np.ndarray) -> list[ComponentBox]:
 #     boxes: list[ComponentBox] = []
