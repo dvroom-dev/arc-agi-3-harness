@@ -132,6 +132,10 @@ supervisor:
         tool: bash
         match_type: contains
         pattern: __ARC_INTERCEPT_COMPARE_MISMATCH__
+        action:
+          type: supervisor_switch_mode
+          target_mode: code_model
+          reason: compare mismatch requires immediate model repair before more real-game progression
       - name: compare-clean
         when: response
         tool: bash
@@ -269,6 +273,10 @@ agent:
           - Do not assume a feature is unique unless evidence supports uniqueness.
           - If a supervisor command includes `KEEPALIVE_RETURN_MODE=<mode>`, treat it as an interrupt:
             execute exactly the required real-game action, report concise evidence, and stop.
+          - Runtime/harness/tooling investigation is out of scope unless the supervisor explicitly asks for infrastructure debugging.
+          - Do not inspect or reason about `super`, `agent-studio`, `/config/tools/`, provider/runtime source, or benchmark harness internals to second-guess compare/control behavior.
+          - Treat workspace artifacts as the authoritative surface for gameplay/model work.
+          - If compare/control artifacts disagree, cite the exact conflicting workspace files, treat it as a local blocker report, and stay within the current mode contract; do not investigate tooling internals.
 
           # Objective
           - Minimize real-game actions.
@@ -367,6 +375,7 @@ modes:
             Do not use `arc_repl` in this mode.
             The only Python command allowed here is `python3 inspect_components.py ...` for component coverage/mismatch checks.
              Use raw `.hex`, sequence metadata, and compare artifacts to define components and map every visible pixel to named elements.
+            Runtime/harness investigation is out of scope here. If artifacts appear inconsistent, cite the exact conflicting workspace files and switch modes or report the blocker; do not inspect tooling internals.
             When reading a full-grid artifact like `current_state.hex`, read the whole file in one `Read` call first. These files are small enough to inspect whole.
             Do not page through different offsets of the same full-grid file unless a specific unresolved question requires a targeted reread after that first full read.
              Detector rule of thumb: if a region can move independently, recolor independently, or be consumed independently, it should usually be its own detected component rather than part of one giant bounding box.
@@ -504,6 +513,7 @@ modes:
             For actionful probes, inspect the returned `artifacts.after_state_hex` and `artifacts.diff_hex` first before reopening on-disk turn artifacts.
             Do not use read-only `arc_repl` calls as inspection tools.
             Do not inspect Python runtime objects inside the probe script; the `arc_repl` response and next-mode artifacts are the inspection surface.
+            Do not investigate harness/runtime/tooling behavior in this mode. If compare or intercept behavior looks inconsistent, record the exact workspace artifacts involved and return to the supervisor instead of inspecting internals.
             You may read raw state artifacts in this mode because level-1 discovery depends on them.
             Only write `theory.md` in this mode.
         - prompt_part: supervisor_context_block
@@ -641,6 +651,8 @@ modes:
             If a solved-level compare pin is active, stay scoped to the pinned solved level and ignore frontier-level artifacts until the pin clears.
             Do not read raw `.hex`, `diff.hex`, or sequence metadata directly in this mode.
             Runtime/harness internals are out of scope: do not read or edit any file under `/config/tools/`.
+            Treat `current_compare.json` and `component_mismatch.json` as the authoritative parity artifacts in this mode.
+            If they disagree or look broken, report the exact contradiction from workspace artifacts and stay in `code_model`; do not inspect runtime/tooling source.
             If compare is red and you have one exact blocker, stay in `code_model` and report that blocker precisely; do not bounce back to `theory` while parity remains red.
         - prompt_part: model_runtime
     user_message:
@@ -681,6 +693,7 @@ modes:
         - "Using any `arc_repl` command in code_model."
         - "Reading raw `.hex`, `diff.hex`, or sequence metadata directly in code_model."
         - "Reading or editing runtime/harness internals (any path containing `/config/tools/`) in code_model."
+        - "Investigating harness/runtime/provider source or control-plane internals instead of reporting a workspace-artifact blocker in code_model."
         - "Editing `model.py` in code_model."
 
   solve_model:
