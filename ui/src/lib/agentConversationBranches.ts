@@ -42,16 +42,14 @@ export function buildAgentConversationEpisodes<T extends BranchVisibilityCandida
   );
 
   const episodes: AgentConversationEpisode[] = [];
+  const episodeByConversationMode = new Map<string, AgentConversationEpisode>();
   for (const branch of visibleBranches) {
     const mode = branch.mode?.trim() || "agent";
-    const previous = episodes.at(-1);
-    const shouldMerge =
-      previous &&
-      previous.mode === mode &&
-      previous.conversationId === branch.conversationId;
+    const key = `${branch.conversationId}:${mode}`;
+    const existing = episodeByConversationMode.get(key);
 
-    if (!shouldMerge) {
-      episodes.push({
+    if (!existing) {
+      const episode: AgentConversationEpisode = {
         key: branch.key ?? branch.forkId,
         mode,
         label: mode,
@@ -64,17 +62,19 @@ export function buildAgentConversationEpisodes<T extends BranchVisibilityCandida
         initialUserPreview: branch.initialUserPreview,
         lastAssistantPreview: branch.lastAssistantPreview,
         memberForkIds: [branch.forkId],
-      });
+      };
+      episodes.push(episode);
+      episodeByConversationMode.set(key, episode);
       continue;
     }
 
-    previous.active = previous.active || branch.active;
-    previous.forkId = branch.forkId;
-    previous.parentId = branch.parentId ?? null;
-    previous.actionSummary = branch.actionSummary ?? previous.actionSummary ?? null;
-    previous.lastAssistantPreview =
-      branch.lastAssistantPreview || previous.lastAssistantPreview;
-    previous.memberForkIds.push(branch.forkId);
+    existing.active = existing.active || branch.active;
+    existing.forkId = branch.forkId;
+    existing.parentId = branch.parentId ?? null;
+    existing.actionSummary = branch.actionSummary ?? existing.actionSummary ?? null;
+    existing.lastAssistantPreview =
+      branch.lastAssistantPreview || existing.lastAssistantPreview;
+    existing.memberForkIds.push(branch.forkId);
   }
 
   const modeCounts = new Map<string, number>();

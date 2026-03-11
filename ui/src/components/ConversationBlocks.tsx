@@ -78,6 +78,12 @@ function humanizeSupervisorDecision(rows: Array<{ key: string; value: string }>)
     summary,
     trigger: trigger && trigger !== "(none)" ? trigger : null,
     nextMode: nextMode && nextMode !== "(none)" ? nextMode : null,
+    actionLine:
+      nextMode && nextMode !== "(none)"
+        ? `switch_mode to ${nextMode}`
+        : action && action !== "(none)"
+          ? action
+          : null,
   };
 }
 
@@ -328,6 +334,12 @@ export function ToolBlock({ runId, block }: { runId: string; block: Conversation
 export function SupervisorDecisionBlock({ content }: { content: string }) {
   const rows = parseKeyValueLines(content);
   const details = humanizeSupervisorDecision(rows);
+  const visibleRows = rows
+    .filter((row) => !["mode", "decision", "action", "resume", "next_mode"].includes(row.key))
+    .map((row) => ({
+      ...row,
+      key: row.key === "reasons" ? "reason" : row.key,
+    }));
   return (
     <div className="rounded-lg border border-cyan-900/70 bg-cyan-950/15 p-3">
       <div className="mb-3">
@@ -338,14 +350,12 @@ export function SupervisorDecisionBlock({ content }: { content: string }) {
       <div className="mb-3 rounded border border-cyan-950/60 bg-black/10 px-3 py-2">
         <div className="text-sm font-semibold text-cyan-50">{details.summary}</div>
         <div className="mt-1 text-xs text-cyan-200/80">
-          {details.nextMode ? `Next mode: ${details.nextMode}` : "No mode change"}
+          {details.actionLine ? `Action: ${details.actionLine}` : "No mode change"}
           {details.trigger ? ` · Trigger: ${details.trigger}` : ""}
         </div>
       </div>
       <div className="grid gap-2">
-        {rows
-          .filter((row) => row.key !== "mode")
-          .map((row) => (
+        {visibleRows.map((row) => (
           <div
             key={row.key}
             className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 rounded border border-cyan-950/60 bg-black/10 px-3 py-2"
