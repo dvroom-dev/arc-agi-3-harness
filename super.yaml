@@ -370,6 +370,9 @@ modes:
             pattern: pwd
             case_sensitive: true
           - match_type: regex
+            pattern: '^switch_mode(\s|$)'
+            case_sensitive: true
+          - match_type: regex
             pattern: '^(ls|find|rg|grep|wc|arc_level)(\s|$)'
             case_sensitive: true
           - match_type: regex
@@ -509,6 +512,9 @@ modes:
             pattern: pwd
             case_sensitive: true
           - match_type: regex
+            pattern: '^switch_mode(\s|$)'
+            case_sensitive: true
+          - match_type: regex
             pattern: '^arc_repl (exec|reset_level)(\s|$)'
             case_sensitive: true
       provider_builtin_tools:
@@ -617,6 +623,9 @@ modes:
         allow:
           - match_type: exact_match
             pattern: pwd
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^switch_mode(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^(ls|find|rg|grep|wc|jq|arc_level)(\s|$)'
@@ -791,6 +800,9 @@ modes:
             pattern: pwd
             case_sensitive: true
           - match_type: regex
+            pattern: '^switch_mode(\s|$)'
+            case_sensitive: true
+          - match_type: regex
             pattern: '^(ls|find|rg|grep|wc|jq|arc_level)(\s|$)'
             case_sensitive: true
           - match_type: regex
@@ -925,6 +937,9 @@ modes:
         allow:
           - match_type: exact_match
             pattern: pwd
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^switch_mode(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^arc_repl (exec_file|reset_level)(\s|$)'
