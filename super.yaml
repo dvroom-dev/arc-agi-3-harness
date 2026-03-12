@@ -25,7 +25,8 @@ prompt_parts:
         Do not invent other actions.
   artifact_read_path:
     - literal: |
-        Use filesystem artifacts as the canonical read path when the current mode allows them: `level_current/**`, `level_current/sequences/**`, `level_current/sequence_compare/**`, `current_compare.md`, and `theory.md`.
+        Use filesystem artifacts as the canonical read path when the current mode allows them: `level_current/**`, `level_current/sequence_compare/**`, `current_compare.md`, and `theory.md`.
+        Do not probe `level_current/sequences/**` just to see whether sequence files exist. First use `current_compare.*`, `component_mismatch.*`, and `turn_index.jsonl`/workspace metadata to determine whether a real action sequence has been recorded.
         `current_compare.md` and `current_compare.json` are generated artifacts. Read them; do not hand-edit them.
   component_model_runtime:
     - literal: |
@@ -422,6 +423,7 @@ modes:
             The only Python command allowed here is `python3 inspect_components.py ...` for component coverage/mismatch checks.
              Use raw `.hex`, sequence metadata, and compare artifacts to define components and map every visible pixel to named elements.
             Runtime/harness investigation is out of scope here. If artifacts appear inconsistent, cite the exact conflicting workspace files and switch modes or report the blocker; do not inspect tooling internals.
+            Do not inspect `.ai-supervisor/**`, blob files, run-control internals, or provider/runtime source while solving. Those are control-plane artifacts, not game evidence.
             When reading a full-grid artifact like `current_state.hex`, read the whole file in one `Read` call first. These files are small enough to inspect whole.
             Do not page through different offsets of the same full-grid file unless a specific unresolved question requires a targeted reread after that first full read.
              Detector rule of thumb: if a region can move independently, recolor independently, or be consumed independently, it should usually be its own detected component rather than part of one giant bounding box.
@@ -449,6 +451,7 @@ modes:
             - maintain the `# Explore Plan` section in `theory.md`; it is the only handoff surface for `explore_and_solve`;
             - run `python3 inspect_components.py --coverage --level <LEVEL>` before leaving theory mode;
             - use `component_coverage.*` as the canonical source for observed grid shapes; do not count rendered `Read` line numbers to infer dimensions;
+            - use `current_compare.*`, `component_mismatch.*`, and `turn_index.jsonl` to decide whether sequence artifacts exist before looking for `level_current/sequences/**`;
             - record the available non-RESET actions from the prompt or existing artifacts; do not propose read-only action-discovery probes;
             - if a solved-level compare pin is active, keep `theory.md` and `components.py` scoped to the pinned solved level only;
             - while a solved-level compare pin is active, do not use or request `arc_repl`; theory remains read-only and mutations belong only in `explore_and_solve`;
@@ -473,6 +476,8 @@ modes:
         - "Before leaving theory mode, run `python3 inspect_components.py --coverage --level <active level>` and ensure it passes for the current level."
         - "In theory mode, after an initial survey, reread only the files needed for one specific unresolved question or handoff."
         - "In theory mode, when reading a full-grid file such as `current_state.hex`, read it whole once before any targeted reread; use offset/limit reads only for a specific unresolved question."
+        - "In theory mode, do not probe `level_current/sequences/**` unless `current_compare.*`, `component_mismatch.*`, or `turn_index.jsonl` indicate that a real sequence artifact already exists for the question you are answering."
+        - "In theory mode, do not inspect `.ai-supervisor/**`, blob files, provider/runtime source, or other control-plane internals. If an error references those paths, summarize the workspace-visible contradiction and stop."
         - "In theory mode, use raw `.hex`/`.diff` evidence to define named components and keep every visible pixel accounted for by component bounding boxes."
         - "On level 1 before the first completion, if a real-game probe is needed, switch_mode to `explore_and_solve` only after writing a fresh `# Explore Plan` section in `theory.md` with exactly one target class."
         - "Use speculation in theory mode when evidence is incomplete, but label it clearly as a hypothesis and keep the active `# Explore Plan` scoped to one target class."
@@ -484,6 +489,7 @@ modes:
       violations:
         - "Repeatedly rereading full-grid or stable artifact files in theory mode without a new specific question."
         - "Reading different offsets of the same full-grid file in theory mode after a full read, without naming a specific unresolved question that requires it."
+        - "Inspecting `.ai-supervisor/**`, blob files, or runtime/tooling internals instead of workspace-visible game artifacts."
         - "Using `arc_repl` or any Python execution other than `python3 inspect_components.py ...` in theory mode."
         - "Leaving theory mode without a fresh passing `component_coverage.json` for the active level."
         - "Writing any file other than `theory.md` or `components.py` in theory mode."
@@ -557,6 +563,7 @@ modes:
             Goal: on level 1 only, discover mechanics and find a real level solution.
             This mode may inspect raw `.hex`, `diff.hex`, and sequence metadata because level-1 completion is not modeled yet.
             Keep the loop tight: probe or try a likely solution, update `theory.md`, and switch back once the specific evidence or completion result is known.
+            Do not inspect `.ai-supervisor/**`, blob files, provider/runtime source, or control-plane internals here. If a tool result mentions those paths, ignore them and continue with workspace-visible game evidence only.
         - prompt_part: arc_repl_probe_runtime
     user_message:
       operation: append
