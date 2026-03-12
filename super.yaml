@@ -84,25 +84,24 @@ prompt_parts:
     - prompt_part: component_model_runtime
   switch_mode_usage:
     - literal: |
-        To leave a mode, call the `switch_mode` tool directly. Do not simulate a mode switch with Bash, `echo`, placeholder commands, or plain prose.
+        To leave a mode, run the `switch_mode` CLI directly. Do not simulate a mode switch with `echo`, placeholder commands, or plain prose.
 
-        Required arguments:
-        - `target_mode`: destination mode name
-        - `reason`: one-sentence justification
-        - `mode_payload` (optional object): structured handoff details
+        Required flags:
+        - `--target-mode <mode>`: destination mode name
+        - `--reason "<sentence>"`: one-sentence justification
+        - `--user-message "<text>"` (optional): concise handoff text for the next mode
 
-        Example tool call:
-        ```tool_call name=switch_mode
-        {
-          "target_mode": "explore_and_solve",
-          "reason": "component coverage passes and one concrete level-1 solution theory is ready to test",
-          "mode_payload": {
-            "solution_theory": "move the controllable block to the named marker via the bottom-left corridor"
-          }
-        }
+        Optional wrap-up certification flags:
+        - `--wrapup-certified`
+        - `--wrapup-level <level>`
+
+        Example:
+        ```bash
+        switch_mode \
+          --target-mode explore_and_solve \
+          --reason "component coverage passes and one concrete feature target is ready to probe" \
+          --user-message "Probe whether the orange_blue_block moves right by one action and record the resulting state changes."
         ```
-
-        If the provider shows the tool as `mcp__super_custom_tools__switch_mode`, that is still the same `switch_mode` tool.
 
 supervisor:
   enabled: true
@@ -145,7 +144,7 @@ supervisor:
       - "When a solved-level compare pin is active, keep all visible state, compare work, and model work targeted to the pinned solved level until the supervisor explicitly certifies wrap-up complete."
       - "While a solved-level compare pin is active, only `theory` and `code_model` are valid next modes. Do not route to `explore_and_solve` or `solve_model` until the supervisor certifies wrap-up complete."
       - "Coverage helpers and compare helpers provide evidence only; they do not certify solved-level wrap-up on their own."
-      - "Wrap-up certification is explicit, not implied. When leaving a pinned solved-level wrap-up, include `mode_payload.wrapup_certified=true` and `mode_payload.wrapup_level=<pinned level>` on the switch to the next mode."
+      - "Wrap-up certification is explicit, not implied. When leaving a pinned solved-level wrap-up, include `--wrapup-certified --wrapup-level <pinned level>` on the `switch_mode` CLI call."
   tool_interception:
     rules:
       - name: idle-keepalive
@@ -477,8 +476,8 @@ modes:
         - "Develop a level-1 completion theory in `theory.md`, but do not hand off a broad route plan; `explore_and_solve` should only receive the current `# Explore Plan` target class and its probe sequence."
         - "On level 2+, if new components or changed semantics require mechanics work, switch_mode to `code_model` with explicit patch targets."
         - "On level 2+, if no new components are needed and only solution search remains, switch_mode to `code_model` with that conclusion so code_model can decide whether solve_model is actually ready."
-        - "When leaving a pinned solved-level wrap-up from theory, include `mode_payload.wrapup_certified=true` and `mode_payload.wrapup_level=<pinned level>` on the switch_mode call."
-        - "When leaving this mode, invoke the `switch_mode` tool directly; do not use Bash placeholders or prose-only switch requests."
+        - "When leaving a pinned solved-level wrap-up from theory, include `--wrapup-certified --wrapup-level <pinned level>` on the `switch_mode` CLI call."
+        - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
       violations:
         - "Repeatedly rereading full-grid or stable artifact files in theory mode without a new specific question."
         - "Reading different offsets of the same full-grid file in theory mode after a full read, without naming a specific unresolved question that requires it."
@@ -583,7 +582,7 @@ modes:
         - "Do not switch back to theory from explore_and_solve without new real-game evidence from this explore turn, unless a supervisor or policy blocker prevented action execution."
         - "Do not turn explore_and_solve into free-form route planning or broad solution search; stay inside the current `# Explore Plan` target class."
         - "After each real-game probe or solution attempt, update `theory.md` before switching modes."
-        - "When leaving this mode, invoke the `switch_mode` tool directly; do not use Bash placeholders or prose-only switch requests."
+        - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
       violations:
         - "Using explore_and_solve on level 2+."
         - "Creating new files or scripts in explore_and_solve."
@@ -757,8 +756,8 @@ modes:
       requirements:
         - "Do not leave code_model while compare is still red for the active level or pinned solved level."
         - "If a solved-level compare pin is active, stay scoped to the pinned solved level and do not attempt frontier-level planning or solving."
-        - "When leaving a pinned solved-level wrap-up from code_model, include `mode_payload.wrapup_certified=true` and `mode_payload.wrapup_level=<pinned level>` on the switch_mode call."
-        - "End each code_model turn with model-file edits, theory updates, or a switch_mode call."
+        - "When leaving a pinned solved-level wrap-up from code_model, include `--wrapup-certified --wrapup-level <pinned level>` on the `switch_mode` CLI call."
+        - "End each code_model turn with model-file edits, theory updates, or a `switch_mode` CLI call."
         - "If compare is red and a single exact blocker remains, stay in code_model and report the blocker instead of switching back to theory."
       violations:
         - "Using any `arc_repl` command in code_model."
@@ -992,7 +991,7 @@ modes:
       operation: append
       requirements:
         - "Use known solver branches in `play.py` for replay before inventing new routes."
-        - "When leaving this mode, invoke the `switch_mode` tool directly; do not use Bash placeholders or prose-only switch requests."
+        - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
       violations:
         - "Doing broad exploratory probing in recover mode."
         - "Reading raw `.hex`, `diff.hex`, or sequence metadata directly in recover mode."
@@ -1014,6 +1013,3 @@ tools:
     - list_dir
     - check_supervisor
     - paginate_tool_response
-    - switch_mode
-
-cycle_limit: 1

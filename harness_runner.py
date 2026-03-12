@@ -16,7 +16,6 @@ from harness_runtime import HarnessRuntime
 from harness_wrapup import certify_or_block_wrapup_transition_impl
 from harness_scorecard_helpers import close_shared_scorecard, open_shared_scorecard, run_scorecard_session_preflight, validate_scorecard_owner_check
 
-
 def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str, game_index: int, total_games: int) -> None:
     runtime = HarnessRuntime(
         deps,
@@ -110,9 +109,10 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
                 "--supervisor-dir", str(runtime.supervisor_dir),
                 *runtime.provider_args(),
                 *runtime.supervisor_args(),
-                "--cycle-limit", str(runtime.cycle_limit),
                 "--output", str(runtime.session_file),
             ]
+            if runtime.cycle_limit is not None:
+                cmd.extend(["--cycle-limit", str(runtime.cycle_limit)])
             if start_mode:
                 cmd.extend(["--start-mode", str(start_mode)])
             deps.run_super(

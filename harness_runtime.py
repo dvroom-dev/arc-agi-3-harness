@@ -120,7 +120,7 @@ class HarnessRuntime:
         self.history_json = self.arc_state_dir / "tool-engine-history.json"
         self.completions_md = self.arc_state_dir / "level_completions.md"
         self.auto_explore_once_marker = self.arc_state_dir / "auto_explore_once.done"
-        self.cycle_limit = 1
+        self.cycle_limit: int | None = None
         self.scorecard_meta_path = self.session_dir / "scorecard.json"
         self.arc_api_key = resolve_arc_api_key()
         self.arc_api_key_prefix = self.arc_api_key[:8] if self.arc_api_key else None
@@ -458,8 +458,9 @@ class HarnessRuntime:
             "--supervisor-dir", str(self.supervisor_dir),
             *self.provider_args(),
             *self.supervisor_args(),
-            "--cycle-limit", str(self.cycle_limit),
         ]
+        if self.cycle_limit is not None:
+            resume_args += ["--cycle-limit", str(self.cycle_limit)]
         if prompt:
             resume_args += self.prompt_args(prompt, prompt_kind="resume", image_paths=image_paths)
         resume_args += ["--output", str(self.session_file)]

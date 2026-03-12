@@ -20,12 +20,12 @@ Use the real runtime, not stale assumptions.
   - Main entrypoints: `harness.py`, `harness_runner.py`, `harness_runtime.py`, `super.yaml`
   - Tool/runtime code: `tools/`, `arc_model_runtime/`
 - Live `super` CLI wrapper: `~/.local/bin/super`
-  - At the time of writing it execs `bun run /home/dvroom/projs/agent-studio/src/bin/run-config.ts`
+  - At the time of writing it execs `bun run /home/dvroom/projs/super/src/bin/super.ts`
   - If `super` behavior matters, inspect the wrapper first instead of assuming which repo owns it
-- Live `super` source repo: `~/projs/agent-studio`
-  - Start with `src/bin/run-config.ts`
+- Live `super` source repo: `~/projs/super`
+  - Start with `src/bin/super.ts`
   - Then inspect `src/server/stdio/supervisor/**`, `src/server/stdio/requests/**`, `src/supervisor/**`
-  - Useful docs: `docs/CLI_OUTPUT_OPTIONS.md`, `docs/FORK_STORAGE.md`, `docs/ARCHITECTURE.md`
+  - Useful docs and state are in the repo itself plus per-run `runs/<run-id>/super/**`
 - `~/projs/agent-super` is useful background/reference, but it is not the live runtime unless the wrapper has been repointed
 
 ### Benchmark Integrity Is Non-Negotiable
@@ -139,8 +139,8 @@ Know where state actually lives.
 - `session.md` frontmatter is the conversation source of truth for `conversation_id`.
 
 Important runtime behavior:
-- The harness starts a run with `super new ... --cycle-limit 1`.
-- It advances one supervised cycle at a time with repeated `super resume --workspace <run-dir> ...`.
+- The harness starts a run with `super new ...`.
+- It advances the run with repeated `super resume --workspace <run-dir> ...`.
 - In streaming mode, the harness intentionally removes `--output` from the `super` subprocess command, streams full stdout live, and writes the transcript file itself afterward.
 - Consequence: live stdout/stderr is the earliest progress signal; do not wait only for `session.md` checkpoints.
 
@@ -218,7 +218,7 @@ Highest-risk files:
 - `tools/arc_repl_*`
 - `arc_model_runtime/*`
 - `super.yaml`
-- In `~/projs/agent-studio`: `src/bin/run-config.ts`, `src/server/stdio/supervisor/**`, `src/server/stdio/requests/**`, `src/supervisor/**`
+- In `~/projs/super`: `src/bin/super.ts`, `src/server/stdio/supervisor/**`, `src/server/stdio/requests/**`, `src/supervisor/**`
 
 Review rules:
 - Findings first, ordered by severity, with file references.
@@ -233,14 +233,14 @@ Hard rules:
 - Never define hard rules that require undoing already-completed actions inside the same conversation.
 - Prefer forward guidance and next-turn corrections.
 - If a violation is already in history, treat it as non-rewritable context unless the runtime explicitly forks/resumes around it.
-- When changing supervisor behavior, inspect both `super.yaml` and the live `super` runtime in `agent-studio`.
+- When changing supervisor behavior, inspect both `super.yaml` and the live `super` runtime in `~/projs/super`.
 
 ### Legacy Code Policy
 
 - Delete unused legacy code aggressively when touched.
 - Keep one canonical implementation per critical behavior.
 - If a helper, hack, or compatibility path is unused in the active harness flow, remove it instead of preserving it.
-- When changing interfaces between this repo and `agent-studio`, update both ends and relevant tests in the same pass.
+- When changing interfaces between this repo and `~/projs/super`, update both ends and relevant tests in the same pass.
 
 ### Run Logging And Artifacts
 

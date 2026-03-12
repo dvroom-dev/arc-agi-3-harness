@@ -373,6 +373,20 @@ exec \"{py}\" \"${{CONFIG_DIR}}/tools/arc_level.py\" \"$@\"
     arc_level_path.write_text(arc_level_wrapper)
     arc_level_path.chmod(0o755)
 
+    switch_mode_wrapper = """#!/usr/bin/env bash
+set -euo pipefail
+printf '{"ok":true,"tool":"switch_mode","argv":'
+python3 - <<'PY' "$@"
+import json
+import sys
+print(json.dumps(sys.argv[1:]))
+PY
+printf '}\n'
+"""
+    switch_mode_path = bin_dir / "switch_mode"
+    switch_mode_path.write_text(switch_mode_wrapper)
+    switch_mode_path.chmod(0o755)
+
     src_prompts_dir = project_root / "prompts"
     if not src_prompts_dir.exists():
         raise RuntimeError(f"missing prompts directory: {src_prompts_dir}")
