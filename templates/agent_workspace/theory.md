@@ -21,6 +21,7 @@ Coverage guardrail:
 - Do not assume a feature is unique; track multiple copies explicitly.
 - Rule of thumb: if a region can move independently, recolor independently, or be consumed independently, it should usually be its own detected component rather than part of one giant bounding box.
 - Prefer multiple specific detectors over one broad umbrella detector when the broad box would hide which sub-part actually changed.
+- Early in level 1, speculation is allowed and expected, but keep it clearly marked as a hypothesis and revise it quickly once action evidence arrives.
 
 # Available Real-Game Actions (exclude RESET)
   - ACTION#: what it appears to do
@@ -41,6 +42,22 @@ Coverage guardrail:
 - Unknown:
   - Why it matters:
   - Smallest next probe or model patch:
+
+# Explore Plan
+- Target class:
+  - What unresolved feature or completion question is being tested
+- Probe sequence:
+  - Ordered real-game actions to run next
+- Expected observations:
+  - What outcomes would confirm or falsify the target class
+- Stop condition:
+  - When explore should return to theory
+- Notes:
+  - Keep this scoped to one target class at a time
+  - On level 1, do not put an unbounded route plan or a mixed probe-plus-then-route agenda here
+  - When movement semantics and route topology are already confirmed, this target class may be one bounded multi-action route
+  - If you hand off a bounded route, include an explicit stop condition: completion, novel event, route exhausted, blocked, or budget boundary
+  - Keep the probe sequence minimal: only the next action sequence needed to answer the current target class
 
 # Levels
 1: SOLVED|UNSOLVED
