@@ -145,7 +145,7 @@ def test_model_status_errors_when_frontier_level_has_no_initial_grid(tmp_path: P
     payload = json.loads(proc.stdout)
     assert payload["ok"] is False
     assert payload["error"]["type"] == "missing_initial_state"
-    assert "frontier level 2 is active in ARC state" in payload["error"]["message"]
+    assert "visible level 2 is active for model work" in payload["error"]["message"]
 
 
 def test_compare_sequences_uses_pinned_solved_level_until_theory_and_code_model_finish(tmp_path: Path) -> None:
@@ -248,7 +248,57 @@ def test_sync_workspace_level_view_uses_pinned_level(tmp_path: Path) -> None:
     assert visible == 1
     meta = json.loads((game_dir / "level_current" / "meta.json").read_text())
     assert meta["level"] == 1
-    assert meta["frontier_level"] == 2
     assert meta["analysis_level_pinned"] is True
     assert (game_dir / "level_1").exists()
     assert not (game_dir / "level_2").exists()
+
+
+def test_sync_workspace_level_view_redacts_cross_level_turn_artifacts_while_pinned(tmp_path: Path) -> None:
+    from arc_model_runtime.utils import sync_workspace_level_view
+
+    game_dir = tmp_path / "game_ls20"
+    game_dir.mkdir(parents=True, exist_ok=True)
+    (game_dir / ".analysis_level_pin.json").write_text(
+        json.dumps({"level": 1, "phase": "pending_theory"}, indent=2)
+    )
+    arc_state_dir = tmp_path / "arc"
+    artifacts_root = arc_state_dir / "game_artifacts" / "game_ls20" / "level_1"
+    _write_hex(artifacts_root / "initial_state.hex", ["0000", "0000"])
+    _write_hex(artifacts_root / "current_state.hex", ["2222", "2222"])
+    _write_hex(artifacts_root / "turn_0021" / "before_state.hex", ["0000", "0000"])
+    _write_hex(artifacts_root / "turn_0021" / "after_state.hex", ["2222", "2222"])
+    _write_hex(artifacts_root / "turn_0021" / "diff.hex", ["2222", "2222"])
+    (artifacts_root / "turn_0021" / "meta.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "arc_repl.level_turn_artifact.v1",
+                "level_before": 1,
+                "level_after": 2,
+                "levels_completed_before": 0,
+                "levels_completed_after": 1,
+            },
+            indent=2,
+        )
+    )
+
+    old = os.environ.get("ARC_STATE_DIR")
+    os.environ["ARC_STATE_DIR"] = str(arc_state_dir)
+    try:
+        visible = sync_workspace_level_view(game_dir, game_id="ls20", frontier_level=2)
+    finally:
+        if old is None:
+            os.environ.pop("ARC_STATE_DIR", None)
+        else:
+            os.environ["ARC_STATE_DIR"] = old
+
+    assert visible == 1
+    copied_meta = json.loads((game_dir / "level_current" / "turn_0021" / "meta.json").read_text())
+    assert copied_meta["level_after"] == 1
+    assert copied_meta["levels_completed_after"] == 0
+    assert copied_meta["analysis_level_boundary_redacted"] is True
+    assert (game_dir / "level_current" / "after_state.hex").exists() is False
+    assert (game_dir / "level_current" / "current_state.hex").read_text().splitlines() == ["0000", "0000"]
+    assert (game_dir / "level_current" / "turn_0021" / "after_state.hex").read_text().splitlines() == [
+        "0000",
+        "0000",
+    ]

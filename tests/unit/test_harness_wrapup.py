@@ -28,7 +28,7 @@ def test_wrapup_transition_blocks_frontier_modes_until_ready(tmp_path: Path) -> 
     (game_dir / "current_compare.json").write_text(json.dumps({"all_match": False, "level": 1}, indent=2) + "\n")
     (game_dir / "level_current").mkdir(parents=True, exist_ok=True)
     (game_dir / "level_current" / "meta.json").write_text(
-        json.dumps({"level": 1, "frontier_level": 2, "analysis_level_pinned": True}, indent=2) + "\n"
+        json.dumps({"level": 1, "analysis_level_pinned": True}, indent=2) + "\n"
     )
     (game_dir / "model_status.json").write_text(
         json.dumps(
@@ -96,7 +96,7 @@ def test_wrapup_transition_clears_pin_and_restores_frontier_view_when_ready(tmp_
     )
     (game_dir / "level_current").mkdir(parents=True, exist_ok=True)
     (game_dir / "level_current" / "meta.json").write_text(
-        json.dumps({"level": 1, "frontier_level": 2, "analysis_level_pinned": True}, indent=2) + "\n"
+        json.dumps({"level": 1, "analysis_level_pinned": True}, indent=2) + "\n"
     )
     (game_dir / "level_current" / "initial_state.hex").write_text("0000\n")
     (game_dir / "model_status.json").write_text(
@@ -165,7 +165,7 @@ def test_wrapup_transition_blocks_when_compare_level_does_not_match_pin(tmp_path
     )
     (game_dir / "level_current").mkdir(parents=True, exist_ok=True)
     (game_dir / "level_current" / "meta.json").write_text(
-        json.dumps({"level": 1, "frontier_level": 2, "analysis_level_pinned": True}, indent=2) + "\n"
+        json.dumps({"level": 1, "analysis_level_pinned": True}, indent=2) + "\n"
     )
     (game_dir / "model_status.json").write_text(
         json.dumps(
@@ -271,7 +271,7 @@ def test_wrapup_surface_validation_accepts_pinned_level_consistency(tmp_path: Pa
     )
     (game_dir / "level_current").mkdir(parents=True, exist_ok=True)
     (game_dir / "level_current" / "meta.json").write_text(
-        json.dumps({"level": 1, "frontier_level": 2, "analysis_level_pinned": True}, indent=2) + "\n"
+        json.dumps({"level": 1, "analysis_level_pinned": True}, indent=2) + "\n"
     )
     (game_dir / "model_status.json").write_text(
         json.dumps(
@@ -329,7 +329,7 @@ def test_wrapup_transition_requires_explicit_supervisor_certification(tmp_path: 
     )
     (game_dir / "level_current").mkdir(parents=True, exist_ok=True)
     (game_dir / "level_current" / "meta.json").write_text(
-        json.dumps({"level": 1, "frontier_level": 2, "analysis_level_pinned": True}, indent=2) + "\n"
+        json.dumps({"level": 1, "analysis_level_pinned": True}, indent=2) + "\n"
     )
     (game_dir / "level_current" / "initial_state.hex").write_text("0000\n")
     (game_dir / "model_status.json").write_text(

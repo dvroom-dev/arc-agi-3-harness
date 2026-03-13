@@ -35,10 +35,31 @@ def _int_or_default(value: Any, default: int) -> int:
         return default
 
 
+def _load_analysis_pin(game_dir: Path) -> dict[str, Any] | None:
+    path = game_dir / ".analysis_level_pin.json"
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def _extract(data: dict[str, Any]) -> dict[str, Any]:
+    frontier_level = max(1, _int_or_default(data.get("current_level"), 1))
+    visible_level = frontier_level
+    pin = _load_analysis_pin(Path.cwd())
+    if isinstance(pin, dict):
+        try:
+            pinned_level = int(pin.get("level"))
+        except Exception:
+            pinned_level = frontier_level
+        if pinned_level > 0 and pinned_level < frontier_level:
+            visible_level = pinned_level
     return {
-        "current_level": max(1, _int_or_default(data.get("current_level"), 1)),
-        "levels_completed": max(0, _int_or_default(data.get("levels_completed"), 0)),
+        "current_level": int(visible_level),
+        "levels_completed": max(0, int(visible_level) - 1),
         "state": str(data.get("state", "") or "").strip() or "UNKNOWN",
     }
 

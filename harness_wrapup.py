@@ -27,6 +27,28 @@ def _int_or_none(value: Any) -> int | None:
         return None
 
 
+def _iter_visible_json_payloads(level_current_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
+    payloads: list[tuple[Path, dict[str, Any]]] = []
+    for path in sorted(level_current_dir.rglob("*.json")):
+        payload = _read_json_if_exists(path)
+        if isinstance(payload, dict):
+            payloads.append((path, payload))
+    for path in sorted(level_current_dir.rglob("*.jsonl")):
+        if not path.exists():
+            continue
+        for idx, line in enumerate(path.read_text().splitlines(), start=1):
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                payload = json.loads(stripped)
+            except Exception:
+                continue
+            if isinstance(payload, dict):
+                payloads.append((path.with_name(f"{path.name}:{idx}"), payload))
+    return payloads
+
+
 def load_super_active_mode_impl(runtime) -> str | None:
     payload = _read_json_if_exists(runtime.run_dir / "super" / "state.json")
     if not isinstance(payload, dict):
@@ -112,7 +134,6 @@ def validate_wrapup_surfaces_impl(runtime) -> None:
     compare = _read_json_if_exists(game_dir / "current_compare.json") or {}
 
     level_current_level = _int_or_none(level_current_meta.get("level"))
-    level_current_frontier = _int_or_none(level_current_meta.get("frontier_level"))
     level_current_pinned = level_current_meta.get("analysis_level_pinned")
     model_current_level = _int_or_none(model_state.get("current_level"))
     model_levels_completed = _int_or_none(model_state.get("levels_completed"))
@@ -122,8 +143,8 @@ def validate_wrapup_surfaces_impl(runtime) -> None:
     errors: list[str] = []
     if level_current_level != pinned_level:
         errors.append(f"level_current.level={level_current_level} expected={pinned_level}")
-    if level_current_frontier != frontier_level:
-        errors.append(f"level_current.frontier_level={level_current_frontier} expected={frontier_level}")
+    if "frontier_level" in level_current_meta:
+        errors.append("level_current.frontier_level must not be visible while pin is active")
     if level_current_pinned is not True:
         errors.append(f"level_current.analysis_level_pinned={level_current_pinned} expected=True")
     if model_current_level != pinned_level:
@@ -139,6 +160,21 @@ def validate_wrapup_surfaces_impl(runtime) -> None:
             errors.append(f"model_status.state.available_model_levels leaked frontier levels {leaked}")
     if compare and compare_level != pinned_level:
         errors.append(f"current_compare.level={compare_level} expected={pinned_level}")
+
+    visible_completed = max(0, pinned_level - 1)
+    for path, payload in _iter_visible_json_payloads(game_dir / "level_current"):
+        if "frontier_level" in payload:
+            errors.append(f"{path} leaks frontier_level")
+        for key in ("current_level", "level_after", "level_before", "level"):
+            value = _int_or_none(payload.get(key))
+            if value is not None and value > pinned_level:
+                errors.append(f"{path} leaks {key}={value} beyond pinned_level={pinned_level}")
+        for key in ("levels_completed", "levels_completed_before", "levels_completed_after"):
+            value = _int_or_none(payload.get(key))
+            if value is not None and value > visible_completed:
+                errors.append(
+                    f"{path} leaks {key}={value} beyond visible_levels_completed={visible_completed}"
+                )
 
     if errors:
         raise RuntimeError(

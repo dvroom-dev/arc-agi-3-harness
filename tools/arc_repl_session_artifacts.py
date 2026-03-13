@@ -6,7 +6,7 @@ import re
 import shutil
 
 import numpy as np
-from arc_model_runtime.utils import effective_analysis_level
+from arc_model_runtime.utils import effective_analysis_level, sanitize_visible_level_tree
 
 try:
     from arc_repl_session_sequences import (
@@ -147,15 +147,14 @@ def _materialize_level_current_view(
     temp = agent_game_dir / ".level_current.tmp"
     _remove_path(temp)
     shutil.copytree(src, temp)
+    sanitize_visible_level_tree(temp, visible_level=int(visible_level))
     (temp / "meta.json").write_text(
         json.dumps(
             {
                 "schema_version": "arc_repl.level_current.v1",
                 "game_id": str(session.game_id),
                 "level": int(visible_level),
-                "frontier_level": int(current_level),
                 "analysis_level_pinned": int(visible_level) != int(current_level),
-                "source": str(src),
             },
             indent=2,
         )

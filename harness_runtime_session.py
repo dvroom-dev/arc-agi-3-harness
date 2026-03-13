@@ -225,7 +225,6 @@ def recover_session_file_from_workspace_impl(
     reason: str,
     force: bool = False,
 ) -> None:
-    frontmatter = runtime.session_frontmatter()
     super_state_document = _load_super_state_document(runtime)
     if super_state_document:
         conversation_id, fork_id, document_text = super_state_document
@@ -250,11 +249,10 @@ def recover_session_file_from_workspace_impl(
         return
 
     conversation_id = (
-        frontmatter.get("conversation_id")
-        or runtime.active_actual_conversation_id
+        runtime.active_actual_conversation_id
         or runtime.discover_workspace_conversation_id()
     )
-    if conversation_id and not force and frontmatter.get("conversation_id") and frontmatter.get("fork_id"):
+    if conversation_id and not force:
         normalized = _normalize_session_file_to_workspace_head(
             runtime,
             conversation_id=conversation_id,
@@ -269,6 +267,15 @@ def recover_session_file_from_workspace_impl(
             return
 
     if not conversation_id:
+        existing = runtime.session_frontmatter()
+        existing_conversation = str(existing.get("conversation_id") or "").strip()
+        existing_fork = str(existing.get("fork_id") or "").strip()
+        if existing_conversation and existing_fork and runtime.session_file.exists():
+            runtime.log(
+                "[harness] preserving bootstrap session.md without workspace conversation store: "
+                f"reason={reason} conversation={existing_conversation} fork={existing_fork}"
+            )
+            return
         raise RuntimeError(
             "session.md is missing required frontmatter and no workspace conversation "
             f"was recoverable (reason={reason})"
@@ -385,7 +392,12 @@ def export_workspace_conversation_artifacts_impl(
 
 
 def sync_active_conversation_id_from_session_impl(runtime) -> None:
-    parsed = runtime.load_conversation_id(runtime.session_file)
+    super_state_document = _load_super_state_document(runtime)
+    parsed = (
+        super_state_document[0]
+        if super_state_document
+        else runtime.discover_workspace_conversation_id()
+    )
     if not parsed:
         return
     alias = runtime.conversation_aliases.get(parsed)
@@ -411,7 +423,6 @@ def sync_active_conversation_id_from_session_impl(runtime) -> None:
 def load_conversation_head_metadata_impl(runtime) -> dict[str, str | int | None] | None:
     conversation_id = (
         runtime.active_actual_conversation_id
-        or runtime.load_conversation_id(runtime.session_file)
         or runtime.discover_workspace_conversation_id()
     )
     if not conversation_id:

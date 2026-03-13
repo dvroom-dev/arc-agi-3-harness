@@ -211,7 +211,7 @@ def test_component_mismatch_helper_errors_when_compare_is_red_without_report(tmp
     assert "not clean" in payload["message"]
 
 
-def test_component_mismatch_helper_falls_back_to_canonical_level_artifacts(tmp_path: Path) -> None:
+def test_component_mismatch_helper_does_not_fall_back_to_canonical_level_artifacts(tmp_path: Path) -> None:
     game_dir = tmp_path / "game_ls20"
     _copy_model_templates(game_dir)
     state_dir = tmp_path / "arc_state"
@@ -289,7 +289,7 @@ def test_component_mismatch_helper_falls_back_to_canonical_level_artifacts(tmp_p
         check=False,
         env=env,
     )
-    assert proc.returncode == 0, proc.stderr
+    assert proc.returncode == 1
     payload = json.loads(proc.stdout)
-    assert payload["status"] == "mismatch"
-    assert payload["sequence"]["sequence_id"] == "seq_0001"
+    assert payload["status"] == "error"
+    assert "seq_0001" in payload["message"] or "not clean" in payload["message"]

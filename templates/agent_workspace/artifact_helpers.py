@@ -7,7 +7,6 @@ They do not add game-specific heuristics.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -54,19 +53,6 @@ def display_path(game_dir: str | Path, path: str | Path) -> str:
         return str(path)
 
 
-def _safe_slug(value: str) -> str:
-    text = "".join(ch if ch.isalnum() or ch in ("-", "_", ".") else "_" for ch in str(value or "").strip())
-    return text.strip("._") or "game"
-
-
-def _state_artifacts_root(game_dir: str | Path) -> Path | None:
-    state_dir = str(os.getenv("ARC_STATE_DIR", "") or "").strip()
-    game_id = str(os.getenv("ARC_ACTIVE_GAME_ID", "") or "").strip()
-    if not state_dir or not game_id:
-        return None
-    return Path(state_dir).expanduser() / "game_artifacts" / f"game_{_safe_slug(game_id)}"
-
-
 def load_json(path: str | Path) -> dict[str, Any]:
     return json.loads(coerce_path(path).read_text())
 
@@ -86,13 +72,6 @@ def load_hex_grid(path: str | Path) -> np.ndarray:
 def level_dir(game_dir: str | Path, level: int) -> Path:
     game_dir = coerce_path(game_dir)
     workspace_level = game_dir / f"level_{int(level)}"
-    if workspace_level.exists():
-        return workspace_level
-    artifacts_root = _state_artifacts_root(game_dir)
-    if artifacts_root is not None:
-        artifact_level = artifacts_root / f"level_{int(level)}"
-        if artifact_level.exists():
-            return artifact_level
     return workspace_level
 
 

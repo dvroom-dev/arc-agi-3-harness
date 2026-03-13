@@ -244,13 +244,14 @@ class ModelSession:
         frontier_level = load_frontier_level_from_arc_state()
         if frontier_level is None:
             return None
-        lvl = int(frontier_level)
+        visible_level = effective_analysis_level(self.game_dir, frontier_level=int(frontier_level))
+        lvl = int(visible_level) if visible_level is not None else int(frontier_level)
         valid_levels = set(int(v) for v in self.env.available_model_levels)
         if lvl not in valid_levels:
             return self._error(
                 action_name,
                 "missing_initial_state",
-                f"frontier level {lvl} is active in ARC state but no initial_state.hex "
+                f"visible level {lvl} is active for model work but no initial_state.hex "
                 f"was discovered; discovered initial states {sorted(valid_levels)}",
             )
         desired_completed = max(0, lvl - 1)

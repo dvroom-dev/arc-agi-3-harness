@@ -92,9 +92,11 @@ prompt_parts:
         - `--reason "<sentence>"`: one-sentence justification
         - `--user-message "<text>"` (optional): concise handoff text for the next mode
 
-        Optional wrap-up certification flags:
+        Final wrap-up release flags:
         - `--wrapup-certified`
         - `--wrapup-level <level>`
+
+        Use the wrap-up flags only on the final switch out of pinned solved-level wrap-up into a non-`theory`, non-`code_model` mode after the supervisor has explicitly certified release. Do not include them on theory <-> code_model handoffs inside wrap-up.
 
         Example:
         ```bash
@@ -125,8 +127,11 @@ supervisor:
       - "Prefer continue unless there is a clear, evidence-backed correction to make."
       - "When switching to theory or explore_and_solve, prefer resume_mode_head over fork_new_conversation so cross-mode context is preserved. Only fork a new theory/explore_and_solve conversation after a game-state discontinuity (reset_level, level_complete, game_complete, game_over)."
       - "When choosing `resume_mode_head` or `fork_new_conversation`, always include a concrete handoff message: what was learned, why the mode is changing, and the exact next action or verification target."
-      - "Any handoff into `explore_and_solve` must include exactly one target class: either (a) a short ordered list of named feature targets to probe, or (b) one concrete solution theory to test. Do not mix feature-target probing with a multi-step solution plan in the same handoff."
-      - "If the trigger is an agent `switch_mode` request that you accept or redirect into another mode, include the agent's full latest assistant message in the handoff context so the next mode does not lose its plan."
+      - "Any handoff into `explore_and_solve` must include exactly one target class: either (a) one concrete feature target to probe, (b) one concrete completion theory to test, or (c) one bounded multi-action route that directly tests a single completion theory or reaches one concrete trigger."
+      - "If current mode is `theory`, `current_compare.md` is clean, and `theory.md` already contains exactly one concrete `# Explore Plan` target with explicit actions or route plus a stop condition, do not allow more theory churn. Route immediately to `explore_and_solve` via `resume_mode_head` when allowed."
+      - "A bounded `explore_and_solve` route is allowed only when the movement semantics and path topology needed for that route are already evidenced. It must include an explicit stop condition: completion, novel event, route exhausted, blocked path, or budget boundary."
+      - "Do not force a return to `theory` after each expected repeated move when the current `explore_and_solve` target is a bounded route and no novel evidence has appeared."
+      - "If the trigger is an agent `switch_mode` request that you accept or redirect, carry forward only the supervisor-approved handoff needed for the next mode. Do not forward the agent's full latest assistant message verbatim when it contains extra route planning or mixed objectives."
       - "For rule enforcement decisions, cite concrete evidence pointers (turn/tool/output/file)."
       - "If evidence is ambiguous, request one minimal discriminating check instead of broad re-analysis."
       - "When a tool interception marker is present, prioritize handling it immediately."
@@ -217,7 +222,7 @@ supervisor:
                  - Otherwise use `resume_mode_head` to `theory`.
                  - Put the compare-clean details into the handoff and explicitly name the single highest-value next question to answer.
                  - The supervisor message must tell the agent what to explore next: one concrete unanswered mechanic/completion question and one minimal next real-game probe or solve attempt.
-                 - If the next step will be `explore_and_solve`, the handoff must name exactly one target class: either explicit feature targets to probe or one concrete solution theory to test.
+                 - If the next step will be `explore_and_solve`, the handoff must name exactly one target class: either explicit feature targets to probe, one concrete solution theory to test, or one bounded route with a stop condition that directly tests a single completion theory.
                  - Inject concise guidance that compare-clean means model parity is clean for explored sequences, not that the level is solved.
               4) If marker is `__ARC_INTERCEPT_RESET_LEVEL__`:
                  - Judge whether the reset is appropriate for the current mode and evidence state.
@@ -242,8 +247,9 @@ supervisor:
               Priorities:
               1) If the latest `current_compare.md` in the active game workspace shows `all_match: false` or divergent sequences and current mode is not `code_model`, prefer `resume_mode_head` or `fork_new_conversation` to `code_model` after the next tool boundary. Put the compare file path and mismatch summary in the user-facing guidance.
               2) If current mode is `code_model` or `solve_model` and the transcript shows an `arc_repl` shell command, treat that as a mode violation and inject or fork corrective guidance.
-              3) If the run has just reached a new frontier level after completing a prior one, prefer `theory` as the next mode so the agent inspects what changed before new real-game probing.
-              4) Otherwise continue.
+              3) If current mode is `theory`, compare is clean, and the latest `theory.md` already names exactly one concrete `# Explore Plan` target with explicit actions or route plus a stop condition, prefer `resume_mode_head` to `explore_and_solve` instead of continuing theory.
+              4) If the run has just reached a new frontier level after completing a prior one, prefer `theory` as the next mode so the agent inspects what changed before new real-game probing.
+              5) Otherwise continue.
       message_templates:
         - name: supervisor_command
           description: "Wrap cadence guidance in a supervisor command envelope."
@@ -374,9 +380,6 @@ modes:
             pattern: '^switch_mode(\s|$)'
             case_sensitive: true
           - match_type: regex
-            pattern: '^(ls|find|rg|grep|wc|arc_level)(\s|$)'
-            case_sensitive: true
-          - match_type: regex
             pattern: '^python3 (\./)?inspect_components\.py(\s|$)'
             case_sensitive: true
       provider_builtin_tools:
@@ -421,7 +424,8 @@ modes:
             You may read any workspace file, but you may only edit `theory.md` and `components.py`.
             Do not use `arc_repl` in this mode.
             The only Python command allowed here is `python3 inspect_components.py ...` for component coverage/mismatch checks.
-             Use raw `.hex`, sequence metadata, and compare artifacts to define components and map every visible pixel to named elements.
+            Use raw `.hex`, sequence metadata, and compare artifacts to define components and map every visible pixel to named elements.
+            Do not use theory mode to debug `model.py`, `model_lib.py`, compare internals, or coordinate-counting contradictions after compare is already clean; that belongs in `code_model`, and a ready next probe belongs in `explore_and_solve`.
             Runtime/harness investigation is out of scope here. If artifacts appear inconsistent, cite the exact conflicting workspace files and switch modes or report the blocker; do not inspect tooling internals.
             Do not inspect `.ai-supervisor/**`, blob files, run-control internals, or provider/runtime source while solving. Those are control-plane artifacts, not game evidence.
             When reading a full-grid artifact like `current_state.hex`, read the whole file in one `Read` call first. These files are small enough to inspect whole.
@@ -456,12 +460,13 @@ modes:
             - if a solved-level compare pin is active, keep `theory.md` and `components.py` scoped to the pinned solved level only;
             - while a solved-level compare pin is active, do not use or request `arc_repl`; theory remains read-only and mutations belong only in `explore_and_solve`;
             - on level 1 before the first completion, speculate as needed from the visible state, but mark speculation clearly in `theory.md` and turn it into exactly one target class in `# Explore Plan`;
-            - on level 1, develop a completion theory in `theory.md`, but hand off to `explore_and_solve` only through the single current `# Explore Plan` target class;
+            - on level 1, develop a completion theory in `theory.md`, and hand off to `explore_and_solve` only through the single current `# Explore Plan` target class;
+            - when movement semantics and route topology are already confirmed, `# Explore Plan` may hand off one bounded multi-action route instead of splitting each repeated move into its own target;
+            - if `current_compare.md` is clean and `# Explore Plan` already contains one concrete target with explicit actions or route plus stop condition, switch immediately instead of doing more theory-side recounting or model introspection;
             - on later levels, decide whether the next step is `code_model`, `solve_model`, or `recover`;
             - if switching, include a concrete handoff message with exact files/evidence to inspect or the exact probe to run.
             Read these agent-workspace files as needed instead of relying on inlined contents:
             - `theory.md`
-            - `model.py`
             - `components.py`
             - `inspect_components.py`
             - `component_coverage.md`
@@ -478,20 +483,28 @@ modes:
         - "In theory mode, when reading a full-grid file such as `current_state.hex`, read it whole once before any targeted reread; use offset/limit reads only for a specific unresolved question."
         - "In theory mode, do not probe `level_current/sequences/**` unless `current_compare.*`, `component_mismatch.*`, or `turn_index.jsonl` indicate that a real sequence artifact already exists for the question you are answering."
         - "In theory mode, do not inspect `.ai-supervisor/**`, blob files, provider/runtime source, or other control-plane internals. If an error references those paths, summarize the workspace-visible contradiction and stop."
+        - "In theory mode, do not read `model.py` or `model_lib.py`; model/runtime debugging belongs in `code_model`."
         - "In theory mode, use raw `.hex`/`.diff` evidence to define named components and keep every visible pixel accounted for by component bounding boxes."
         - "On level 1 before the first completion, if a real-game probe is needed, switch_mode to `explore_and_solve` only after writing a fresh `# Explore Plan` section in `theory.md` with exactly one target class."
         - "Use speculation in theory mode when evidence is incomplete, but label it clearly as a hypothesis and keep the active `# Explore Plan` scoped to one target class."
-        - "Develop a level-1 completion theory in `theory.md`, but do not hand off a broad route plan; `explore_and_solve` should only receive the current `# Explore Plan` target class and its probe sequence."
+        - "When movement semantics and route topology are already evidenced, a level-1 `# Explore Plan` may hand off one bounded multi-action route to test a single completion theory or reach one concrete trigger."
+        - "Do not split a deterministic repeated-move route into separate per-step target classes once the repeated move semantics are already confirmed."
+        - "Do not hand off an unbounded route plan, a mixed probe-plus-then-route script, or multiple target classes; `explore_and_solve` should receive one target class with either a minimal probe sequence or one bounded route plus a stop condition."
+        - "If `current_compare.md` is clean and `theory.md` already contains exactly one concrete `# Explore Plan` target with explicit actions or route and a stop condition, switch immediately to `explore_and_solve` instead of continuing theory analysis."
         - "On level 2+, if new components or changed semantics require mechanics work, switch_mode to `code_model` with explicit patch targets."
         - "On level 2+, if no new components are needed and only solution search remains, switch_mode to `code_model` with that conclusion so code_model can decide whether solve_model is actually ready."
-        - "When leaving a pinned solved-level wrap-up from theory, include `--wrapup-certified --wrapup-level <pinned level>` on the `switch_mode` CLI call."
+        - "While a solved-level wrap-up pin is active, do not include wrap-up certification flags on theory -> code_model or theory -> theory handoffs. Those flags are reserved for the final certified release out of wrap-up."
         - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
       violations:
         - "Repeatedly rereading full-grid or stable artifact files in theory mode without a new specific question."
         - "Reading different offsets of the same full-grid file in theory mode after a full read, without naming a specific unresolved question that requires it."
+        - "Reading `model.py` or `model_lib.py`, or debugging compare/model internals, in theory mode."
         - "Inspecting `.ai-supervisor/**`, blob files, or runtime/tooling internals instead of workspace-visible game artifacts."
+        - "Using Bash for anything other than `switch_mode ...` or `python3 inspect_components.py ...` in theory mode."
         - "Using `arc_repl` or any Python execution other than `python3 inspect_components.py ...` in theory mode."
         - "Leaving theory mode without a fresh passing `component_coverage.json` for the active level."
+        - "Staying in theory mode after compare is clean and `theory.md` already contains one concrete `# Explore Plan` target with explicit actions or route plus stop condition."
+        - "Handing off an unbounded route plan, a mixed staged probe-plus-route script, or multiple target classes from theory mode into `explore_and_solve`."
         - "Writing any file other than `theory.md` or `components.py` in theory mode."
 
   explore_and_solve:
@@ -572,11 +585,12 @@ modes:
             Active game: `${vars.game_id}`.
             Explore-and-solve is level-1 only:
             - read the current `# Explore Plan` section in `theory.md` first and treat it as the entire contract for this turn;
-            - perform the minimal real-game probes needed to answer that one handed-off target class;
-            - stay focused only on that handed-off target class until it is answered or falsified;
+            - perform the minimal real-game probes or bounded route needed to answer that one handed-off target class;
+            - stay focused only on that handed-off target class until it is answered, falsified, or its explicit bounded-route stop condition is reached;
             - write the observed outcome and its likely implication into `theory.md`;
             - then switch_mode promptly.
             Do not invent a new route plan, feature target, or solution theory in this mode. If the current `# Explore Plan` is exhausted, switch back to theory.
+            If the current `# Explore Plan` is a bounded route, do not bounce back to theory after each expected repeated move; keep going until completion, a novel event, the explicit stop condition, or a blocker.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
             For actionful probes, inspect the returned `artifacts.after_state_hex` and `artifacts.diff_hex` first before reopening on-disk turn artifacts.
             Do not use read-only `arc_repl` calls as inspection tools.
@@ -590,19 +604,20 @@ modes:
       operation: append
       requirements:
         - "Use explore_and_solve only on level 1 before the first completion."
-        - "In explore_and_solve, read the current `# Explore Plan` section in `theory.md` and perform only the minimum real-game action sequence needed to answer that target class."
-        - "Do not exit explore_and_solve until the current `# Explore Plan` target class has been answered or falsified and recorded."
+        - "In explore_and_solve, read the current `# Explore Plan` section in `theory.md` and perform only the minimum real-game action sequence or bounded route needed to answer that target class."
+        - "Do not exit explore_and_solve until the current `# Explore Plan` target class has been answered or falsified and recorded, or its explicit bounded-route stop condition has been reached."
         - "Do not switch back to theory from explore_and_solve without new real-game evidence from this explore turn, unless a supervisor or policy blocker prevented action execution."
         - "Do not turn explore_and_solve into free-form route planning or broad solution search; stay inside the current `# Explore Plan` target class."
+        - "When the current `# Explore Plan` is a bounded route, continue through expected repeated moves without reopening theory unless a novel event, blocker, completion, or explicit stop condition occurs."
         - "After each real-game probe or solution attempt, update `theory.md` before switching modes."
         - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
       violations:
         - "Using explore_and_solve on level 2+."
         - "Creating new files or scripts in explore_and_solve."
         - "Broadening explore_and_solve to new unhanded-off targets or free-form map wandering without first switching back for a new `# Explore Plan`."
-        - "Exiting explore_and_solve before the current `# Explore Plan` target class has been answered or falsified."
+        - "Exiting explore_and_solve before the current `# Explore Plan` target class has been answered or falsified, or before its explicit bounded-route stop condition is reached."
         - "Returning to theory from explore_and_solve without new real-game evidence from the current explore turn, unless a supervisor or policy blocker prevented action execution."
-        - "Using explore_and_solve to invent or refine a route plan instead of probing the handed-off targets."
+        - "Using explore_and_solve to invent or refine a route plan instead of executing the handed-off target."
         - "Reading workspace files unrelated to the current level evidence in explore_and_solve."
         - "Using explore_and_solve for broad analysis instead of a concrete probe or solution attempt."
 
@@ -772,7 +787,7 @@ modes:
       requirements:
         - "Do not leave code_model while compare is still red for the active level or pinned solved level."
         - "If a solved-level compare pin is active, stay scoped to the pinned solved level and do not attempt frontier-level planning or solving."
-        - "When leaving a pinned solved-level wrap-up from code_model, include `--wrapup-certified --wrapup-level <pinned level>` on the `switch_mode` CLI call."
+        - "While a solved-level wrap-up pin is active, do not include wrap-up certification flags on code_model -> theory or code_model -> code_model handoffs. Those flags are reserved for the final certified release out of wrap-up."
         - "End each code_model turn with model-file edits, theory updates, or a `switch_mode` CLI call."
         - "If compare is red and a single exact blocker remains, stay in code_model and report the blocker instead of switching back to theory."
       violations:
@@ -1035,3 +1050,4 @@ tools:
     - list_dir
     - check_supervisor
     - paginate_tool_response
+    - switch_mode

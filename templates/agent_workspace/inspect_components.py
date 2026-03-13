@@ -400,15 +400,19 @@ def run_component_mismatch(game_dir: Path) -> tuple[dict[str, Any], int]:
 
 
 def main() -> int:
-    args = parse_args()
-    game_dir = Path(args.game_dir).resolve()
-    if args.coverage == args.current_mismatch:
-        raise SystemExit("choose exactly one of --coverage or --current-mismatch")
+    try:
+        args = parse_args()
+        game_dir = Path(args.game_dir).resolve()
+        if args.coverage == args.current_mismatch:
+            raise RuntimeError("choose exactly one of --coverage or --current-mismatch")
 
-    if args.coverage:
-        payload, code = run_component_coverage(game_dir, level=args.level)
-    else:
-        payload, code = run_component_mismatch(game_dir)
+        if args.coverage:
+            payload, code = run_component_coverage(game_dir, level=args.level)
+        else:
+            payload, code = run_component_mismatch(game_dir)
+    except Exception as exc:
+        payload = {"status": "error", "message": str(exc)}
+        code = 1
 
     print(json.dumps(payload, indent=2))
     return code

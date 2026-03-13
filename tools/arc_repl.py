@@ -28,7 +28,7 @@ from arc_repl_env import (
     _reset_env_with_retry,
 )
 from arc_repl_exec import _write_turn_trace
-from arc_repl_exec_output import emit_exec_result_block
+from arc_repl_exec_output import emit_exec_result_block, sanitize_result_for_agent_visibility
 from arc_repl_state import (
     _append_level_completion,
     _arc_dir,
@@ -46,17 +46,12 @@ from arc_repl_daemon_client import (
     spawn_daemon as spawn_daemon_impl,
     wait_for_daemon as wait_for_daemon_impl,
 )
-from arc_repl_diagnostics import (
-    daemon_unavailable_diagnostics,
-    has_prior_session_artifacts,
-)
-from arc_repl_intercepts import (
-    clear_idle_keepalive_marker as _clear_idle_keepalive_marker_impl,
-    idle_keepalive_marker_for_call as _idle_keepalive_marker_for_call_impl,
-    reset_level_intercept_line as _reset_level_intercept_line,
-    result_has_real_game_action as _result_has_real_game_action,
-    run_exec_compare_intercept as _run_exec_compare_intercept,
-)
+from arc_repl_diagnostics import daemon_unavailable_diagnostics, has_prior_session_artifacts
+from arc_repl_intercepts import clear_idle_keepalive_marker as _clear_idle_keepalive_marker_impl
+from arc_repl_intercepts import idle_keepalive_marker_for_call as _idle_keepalive_marker_for_call_impl
+from arc_repl_intercepts import reset_level_intercept_line as _reset_level_intercept_line
+from arc_repl_intercepts import result_has_real_game_action as _result_has_real_game_action
+from arc_repl_intercepts import run_exec_compare_intercept as _run_exec_compare_intercept
 from arc_repl_session_core import (
     BaseReplSession,
     _chunk_for_bbox,
@@ -64,19 +59,9 @@ from arc_repl_session_core import (
     _grid_from_hex_rows,
     _same_game_lineage as _same_game_lineage_impl,
 )
-from arc_repl_paths import (
-    conversation_id_from_env,
-    daemon_log_path,
-    ipc_paths,
-    lifecycle_path,
-    meta_path,
-    pid_path,
-    send_ipc_request,
-    session_dir,
-    session_key_from_env,
-    socket_path,
-    spawn_parent_identity_from_env,
-)
+from arc_repl_paths import conversation_id_from_env, daemon_log_path, ipc_paths, lifecycle_path
+from arc_repl_paths import meta_path, pid_path, send_ipc_request, session_dir
+from arc_repl_paths import session_key_from_env, socket_path, spawn_parent_identity_from_env
 SCHEMA_VERSION = "arc_repl.v1"
 SOCKET_WAIT_TIMEOUT_S = 90.0
 def _idle_keepalive_marker_for_call(cwd: Path, *, action: str, result: object) -> str | None:
@@ -424,12 +409,17 @@ def main() -> int:
             idle_marker = _idle_keepalive_marker_for_call(cwd, action=action, result=result)
             if idle_marker:
                 idle_intercept_line = f"{idle_marker} action={action}".strip()
-        reset_intercept_line = _reset_level_intercept_line(action, result)
         level_compare_block = (
             _run_exec_compare_intercept(cwd, result)
             if str(action).strip().lower() == "exec"
             else None
         )
+        visible_result = (
+            sanitize_result_for_agent_visibility(cwd=cwd, result=result)
+            if isinstance(result, dict)
+            else result
+        )
+        reset_intercept_line = _reset_level_intercept_line(action, visible_result)
         if action == "exec":
             if not isinstance(result, dict):
                 if result is not None:
@@ -442,7 +432,7 @@ def main() -> int:
                 sys.stdout.write(script_stdout)
                 if not script_stdout.endswith("\n"):
                     sys.stdout.write("\n")
-            exec_result_block = emit_exec_result_block(result)
+            exec_result_block = emit_exec_result_block(cwd=cwd, result=result)
             if exec_result_block:
                 sys.stdout.write(exec_result_block)
                 if not exec_result_block.endswith("\n"):
@@ -474,17 +464,17 @@ def main() -> int:
                                     sys.stderr.write("\n")
                 return 1
             return 0
-        if isinstance(result, dict):
+        if isinstance(visible_result, dict):
             intercept_lines: list[str] = []
             if reset_intercept_line:
                 intercept_lines.append(reset_intercept_line)
             if idle_intercept_line:
                 intercept_lines.append(idle_intercept_line)
             if intercept_lines:
-                result["intercept_hint"] = " | ".join(intercept_lines)
-                result["intercept_hints"] = intercept_lines
-        _emit_json(result)
-        return 0 if bool(result.get("ok")) else 1
+                visible_result["intercept_hint"] = " | ".join(intercept_lines)
+                visible_result["intercept_hints"] = intercept_lines
+        _emit_json(visible_result)
+        return 0 if bool(visible_result.get("ok")) else 1
     except Exception as exc:
         _emit_json(
             _error(

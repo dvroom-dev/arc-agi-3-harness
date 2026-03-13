@@ -10,6 +10,12 @@ from pathlib import Path
 import numpy as np
 from arcengine import GameAction
 
+from .visible_artifacts import (
+    sanitize_visible_json_payload,
+    sanitize_visible_level_tree,
+    visible_levels_completed_for_level,
+)
+
 _LEVEL_DIR_RE = re.compile(r"^level_(\d+)$")
 
 
@@ -88,7 +94,6 @@ def effective_analysis_level(game_dir: Path, frontier_level: int | None = None) 
         return pinned_level
     return frontier
 
-
 def arc_state_json_path() -> Path | None:
     state_dir = str(os.getenv("ARC_STATE_DIR", "") or "").strip()
     if not state_dir:
@@ -108,7 +113,6 @@ def load_frontier_level_from_arc_state() -> int | None:
         return int(payload.get("current_level"))
     except Exception:
         return None
-
 
 def grid_from_hex_rows(rows: list[str]) -> np.ndarray:
     if not rows:
@@ -253,15 +257,14 @@ def sync_workspace_level_view(game_dir: Path, *, game_id: str, frontier_level: i
     temp = game_dir / ".level_current.tmp"
     _remove_path(temp)
     shutil.copytree(src, temp)
+    sanitize_visible_level_tree(temp, visible_level=int(visible_level))
     (temp / "meta.json").write_text(
         json.dumps(
             {
                 "schema_version": "arc_repl.level_current.v1",
                 "game_id": str(game_id),
                 "level": int(visible_level),
-                "frontier_level": int(frontier_level),
                 "analysis_level_pinned": int(visible_level) != int(frontier_level),
-                "source": str(src),
             },
             indent=2,
         )

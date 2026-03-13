@@ -16,6 +16,7 @@ from .utils import (
     load_analysis_level_pin,
     read_hex_grid,
     resolve_level_dir,
+    sanitize_visible_json_payload,
     sync_workspace_level_view,
     update_analysis_level_pin,
 )
@@ -198,6 +199,13 @@ def report_md(report: dict) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _redact_payload_for_pinned_level(payload: dict[str, Any], *, pinned_level: int | None) -> dict[str, Any]:
+    if pinned_level is None:
+        return payload
+    sanitized = sanitize_visible_json_payload(payload, visible_level=int(pinned_level))
+    return sanitized if isinstance(sanitized, dict) else payload
+
+
 def _current_compare_markdown(summary_payload: dict[str, Any]) -> str:
     lines = [
         f"# Current Compare (Level {int(summary_payload['level'])})",
@@ -264,6 +272,14 @@ def _refresh_component_mismatch(session) -> str | None:
 
 
 def _persist_current_compare(session, payload: dict[str, Any]) -> None:
+    pin = load_analysis_level_pin(session.game_dir)
+    pinned_level: int | None = None
+    if isinstance(pin, dict):
+        try:
+            pinned_level = int(pin.get("level"))
+        except Exception:
+            pinned_level = None
+    payload = _redact_payload_for_pinned_level(payload, pinned_level=pinned_level)
     reports = payload.get("reports")
     if not isinstance(reports, list):
         reports = []
@@ -437,6 +453,7 @@ def compare_sequences(
         "reports": reports,
         **session.get_status_state(),
     }
+    payload = _redact_payload_for_pinned_level(payload, pinned_level=pinned_level)
     _persist_current_compare(session, payload)
     if bool(payload["all_match"]) and isinstance(pin, dict) and int(pin.get("level", -1)) == int(target_level):
         update_analysis_level_pin(

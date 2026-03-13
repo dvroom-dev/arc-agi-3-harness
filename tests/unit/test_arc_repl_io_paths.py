@@ -160,3 +160,50 @@ def test_main_exec_error_prints_stderr(monkeypatch, capsys) -> None:
     rc = arc_repl.main()
     assert rc == 1
     assert "boom" in capsys.readouterr().err
+
+
+def test_main_exec_redacts_frontier_level_while_analysis_pin_is_active(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".analysis_level_pin.json").write_text(
+        json.dumps({"level": 1, "phase": "pending_theory"}, indent=2)
+    )
+    monkeypatch.setattr(sys, "argv", ["arc_repl"])
+    monkeypatch.setattr(
+        arc_repl,
+        "_read_args",
+        lambda: {"action": "exec", "game_id": "ls20", "script": "print('x')"},
+    )
+    monkeypatch.setattr(
+        arc_repl,
+        "_send_request",
+        lambda cwd, conversation_id, request: (
+            {
+                "ok": True,
+                "action": "exec",
+                "script_stdout": "",
+                "state": "NOT_FINISHED",
+                "current_level": 2,
+                "levels_completed": 1,
+                "steps_executed": 1,
+                "trace_file": "trace.md",
+                "artifacts": {
+                    "level": 1,
+                    "tool_turn": 21,
+                    "changed_pixels": 7,
+                    "after_state_hex": "2222",
+                },
+            },
+            False,
+        ),
+    )
+    rc = arc_repl.main()
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert '"current_level": 1' in out
+    assert '"levels_completed": 0' in out
+    assert '"analysis_level_boundary_redacted": true' in out
+    assert '"after_state_hex"' not in out
