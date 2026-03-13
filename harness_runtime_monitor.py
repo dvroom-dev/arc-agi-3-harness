@@ -126,9 +126,6 @@ def resolve_raw_events_path(
         ids.append(str(active_actual_conversation_id))
     if active_conversation_id:
         ids.append(str(active_conversation_id))
-    parsed = load_conversation_id(session_file)
-    if parsed:
-        ids.append(str(parsed))
 
     ordered: list[str] = []
     seen: set[str] = set()

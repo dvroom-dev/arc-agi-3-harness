@@ -150,29 +150,33 @@ def _remove_stream_sync_path(path: Path) -> None:
     path.rmdir()
 
 
-def _read_stream_session_conversation_id(output_path: Path) -> str | None:
-    try:
-        text = output_path.read_text()
-    except Exception:
+def _discover_stream_workspace_conversation_id(run_dir: Path) -> str | None:
+    conversations_dir = run_dir / ".ai-supervisor" / "conversations"
+    if not conversations_dir.exists():
         return None
-    lines = text.splitlines()
-    if not lines or lines[0].strip() != "---":
+
+    candidates = [path for path in conversations_dir.iterdir() if path.is_dir()]
+    if not candidates:
         return None
-    for line in lines[1:80]:
-        if line.strip() == "---":
-            break
-        match = re.match(r"^\s*conversation_id\s*:\s*(.+?)\s*$", line)
-        if match:
-            return match.group(1).strip().strip("\"'")
-    return None
+    if len(candidates) == 1:
+        return candidates[0].name
+
+    ranked = sorted(
+        candidates,
+        key=lambda path: (
+            (path / "index.json").stat().st_mtime if (path / "index.json").exists() else path.stat().st_mtime
+        ),
+        reverse=True,
+    )
+    return ranked[0].name
 
 
 def _sync_live_stream_conversation_artifacts(output_path: Path, cwd: str) -> None:
-    conversation_id = _read_stream_session_conversation_id(output_path)
+    run_dir = Path(cwd or PROJECT_ROOT)
+    conversation_id = _discover_stream_workspace_conversation_id(run_dir)
     if not conversation_id:
         return
 
-    run_dir = Path(cwd or PROJECT_ROOT)
     source_dir = run_dir / ".ai-supervisor" / "conversations" / conversation_id
     forks_src = source_dir / "forks"
     if not forks_src.exists():

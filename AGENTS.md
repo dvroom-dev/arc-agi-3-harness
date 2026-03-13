@@ -136,7 +136,8 @@ Know where state actually lives.
 - The harness copies `super.yaml` into `runs/<session>/super.yaml` per run.
 - The agent uses run-local wrappers from `runs/<session>/config/bin`; agent commands should not depend on project-root executables.
 - Supervisor conversation state is workspace-local under `runs/<session>/.ai-supervisor/conversations/<conversation_id>/...`.
-- `session.md` frontmatter is the conversation source of truth for `conversation_id`.
+- Workspace conversation state under `.ai-supervisor/conversations/<conversation_id>/...` is the live source of truth.
+- `.ctxs/<session>/session.md` is an exported transcript artifact, not a live input source.
 
 Important runtime behavior:
 - The harness starts a run with `super new ...`.
@@ -163,7 +164,7 @@ Hard rules:
 Monitoring order:
 0. Watch streaming stdout/stderr from the persistent exec session for immediate progress, provider errors, tool hangs, and supervisor decisions.
 1. Check `runs/<run-id>/supervisor/arc/state.json` and `runs/<run-id>/supervisor/arc/tool-engine-history.json` together.
-2. Check `.ctxs/<session>/session.md` for transcript and current `conversation_id`.
+2. Check `runs/<run-id>/.ai-supervisor/conversations/<conversation>/index.json` or the current branch artifacts for live conversation state.
 3. If progress is unclear, check `runs/<run-id>/.ai-supervisor/conversations/<conversation>/raw_events/events.ndjson`.
 4. Only then conclude stall/failure and classify root cause.
 
