@@ -66,9 +66,10 @@ If any of those are missing, the supervisor must keep the run pinned and resume
 the appropriate wrap-up mode.
 
 Certification is explicit:
-- when leaving solved-level wrap-up, the supervisor must switch to the next mode
-  with `mode_payload.wrapup_certified=true`
-- and `mode_payload.wrapup_level=<solved level>`
+- when leaving solved-level wrap-up, the supervisor must set
+  `transition_payload.wrapup_certified=true`
+- and `transition_payload.wrapup_level=<solved level>`
+- mode choice and fork-vs-resume are separate from this release metadata
 - the harness will not clear the pin without those fields, even if helper
   evidence is otherwise ready
 
