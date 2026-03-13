@@ -29,6 +29,7 @@ from harness_runtime_env import (
 )
 from harness_runtime_cleanup import cleanup_repl_daemons_impl, close_scorecard_if_needed_impl
 from harness_runtime_conversation import load_conversation_id_impl
+from harness_runtime_arc_repl import run_arc_repl_impl, resume_super_impl
 from harness_runtime_prompting import (
     load_current_pixels_impl,
     prompt_args_impl,
@@ -43,8 +44,10 @@ from harness_runtime_session import (
     sync_active_conversation_id_from_session_impl,
 )
 from harness_runtime_validation import validate_run_super_config_text
+from harness_runtime_telemetry import append_phase_timing_impl, phase_scope_impl
 from harness_scorecard_helpers import build_scorecard_client, export_scorecard_cookies_json, resolve_arc_api_key
 from tools.proc_utils import read_proc_start_ticks
+from harness_wrapup import certify_or_block_wrapup_transition_impl
 
 
 class HarnessRuntime:
@@ -66,6 +69,8 @@ class HarnessRuntime:
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.session_file = self.session_dir / "session.md"
         self.run_dir = deps.PROJECT_ROOT / "runs" / self.session_name
+        self.telemetry_dir = self.run_dir / "telemetry"
+        self.phase_timings_path = self.telemetry_dir / "harness_phases.ndjson"
         cleanup_stats = deps.cleanup_orphan_repl_daemons(
             deps.PROJECT_ROOT,
             preserve_run_ids={self.session_name},
@@ -81,19 +86,22 @@ class HarnessRuntime:
         self.agent_dir = self.run_dir / "agent"
         self.supervisor_dir = self.run_dir / "supervisor"
         self.run_config_dir = self.run_dir / "config"
-        deps.setup_run_dir(
-            self.run_dir,
-            self.agent_dir,
-            self.supervisor_dir,
-            self.log,
-            game_id=str(args.game_id),
-        )
-        self.run_bin_dir, self.run_tools_dir = deps.setup_run_config_dir(self.run_config_dir)
+        with self.phase_scope(category="setup", name="setup_run_dir"):
+            deps.setup_run_dir(
+                self.run_dir,
+                self.agent_dir,
+                self.supervisor_dir,
+                self.log,
+                game_id=str(args.game_id),
+            )
+        with self.phase_scope(category="setup", name="setup_run_config_dir"):
+            self.run_bin_dir, self.run_tools_dir = deps.setup_run_config_dir(self.run_config_dir)
         deps.assert_no_game_files_in_agent_dir(self.agent_dir)
         self.run_super_config = self.run_dir / "super.yaml"
-        rendered_super_config = (deps.PROJECT_ROOT / "super.yaml").read_text()
-        validate_run_super_config_text(rendered_super_config)
-        self.run_super_config.write_text(rendered_super_config)
+        with self.phase_scope(category="setup", name="render_super_config"):
+            rendered_super_config = (deps.PROJECT_ROOT / "super.yaml").read_text()
+            validate_run_super_config_text(rendered_super_config)
+            self.run_super_config.write_text(rendered_super_config)
         self.super_config = self.run_super_config
 
         if not deps.PROJECT_VENV_PYTHON.exists():
@@ -110,10 +118,16 @@ class HarnessRuntime:
         self.arc_env_dir = deps.ARC_ENV_CACHE_ROOT / self.session_name
         self.arc_env_dir.mkdir(parents=True, exist_ok=True)
         if self.offline_mode:
-            self.log(
-                "[harness] seeded offline env cache: "
-                f"{deps.seed_arc_environment_cache(self.arc_env_dir, requested_game_id=str(args.game_id))}"
-            )
+            with self.phase_scope(category="setup", name="seed_offline_env_cache") as phase:
+                seeded = deps.seed_arc_environment_cache(
+                    self.arc_env_dir,
+                    requested_game_id=str(args.game_id),
+                )
+                phase["seeded_path"] = str(seeded)
+                self.log(
+                    "[harness] seeded offline env cache: "
+                    f"{seeded}"
+                )
         self.state_json = self.arc_state_dir / "state.json"
         self.history_json = self.arc_state_dir / "tool-engine-history.json"
         self.completions_md = self.arc_state_dir / "level_completions.md"
@@ -144,7 +158,9 @@ class HarnessRuntime:
             if self.active_scorecard_id:
                 skip_get_validation = bool(getattr(args, "skip_scorecard_get_validation", False))
                 if not skip_get_validation:
-                    self.scorecard_client.get_scorecard(self.active_scorecard_id)
+                    with self.phase_scope(category="scorecard", name="get_scorecard") as phase:
+                        self.scorecard_client.get_scorecard(self.active_scorecard_id)
+                        phase["scorecard_id"] = self.active_scorecard_id
             else:
                 tags = ["arc-agi-harness", "tool-driven", f"game:{args.game_id}"]
                 opaque = {
@@ -152,7 +168,11 @@ class HarnessRuntime:
                     "game_id": str(args.game_id),
                     "started_at": datetime.now(timezone.utc).isoformat(),
                 }
-                self.active_scorecard_id = str(self.scorecard_client.open_scorecard(tags=tags, opaque=opaque))
+                with self.phase_scope(category="scorecard", name="open_scorecard") as phase:
+                    self.active_scorecard_id = str(
+                        self.scorecard_client.open_scorecard(tags=tags, opaque=opaque)
+                    )
+                    phase["scorecard_id"] = self.active_scorecard_id
                 self.scorecard_created_here = True
             if not self.scorecard_cookies_json:
                 self.scorecard_cookies_json = export_scorecard_cookies_json(self.scorecard_client)
@@ -228,9 +248,40 @@ class HarnessRuntime:
             getattr(self.args, "arc_backend", "") or ""
         ).strip().lower() == "api"
 
-    def open_scorecard_now(self) -> str: return open_scorecard_now_impl(self)
+    def open_scorecard_now(self) -> str:
+        with self.phase_scope(category="scorecard", name="open_scorecard_now"):
+            return open_scorecard_now_impl(self)
 
     def log(self, msg: str) -> None: print(msg, file=self.deps.sys.stderr, flush=True)
+
+    def append_phase_timing(
+        self,
+        *,
+        category: str,
+        name: str,
+        elapsed_ms: int,
+        ok: bool,
+        metadata: dict[str, Any] | None = None,
+        error: str | None = None,
+    ) -> None:
+        append_phase_timing_impl(
+            self,
+            category=category,
+            name=name,
+            elapsed_ms=elapsed_ms,
+            ok=ok,
+            metadata=metadata,
+            error=error,
+        )
+
+    def phase_scope(
+        self,
+        *,
+        category: str,
+        name: str,
+        metadata: dict[str, Any] | None = None,
+    ):
+        return phase_scope_impl(self, category=category, name=name, metadata=metadata)
 
     def _build_scorecard_client(self):
         return build_scorecard_client(
@@ -259,16 +310,17 @@ class HarnessRuntime:
         )
 
     def monitor_snapshot(self) -> dict[str, Any]:
-        return monitor_snapshot_impl(
-            state_path=self.state_json,
-            history_path=self.history_json,
-            model_status_path=self.active_agent_dir() / "model_status.json",
-            run_dir=self.run_dir,
-            session_file=self.session_file,
-            active_actual_conversation_id=self.active_actual_conversation_id,
-            active_conversation_id=self.active_conversation_id,
-            load_conversation_id=self.load_conversation_id,
-        )
+        with self.phase_scope(category="state", name="monitor_snapshot"):
+            return monitor_snapshot_impl(
+                state_path=self.state_json,
+                history_path=self.history_json,
+                model_status_path=self.active_agent_dir() / "model_status.json",
+                run_dir=self.run_dir,
+                session_file=self.session_file,
+                active_actual_conversation_id=self.active_actual_conversation_id,
+                active_conversation_id=self.active_conversation_id,
+                load_conversation_id=self.load_conversation_id,
+            )
 
     def load_conversation_id(self, doc_path: Path) -> str | None:
         return load_conversation_id_impl(doc_path)
@@ -281,132 +333,13 @@ class HarnessRuntime:
         return format_model_status_summary_impl(model_status)
 
     def run_arc_repl(self, payload: dict) -> tuple[dict | None, str, int]:
-        request = dict(payload)
-        action_name = str(request.get("action", "")).strip()
-        requested_game_id = str(request.get("game_id", "")).strip()
-        if requested_game_id:
-            if (
-                self.active_game_id
-                and requested_game_id == str(self.args.game_id).strip()
-                and self.active_game_id != requested_game_id
-            ):
-                request["game_id"] = self.active_game_id
-        elif self.active_game_id:
-            request["game_id"] = self.active_game_id
-
-        cmd = [
-            str(self.deps.PROJECT_VENV_PYTHON),
-            str(self.run_arc_repl_tool),
-        ]
-        child_env = dict(os.environ)
-        child_env["ARC_OPERATION_MODE"] = str(self.args.operation_mode).strip().upper()
-        child_env["ARC_BACKEND"] = str(getattr(self.args, "arc_backend", "") or "")
-        child_env["ARC_BASE_URL"] = self.arc_base_url
-        child_env.setdefault("ARC_ENVIRONMENTS_DIR", str(self.arc_env_dir))
-        child_env["ARC_STATE_DIR"] = str(self.arc_state_dir)
-        child_env["ARC_CONFIG_DIR"] = str(self.run_config_dir)
-        child_env["ONLY_RESET_LEVELS"] = "true"
-        if self.arc_api_key:
-            child_env["ARC_API_KEY"] = self.arc_api_key
-        child_env["ARC_CONVERSATION_ID"] = self.active_conversation_id
-        child_env["ARC_ACTIVE_GAME_ID"] = self.active_game_id or str(self.args.game_id).strip()
-        if self.active_scorecard_id:
-            child_env["ARC_SCORECARD_ID"] = self.active_scorecard_id
-        if self.scorecard_cookies_json:
-            child_env["ARC_SCORECARD_COOKIES"] = self.scorecard_cookies_json
-        child_env["ARC_REPL_SESSION_KEY"] = self.active_repl_session_key
-        child_env["ARC_REPL_PARENT_PID"] = str(self.repl_parent_pid)
-        if self.repl_parent_start_ticks is not None:
-            child_env["ARC_REPL_PARENT_START_TICKS"] = str(self.repl_parent_start_ticks)
-
-        proc = self.deps.subprocess.run(
-            cmd,
-            input=json.dumps(request),
-            text=True,
-            capture_output=True,
-            cwd=str(self.active_agent_dir()),
-            env=child_env,
-        )
-        if proc.stderr.strip():
-            for line in proc.stderr.strip().splitlines():
-                self.log(f"[arc_repl] {line}")
-
-        stdout = proc.stdout.strip()
-        parsed: dict | None = None
-        allow_raw_stdout = action_name == "exec"
-        if allow_raw_stdout:
-            return None, stdout, proc.returncode
-
-        if stdout:
-            try:
-                maybe = json.loads(stdout)
-            except Exception as exc:
-                if proc.returncode == 0:
-                    preview = stdout[:800].replace("\n", "\\n")
-                    raise RuntimeError(
-                        "arc_repl returned non-JSON stdout despite success status: "
-                        f"{exc}. stdout_preview={preview}"
-                    ) from exc
-            else:
-                if isinstance(maybe, dict):
-                    parsed = maybe
-                    if (
-                        self.active_scorecard_id
-                        and action_name == "status"
-                        and proc.returncode == 0
-                    ):
-                        echoed_scorecard_id = str(parsed.get("scorecard_id", "") or "").strip()
-                        if echoed_scorecard_id != self.active_scorecard_id:
-                            raise RuntimeError(
-                                "arc_repl status did not echo expected scorecard_id: "
-                                f"expected={self.active_scorecard_id!r} "
-                                f"got={echoed_scorecard_id!r}"
-                            )
-                    resolved_game_id = str(parsed.get("game_id", "")).strip()
-                    if resolved_game_id:
-                        self.active_game_id = resolved_game_id
-                        self.update_prompt_game_vars()
-                        self.super_env["ARC_ACTIVE_GAME_ID"] = self.active_game_id
-                    repl_meta = parsed.get("repl")
-                    if isinstance(repl_meta, dict):
-                        daemon_pid_raw = repl_meta.get("daemon_pid")
-                        daemon_pid: int | None = None
-                        try:
-                            daemon_pid = int(daemon_pid_raw)
-                        except Exception:
-                            daemon_pid = None
-                        if daemon_pid is not None:
-                            session_created = bool(repl_meta.get("session_created", False))
-                            if self.last_repl_daemon_pid is None:
-                                self.log(
-                                    "[harness] arc_repl daemon active: "
-                                    f"pid={daemon_pid} session_key={self.active_repl_session_key} "
-                                    f"session_created={session_created}"
-                                )
-                            elif daemon_pid != self.last_repl_daemon_pid:
-                                daemon_dir = (
-                                    self.arc_state_dir
-                                    / "repl-sessions"
-                                    / self.active_repl_session_key
-                                )
-                                self.log(
-                                    "[harness] WARNING: arc_repl daemon pid changed: "
-                                    f"old={self.last_repl_daemon_pid} new={daemon_pid} "
-                                    f"action={action_name} session_created={session_created}. "
-                                    f"Inspect {daemon_dir / 'daemon.log'} and "
-                                    f"{daemon_dir / 'daemon.lifecycle.jsonl'}."
-                                )
-                            self.last_repl_daemon_pid = daemon_pid
-                elif proc.returncode == 0:
-                    raise RuntimeError(
-                        "arc_repl returned JSON that is not an object on success."
-                    )
-        elif proc.returncode == 0:
-            raise RuntimeError("arc_repl returned empty stdout on success.")
-
-        return parsed, stdout, proc.returncode
+        return run_arc_repl_impl(self, payload)
 
     def sync_active_conversation_id_from_session(self) -> None: sync_active_conversation_id_from_session_impl(self)
+
+    def certify_or_block_wrapup_transition(self) -> None:
+        with self.phase_scope(category="wrapup", name="certify_or_block_transition"):
+            certify_or_block_wrapup_transition_impl(self)
 
     def session_frontmatter(self) -> dict[str, str]: return session_frontmatter_impl(self)
 
@@ -418,7 +351,12 @@ class HarnessRuntime:
         reason: str,
         force: bool = False,
     ) -> None:
-        recover_session_file_from_workspace_impl(self, reason=reason, force=force)
+        with self.phase_scope(
+            category="sync",
+            name="recover_session_file",
+            metadata={"reason": reason, "force": force},
+        ):
+            recover_session_file_from_workspace_impl(self, reason=reason, force=force)
 
     def load_conversation_head_metadata(self) -> dict[str, str | int | None] | None: return load_conversation_head_metadata_impl(self)
 
@@ -444,33 +382,15 @@ class HarnessRuntime:
         refresh_dynamic_super_env_impl(self)
 
     def resume_super(self, prompt: str | None = None, *, image_paths: list[Path] | None = None) -> str:
-        self.refresh_dynamic_super_env()
-        self.recover_session_file_from_workspace(reason="pre-resume")
-        self.log(f"[harness] super agent-dir: {self.active_agent_dir()}")
-        resume_args: list[str] = [
-            "resume",
-            "--workspace", str(self.run_dir),
-            "--config", str(self.super_config),
-            "--config-dir", str(self.run_config_dir),
-            "--agent-dir", str(self.active_agent_dir()),
-            "--supervisor-dir", str(self.supervisor_dir),
-            *self.provider_args(),
-            *self.supervisor_args(),
-        ]
-        if self.cycle_limit is not None:
-            resume_args += ["--cycle-limit", str(self.cycle_limit)]
-        if prompt:
-            resume_args += self.prompt_args(prompt, prompt_kind="resume", image_paths=image_paths)
-        resume_args += ["--output", str(self.session_file)]
-        stdout = self.deps.run_super(resume_args, stream=True, cwd=self.run_dir, env=self.super_env)
-        self.recover_session_file_from_workspace(reason="post-resume", force=True)
-        return stdout
+        return resume_super_impl(self, prompt, image_paths=image_paths)
 
     def cleanup_repl_daemons(self) -> None:
-        cleanup_repl_daemons_impl(self)
+        with self.phase_scope(category="cleanup", name="cleanup_repl_daemons"):
+            cleanup_repl_daemons_impl(self)
 
     def close_scorecard_if_needed(self) -> None:
-        close_scorecard_if_needed_impl(self)
+        with self.phase_scope(category="scorecard", name="close_scorecard_if_needed"):
+            close_scorecard_if_needed_impl(self)
 
     def has_idle_keepalive_marker(self) -> bool:
         return has_idle_keepalive_marker_impl(self)

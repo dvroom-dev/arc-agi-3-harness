@@ -86,6 +86,16 @@ def test_harness_main_smoke_no_llm_calls(tmp_path: Path, monkeypatch) -> None:
 
     assert (root / "runs" / "t-run" / "agent").exists()
     assert (root / ".ctxs" / "t-run" / "session.md").exists()
+    phase_log = root / "runs" / "t-run" / "telemetry" / "harness_phases.ndjson"
+    assert phase_log.exists()
+    categories = {
+        json.loads(line)["category"]
+        for line in phase_log.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+    assert "setup" in categories
+    assert "tool" in categories
+    assert "super" in categories
 
 
 def test_harness_sets_only_reset_levels_in_child_and_super_envs(

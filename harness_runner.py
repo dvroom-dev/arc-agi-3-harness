@@ -13,9 +13,7 @@ from harness_runner_args import resolve_arc_base_url, resolve_game_ids, session_
 from harness_runner_regression import _classify_level_drop
 from harness_runner_super_cycle import noop_super_cycle_error
 from harness_runtime import HarnessRuntime
-from harness_wrapup import certify_or_block_wrapup_transition_impl
 from harness_scorecard_helpers import close_shared_scorecard, open_shared_scorecard, run_scorecard_session_preflight, validate_scorecard_owner_check
-
 def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str, game_index: int, total_games: int) -> None:
     runtime = HarnessRuntime(
         deps,
@@ -52,7 +50,6 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
     else:
         runtime.log("[harness] input exploration is disabled (default).")
     runtime.log("[harness] level-start prompt image attachments are disabled.")
-
     try:
         _, _, init_rc = runtime.run_arc_repl({"action": "status", "game_id": args.game_id})
         if init_rc != 0:
@@ -95,7 +92,6 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
         game_over_resets = 0
         last_recorded_completed_level = deps.read_max_recorded_completion_level(runtime.completions_md)
         last_real_game_action_at_monotonic = time.monotonic()
-
         def _start_super_new(*, phase_label: str, start_mode: str | None = None) -> None:
             runtime.log(f"[harness] starting super new ({phase_label})...")
             runtime.refresh_dynamic_super_env()
@@ -115,14 +111,19 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
                 cmd.extend(["--cycle-limit", str(runtime.cycle_limit)])
             if start_mode:
                 cmd.extend(["--start-mode", str(start_mode)])
-            deps.run_super(
-                cmd,
-                stream=True,
-                cwd=runtime.run_dir,
-                env=runtime.super_env,
-            )
+            with runtime.phase_scope(
+                category="super",
+                name="new",
+                metadata={"phase_label": phase_label, "start_mode": start_mode},
+            ):
+                deps.run_super(
+                    cmd,
+                    stream=True,
+                    cwd=runtime.run_dir,
+                    env=runtime.super_env,
+                )
             runtime.recover_session_file_from_workspace(reason="post-new", force=True)
-            runtime.sync_active_conversation_id_from_session(); certify_or_block_wrapup_transition_impl(runtime)
+            runtime.sync_active_conversation_id_from_session(); runtime.certify_or_block_wrapup_transition()
             monitor = runtime.monitor_snapshot()
             runtime.log(
                 "[harness] monitor sources: "
@@ -235,7 +236,7 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
                 history_len_before_resume = processed_history_len
                 head_before_resume = runtime.load_conversation_head_metadata()
                 stdout = runtime.resume_super()
-                runtime.sync_active_conversation_id_from_session(); certify_or_block_wrapup_transition_impl(runtime)
+                runtime.sync_active_conversation_id_from_session(); runtime.certify_or_block_wrapup_transition()
                 if not stdout.strip():
                     runtime.log(
                         "[harness] super returned empty assistant response; "
@@ -337,10 +338,8 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
         replay_start_mode = str(
             getattr(args, "score_after_solve_start_mode", "recover") or "recover"
         ).strip() or "recover"
-
         _start_super_new(phase_label="discovery")
         discovery_won = _run_super_loop()
-
         if score_after_solve and discovery_won and not runtime.active_scorecard_id:
             scorecard_id = runtime.open_scorecard_now()
             runtime.log(f"[harness] score-after-solve: opened scorecard id={scorecard_id}")
