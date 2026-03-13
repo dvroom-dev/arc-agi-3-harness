@@ -57,11 +57,11 @@ def load_super_active_mode_impl(runtime) -> str | None:
     return mode or None
 
 
-def load_super_active_mode_payload_impl(runtime) -> dict[str, str]:
+def load_super_active_transition_payload_impl(runtime) -> dict[str, str]:
     payload = _read_json_if_exists(runtime.run_dir / "super" / "state.json")
     if not isinstance(payload, dict):
         return {}
-    raw = payload.get("activeModePayload")
+    raw = payload.get("activeTransitionPayload")
     if not isinstance(raw, dict):
         return {}
     out: dict[str, str] = {}
@@ -193,17 +193,17 @@ def certify_or_block_wrapup_transition_impl(runtime) -> None:
     if not target_mode:
         return
 
-    target_mode_payload = load_super_active_mode_payload_impl(runtime)
-    certified = str(target_mode_payload.get("wrapup_certified") or "").strip().lower() == "true"
-    certified_level = _int_or_none(target_mode_payload.get("wrapup_level"))
+    transition_payload = load_super_active_transition_payload_impl(runtime)
+    certified = str(transition_payload.get("wrapup_certified") or "").strip().lower() == "true"
+    certified_level = _int_or_none(transition_payload.get("wrapup_level"))
     if not certified:
         if target_mode in {"theory", "code_model"}:
             return
         raise RuntimeError(
             "cannot leave solved-level wrap-up without explicit supervisor certification: "
             f"target_mode={target_mode} "
-            f"wrapup_certified={target_mode_payload.get('wrapup_certified')} "
-            f"wrapup_level={target_mode_payload.get('wrapup_level')} "
+            f"wrapup_certified={transition_payload.get('wrapup_certified')} "
+            f"wrapup_level={transition_payload.get('wrapup_level')} "
             f"expected_level={status['pinned_level']}"
         )
 
@@ -223,8 +223,8 @@ def certify_or_block_wrapup_transition_impl(runtime) -> None:
         raise RuntimeError(
             "cannot leave solved-level wrap-up without explicit supervisor certification: "
             f"target_mode={target_mode} "
-            f"wrapup_certified={target_mode_payload.get('wrapup_certified')} "
-            f"wrapup_level={target_mode_payload.get('wrapup_level')} "
+            f"wrapup_certified={transition_payload.get('wrapup_certified')} "
+            f"wrapup_level={transition_payload.get('wrapup_level')} "
             f"expected_level={status['pinned_level']}"
         )
 

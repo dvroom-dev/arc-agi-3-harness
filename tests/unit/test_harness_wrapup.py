@@ -78,7 +78,7 @@ def test_wrapup_transition_clears_pin_and_restores_frontier_view_when_ready(tmp_
         json.dumps(
             {
                 "activeMode": "solve_model",
-                "activeModePayload": {"wrapup_certified": "true", "wrapup_level": "1"},
+                "activeTransitionPayload": {"wrapup_certified": "true", "wrapup_level": "1"},
             },
             indent=2,
         )
@@ -153,7 +153,7 @@ def test_wrapup_transition_can_release_directly_into_theory_when_certified(tmp_p
         json.dumps(
             {
                 "activeMode": "theory",
-                "activeModePayload": {"wrapup_certified": "true", "wrapup_level": "1"},
+                "activeTransitionPayload": {"wrapup_certified": "true", "wrapup_level": "1"},
             },
             indent=2,
         )
@@ -222,7 +222,7 @@ def test_wrapup_transition_blocks_when_compare_level_does_not_match_pin(tmp_path
         json.dumps(
             {
                 "activeMode": "solve_model",
-                "activeModePayload": {"wrapup_certified": "true", "wrapup_level": "2"},
+                "activeTransitionPayload": {"wrapup_certified": "true", "wrapup_level": "2"},
             },
             indent=2,
         )

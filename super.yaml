@@ -94,12 +94,7 @@ prompt_parts:
 
         Generic mode payload flags:
         - `--mode-payload <key=value>` (repeatable): attach transition metadata to the next mode
-
-        For final solved-level wrap-up release, use:
-        - `--mode-payload wrapup_certified=true`
-        - `--mode-payload wrapup_level=<level>`
-
-        Use those wrap-up payload entries only on the final supervisor-certified release out of pinned solved-level wrap-up. Do not include them on theory <-> code_model handoffs inside wrap-up.
+        Use `--mode-payload` only for data the next mode needs in its own prompt/context. Do not use it to request solved-level wrap-up release; the supervisor carries release metadata separately from the mode choice.
 
         Example:
         ```bash
@@ -153,7 +148,7 @@ supervisor:
       - "When a solved-level compare pin is active, keep all visible state, compare work, and model work targeted to the pinned solved level until the supervisor explicitly certifies wrap-up complete."
       - "While a solved-level compare pin is active, only `theory` and `code_model` are valid next modes. Do not route to `explore_and_solve` or `solve_model` until the supervisor certifies wrap-up complete."
       - "Coverage helpers and compare helpers provide evidence only; they do not certify solved-level wrap-up on their own."
-      - "Wrap-up certification is explicit, not implied. When releasing a pinned solved-level wrap-up, include `--mode-payload wrapup_certified=true --mode-payload wrapup_level=<pinned level>` on the `switch_mode` CLI call. The released frontier mode may still be `theory` if that is the best place to start the next level."
+      - "Wrap-up certification is explicit, not implied. Keep the release decision separate from the frontier mode choice and from fork-vs-resume. When certifying solved-level wrap-up complete, set supervisor `transition_payload.wrapup_certified=true` and `transition_payload.wrapup_level=<pinned level>`. Then independently choose whether to continue, `resume_mode_head`, or `fork_new_conversation`, and independently choose the best frontier-start mode. The released frontier mode may still be `theory`."
   tool_interception:
     rules:
       - name: idle-keepalive
