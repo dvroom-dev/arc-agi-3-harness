@@ -7,6 +7,7 @@ import shutil
 
 import numpy as np
 from arc_model_runtime.utils import effective_analysis_level, sanitize_visible_level_tree
+from arc_model_runtime.visible_artifacts import LEVEL_TRANSITION_FILE, level_transition_payload
 
 try:
     from arc_repl_session_sequences import (
@@ -267,6 +268,26 @@ def _write_level_turn_files(
         },
     }
     (turn_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    if int(meta["level_after"]) > int(meta["level_before"]):
+        (turn_dir / LEVEL_TRANSITION_FILE).write_text(
+            json.dumps(
+                {
+                    **level_transition_payload(
+                        visible_level=int(level_number),
+                        redacted=False,
+                        source_turn_dir=f"level_{level_number}/turn_{int(session.turn):04d}",
+                    ),
+                    "level_before": int(meta["level_before"]),
+                    "level_after": int(meta["level_after"]),
+                    "levels_completed_before": int(meta["levels_completed_before"]),
+                    "levels_completed_after": int(meta["levels_completed_after"]),
+                    "state_before_action": str(meta["state_before_action"]),
+                    "state_after_action": str(meta["state_after_action"]),
+                },
+                indent=2,
+            )
+            + "\n"
+        )
 
     # Per-level append-only index, plus game-wide index for quick scan.
     level_index = level_dir / "turn_index.jsonl"

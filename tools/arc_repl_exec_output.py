@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from arc_model_runtime.utils import effective_analysis_level, visible_levels_completed_for_level
+from arc_model_runtime.utils import (
+    build_visible_level_status,
+    effective_analysis_level,
+    visible_levels_completed_for_level,
+)
 
 
 def sanitize_result_for_agent_visibility(*, cwd: Path, result: dict) -> dict:
@@ -22,6 +26,11 @@ def sanitize_result_for_agent_visibility(*, cwd: Path, result: dict) -> dict:
     sanitized["current_level"] = int(visible_level)
     sanitized["levels_completed"] = visible_levels_completed_for_level(int(visible_level))
     sanitized["analysis_level_pinned"] = True
+    sanitized["analysis_level_status"] = build_visible_level_status(
+        game_dir=cwd,
+        frontier_level=int(frontier_level_int),
+        visible_level=int(visible_level),
+    )
     artifacts = result.get("artifacts")
     if isinstance(artifacts, dict):
         safe_artifacts: dict[str, object] = {}

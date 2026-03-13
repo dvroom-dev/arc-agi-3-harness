@@ -9,6 +9,51 @@ import pytest
 import harness_wrapup
 
 
+def _write_level_current_surface(
+    game_dir: Path,
+    *,
+    level: int,
+    pinned: bool,
+    initial_rows: str | None = None,
+) -> None:
+    level_current = game_dir / "level_current"
+    level_current.mkdir(parents=True, exist_ok=True)
+    (level_current / "meta.json").write_text(
+        json.dumps({"level": level, "analysis_level_pinned": pinned}, indent=2) + "\n"
+    )
+    if initial_rows is not None:
+        (level_current / "initial_state.hex").write_text(initial_rows)
+    if pinned:
+        (level_current / "analysis_level_status.json").write_text(
+            json.dumps(
+                {
+                    "visible_level": level,
+                    "analysis_level_pinned": True,
+                    "frontier_hidden_by_pin": True,
+                    "next_allowed_operation": "finalize_pinned_level",
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+        (level_current / "level_transition.json").write_text(
+            json.dumps({"analysis_level_boundary_redacted": True}, indent=2) + "\n"
+        )
+
+
+def _make_runtime(run_dir: Path, arc_state_dir: Path, game_dir: Path):
+    return SimpleNamespace(
+        run_dir=run_dir,
+        arc_state_dir=arc_state_dir,
+        active_game_id="ls20",
+        args=SimpleNamespace(game_id="ls20"),
+        active_agent_dir=lambda: game_dir,
+        load_state=lambda: json.loads((arc_state_dir / "state.json").read_text()),
+        refresh_dynamic_super_env=lambda: None,
+        log=lambda _msg: None,
+    )
+
+
 def test_wrapup_transition_blocks_frontier_modes_until_ready(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "wrapup-block"
     game_dir = run_dir / "agent" / "game_ls20"
@@ -26,10 +71,7 @@ def test_wrapup_transition_blocks_frontier_modes_until_ready(tmp_path: Path) -> 
     )
     (game_dir / "component_coverage.json").write_text(json.dumps({"status": "fail"}, indent=2) + "\n")
     (game_dir / "current_compare.json").write_text(json.dumps({"all_match": False, "level": 1}, indent=2) + "\n")
-    (game_dir / "level_current").mkdir(parents=True, exist_ok=True)
-    (game_dir / "level_current" / "meta.json").write_text(
-        json.dumps({"level": 1, "analysis_level_pinned": True}, indent=2) + "\n"
-    )
+    _write_level_current_surface(game_dir, level=1, pinned=True)
     (game_dir / "model_status.json").write_text(
         json.dumps(
             {
@@ -44,16 +86,7 @@ def test_wrapup_transition_blocks_frontier_modes_until_ready(tmp_path: Path) -> 
         + "\n"
     )
 
-    runtime = SimpleNamespace(
-        run_dir=run_dir,
-        arc_state_dir=arc_state_dir,
-        active_game_id="ls20",
-        args=SimpleNamespace(game_id="ls20"),
-        active_agent_dir=lambda: game_dir,
-        load_state=lambda: json.loads((arc_state_dir / "state.json").read_text()),
-        refresh_dynamic_super_env=lambda: None,
-        log=lambda _msg: None,
-    )
+    runtime = _make_runtime(run_dir, arc_state_dir, game_dir)
 
     with pytest.raises(RuntimeError, match="cannot leave solved-level wrap-up"):
         harness_wrapup.certify_or_block_wrapup_transition_impl(runtime)
@@ -94,11 +127,7 @@ def test_wrapup_transition_clears_pin_and_restores_frontier_view_when_ready(tmp_
     (game_dir / "component_mismatch.json").write_text(
         json.dumps({"status": "clean"}, indent=2) + "\n"
     )
-    (game_dir / "level_current").mkdir(parents=True, exist_ok=True)
-    (game_dir / "level_current" / "meta.json").write_text(
-        json.dumps({"level": 1, "analysis_level_pinned": True}, indent=2) + "\n"
-    )
-    (game_dir / "level_current" / "initial_state.hex").write_text("0000\n")
+    _write_level_current_surface(game_dir, level=1, pinned=True, initial_rows="0000\n")
     (game_dir / "model_status.json").write_text(
         json.dumps(
             {
@@ -114,16 +143,8 @@ def test_wrapup_transition_clears_pin_and_restores_frontier_view_when_ready(tmp_
     )
 
     refreshed: list[str] = []
-    runtime = SimpleNamespace(
-        run_dir=run_dir,
-        arc_state_dir=arc_state_dir,
-        active_game_id="ls20",
-        args=SimpleNamespace(game_id="ls20"),
-        active_agent_dir=lambda: game_dir,
-        load_state=lambda: json.loads((arc_state_dir / "state.json").read_text()),
-        refresh_dynamic_super_env=lambda: refreshed.append("yes"),
-        log=lambda _msg: None,
-    )
+    runtime = _make_runtime(run_dir, arc_state_dir, game_dir)
+    runtime.refresh_dynamic_super_env = lambda: refreshed.append("yes")
 
     harness_wrapup.certify_or_block_wrapup_transition_impl(runtime)
 
@@ -169,11 +190,7 @@ def test_wrapup_transition_can_release_directly_into_theory_when_certified(tmp_p
     (game_dir / "component_mismatch.json").write_text(
         json.dumps({"status": "clean"}, indent=2) + "\n"
     )
-    (game_dir / "level_current").mkdir(parents=True, exist_ok=True)
-    (game_dir / "level_current" / "meta.json").write_text(
-        json.dumps({"level": 1, "analysis_level_pinned": True}, indent=2) + "\n"
-    )
-    (game_dir / "level_current" / "initial_state.hex").write_text("0000\n")
+    _write_level_current_surface(game_dir, level=1, pinned=True, initial_rows="0000\n")
     (game_dir / "model_status.json").write_text(
         json.dumps(
             {
@@ -189,16 +206,8 @@ def test_wrapup_transition_can_release_directly_into_theory_when_certified(tmp_p
     )
 
     refreshed: list[str] = []
-    runtime = SimpleNamespace(
-        run_dir=run_dir,
-        arc_state_dir=arc_state_dir,
-        active_game_id="ls20",
-        args=SimpleNamespace(game_id="ls20"),
-        active_agent_dir=lambda: game_dir,
-        load_state=lambda: json.loads((arc_state_dir / "state.json").read_text()),
-        refresh_dynamic_super_env=lambda: refreshed.append("yes"),
-        log=lambda _msg: None,
-    )
+    runtime = _make_runtime(run_dir, arc_state_dir, game_dir)
+    runtime.refresh_dynamic_super_env = lambda: refreshed.append("yes")
 
     harness_wrapup.certify_or_block_wrapup_transition_impl(runtime)
 
@@ -238,10 +247,7 @@ def test_wrapup_transition_blocks_when_compare_level_does_not_match_pin(tmp_path
     (game_dir / "component_mismatch.json").write_text(
         json.dumps({"status": "clean"}, indent=2) + "\n"
     )
-    (game_dir / "level_current").mkdir(parents=True, exist_ok=True)
-    (game_dir / "level_current" / "meta.json").write_text(
-        json.dumps({"level": 1, "analysis_level_pinned": True}, indent=2) + "\n"
-    )
+    _write_level_current_surface(game_dir, level=1, pinned=True)
     (game_dir / "model_status.json").write_text(
         json.dumps(
             {
@@ -256,16 +262,7 @@ def test_wrapup_transition_blocks_when_compare_level_does_not_match_pin(tmp_path
         + "\n"
     )
 
-    runtime = SimpleNamespace(
-        run_dir=run_dir,
-        arc_state_dir=arc_state_dir,
-        active_game_id="ls20",
-        args=SimpleNamespace(game_id="ls20"),
-        active_agent_dir=lambda: game_dir,
-        load_state=lambda: json.loads((arc_state_dir / "state.json").read_text()),
-        refresh_dynamic_super_env=lambda: None,
-        log=lambda _msg: None,
-    )
+    runtime = _make_runtime(run_dir, arc_state_dir, game_dir)
 
     with pytest.raises(RuntimeError, match="wrap-up surface validation failed"):
         harness_wrapup.certify_or_block_wrapup_transition_impl(runtime)
@@ -344,10 +341,7 @@ def test_wrapup_surface_validation_accepts_pinned_level_consistency(tmp_path: Pa
     (game_dir / "component_mismatch.json").write_text(
         json.dumps({"status": "mismatch"}, indent=2) + "\n"
     )
-    (game_dir / "level_current").mkdir(parents=True, exist_ok=True)
-    (game_dir / "level_current" / "meta.json").write_text(
-        json.dumps({"level": 1, "analysis_level_pinned": True}, indent=2) + "\n"
-    )
+    _write_level_current_surface(game_dir, level=1, pinned=True)
     (game_dir / "model_status.json").write_text(
         json.dumps(
             {
@@ -362,16 +356,7 @@ def test_wrapup_surface_validation_accepts_pinned_level_consistency(tmp_path: Pa
         + "\n"
     )
 
-    runtime = SimpleNamespace(
-        run_dir=run_dir,
-        arc_state_dir=arc_state_dir,
-        active_game_id="ls20",
-        args=SimpleNamespace(game_id="ls20"),
-        active_agent_dir=lambda: game_dir,
-        load_state=lambda: json.loads((arc_state_dir / "state.json").read_text()),
-        refresh_dynamic_super_env=lambda: None,
-        log=lambda _msg: None,
-    )
+    runtime = _make_runtime(run_dir, arc_state_dir, game_dir)
 
     harness_wrapup.validate_wrapup_surfaces_impl(runtime)
 
@@ -402,11 +387,7 @@ def test_wrapup_transition_requires_explicit_supervisor_certification(tmp_path: 
     (game_dir / "component_mismatch.json").write_text(
         json.dumps({"status": "clean"}, indent=2) + "\n"
     )
-    (game_dir / "level_current").mkdir(parents=True, exist_ok=True)
-    (game_dir / "level_current" / "meta.json").write_text(
-        json.dumps({"level": 1, "analysis_level_pinned": True}, indent=2) + "\n"
-    )
-    (game_dir / "level_current" / "initial_state.hex").write_text("0000\n")
+    _write_level_current_surface(game_dir, level=1, pinned=True, initial_rows="0000\n")
     (game_dir / "model_status.json").write_text(
         json.dumps(
             {
@@ -421,16 +402,7 @@ def test_wrapup_transition_requires_explicit_supervisor_certification(tmp_path: 
         + "\n"
     )
 
-    runtime = SimpleNamespace(
-        run_dir=run_dir,
-        arc_state_dir=arc_state_dir,
-        active_game_id="ls20",
-        args=SimpleNamespace(game_id="ls20"),
-        active_agent_dir=lambda: game_dir,
-        load_state=lambda: json.loads((arc_state_dir / "state.json").read_text()),
-        refresh_dynamic_super_env=lambda: None,
-        log=lambda _msg: None,
-    )
+    runtime = _make_runtime(run_dir, arc_state_dir, game_dir)
 
     with pytest.raises(RuntimeError, match="explicit supervisor certification"):
         harness_wrapup.certify_or_block_wrapup_transition_impl(runtime)

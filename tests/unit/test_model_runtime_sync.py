@@ -296,6 +296,12 @@ def test_sync_workspace_level_view_redacts_cross_level_turn_artifacts_while_pinn
     assert copied_meta["level_after"] == 1
     assert copied_meta["levels_completed_after"] == 0
     assert copied_meta["analysis_level_boundary_redacted"] is True
+    level_status = json.loads((game_dir / "level_current" / "analysis_level_status.json").read_text())
+    assert level_status["analysis_level_pinned"] is True
+    assert level_status["frontier_hidden_by_pin"] is True
+    assert level_status["next_allowed_operation"] == "finalize_pinned_level"
+    transition_status = json.loads((game_dir / "level_current" / "level_transition.json").read_text())
+    assert transition_status["analysis_level_boundary_redacted"] is True
     assert (game_dir / "level_current" / "after_state.hex").exists() is False
     assert (game_dir / "level_current" / "current_state.hex").read_text().splitlines() == ["0000", "0000"]
     assert (game_dir / "level_current" / "turn_0021" / "after_state.hex").read_text().splitlines() == [

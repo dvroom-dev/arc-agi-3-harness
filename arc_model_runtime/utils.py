@@ -11,8 +11,10 @@ import numpy as np
 from arcengine import GameAction
 
 from .visible_artifacts import (
+    ANALYSIS_LEVEL_STATUS_FILE,
     sanitize_visible_json_payload,
     sanitize_visible_level_tree,
+    visible_level_status_payload,
     visible_levels_completed_for_level,
 )
 
@@ -77,6 +79,40 @@ def update_analysis_level_pin(game_dir: Path, updates: dict) -> dict | None:
 
 def clear_analysis_level_pin(game_dir: Path) -> None:
     analysis_level_pin_path(game_dir).unlink(missing_ok=True)
+
+
+def visible_level_status_path(game_dir: Path) -> Path:
+    return game_dir / "level_current" / ANALYSIS_LEVEL_STATUS_FILE
+
+
+def load_visible_level_status(game_dir: Path) -> dict | None:
+    path = visible_level_status_path(game_dir)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def build_visible_level_status(
+    *,
+    game_dir: Path,
+    frontier_level: int,
+    visible_level: int,
+) -> dict[str, object]:
+    pin = load_analysis_level_pin(game_dir)
+    pin_phase = None
+    if isinstance(pin, dict):
+        phase = str(pin.get("phase") or "").strip()
+        pin_phase = phase or None
+    return visible_level_status_payload(
+        visible_level=int(visible_level),
+        frontier_hidden_by_pin=int(visible_level) < int(frontier_level),
+        pin_phase=pin_phase,
+        boundary_redacted=int(visible_level) < int(frontier_level),
+    )
 
 
 def effective_analysis_level(game_dir: Path, frontier_level: int | None = None) -> int | None:
@@ -266,6 +302,18 @@ def sync_workspace_level_view(game_dir: Path, *, game_id: str, frontier_level: i
                 "level": int(visible_level),
                 "analysis_level_pinned": int(visible_level) != int(frontier_level),
             },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (temp / ANALYSIS_LEVEL_STATUS_FILE).write_text(
+        json.dumps(
+            build_visible_level_status(
+                game_dir=game_dir,
+                frontier_level=int(frontier_level),
+                visible_level=int(visible_level),
+            ),
             indent=2,
         )
         + "\n",

@@ -47,6 +47,8 @@ def test_arc_level_defaults_and_fields(tmp_path: Path) -> None:
     assert payload["current_level"] == 3
     assert payload["levels_completed"] == 2
     assert payload["state"] == "NOT_FINISHED"
+    assert payload["analysis_level_status"]["analysis_level_pinned"] is False
+    assert payload["analysis_level_status"]["next_allowed_operation"] == "continue_visible_level"
 
 
 def test_arc_level_errors_without_state_dir(tmp_path: Path) -> None:
@@ -86,3 +88,6 @@ def test_arc_level_hides_frontier_level_while_analysis_pin_is_active(tmp_path: P
     assert payload["current_level"] == 2
     assert payload["levels_completed"] == 1
     assert payload["state"] == "NOT_FINISHED"
+    assert payload["analysis_level_status"]["analysis_level_pinned"] is True
+    assert payload["analysis_level_status"]["frontier_hidden_by_pin"] is True
+    assert payload["analysis_level_status"]["next_allowed_operation"] == "finalize_pinned_level"

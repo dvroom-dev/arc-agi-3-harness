@@ -8,6 +8,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
+try:
+    from arc_model_runtime.utils import build_visible_level_status
+except Exception:
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from arc_model_runtime.utils import build_visible_level_status
+
 
 def _state_path() -> Path:
     state_dir = str(os.environ.get("ARC_STATE_DIR", "")).strip()
@@ -57,10 +63,16 @@ def _extract(data: dict[str, Any]) -> dict[str, Any]:
             pinned_level = frontier_level
         if pinned_level > 0 and pinned_level < frontier_level:
             visible_level = pinned_level
+    level_status = build_visible_level_status(
+        game_dir=Path.cwd(),
+        frontier_level=int(frontier_level),
+        visible_level=int(visible_level),
+    )
     return {
         "current_level": int(visible_level),
         "levels_completed": max(0, int(visible_level) - 1),
         "state": str(data.get("state", "") or "").strip() or "UNKNOWN",
+        "analysis_level_status": level_status,
     }
 
 
