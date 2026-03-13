@@ -1,7 +1,7 @@
-import fs from "fs/promises";
-import path from "path";
 import type { ConversationBlock } from "@/lib/conversation";
-import { ctxDir, runDir } from "@/lib/paths";
+import { findConversationId } from "@/lib/agentConversationData.server";
+import { runDir } from "@/lib/paths";
+import { loadStoredConversationBranches } from "@/lib/agentConversationStore.server";
 import type { AgentConversationBranch } from "@/lib/types";
 
 export interface SessionMetadata {
@@ -11,48 +11,72 @@ export interface SessionMetadata {
   frontmatterBlock: ConversationBlock | null;
 }
 
-export async function activeSessionInfo(runId: string): Promise<SessionMetadata> {
-  const sessionFile = path.join(ctxDir(runId), "session.md");
-  try {
-    const text = await fs.readFile(sessionFile, "utf-8");
-    const frontmatterMatch = text.match(/^---\n([\s\S]*?)\n---/);
-    const frontmatterContent = frontmatterMatch?.[1]?.trim() || "";
-    return {
-      conversationId: text.match(/^conversation_id:\s*(.+)$/m)?.[1]?.trim() || null,
-      forkId: text.match(/^fork_id:\s*(.+)$/m)?.[1]?.trim() || null,
-      mode: text.match(/^mode:\s*(.+)$/m)?.[1]?.trim() || null,
-      frontmatterBlock: frontmatterContent
-        ? {
-            kind: "frontmatter",
-            content: frontmatterContent,
-            raw: frontmatterContent,
-          }
-        : null,
-    };
-  } catch {
-    return { conversationId: null, forkId: null, mode: null, frontmatterBlock: null };
-  }
+function extractFrontmatterBlock(documentText: string): ConversationBlock | null {
+  const frontmatterMatch = documentText.match(/^---\n([\s\S]*?)\n---/);
+  const frontmatterContent = frontmatterMatch?.[1]?.trim() || "";
+  if (!frontmatterContent) return null;
+  return {
+    kind: "frontmatter",
+    content: frontmatterContent,
+    raw: frontmatterContent,
+  };
 }
 
-export async function loadAgentBaseBlock(runId: string): Promise<ConversationBlock | null> {
-  const sessionFile = path.join(ctxDir(runId), "session.md");
+async function loadActiveBranchDocument(runId: string): Promise<{
+  conversationId: string;
+  forkId: string;
+  mode: string | null;
+  documentText: string;
+} | null> {
+  const conversationId = await findConversationId(runId);
+  if (!conversationId) return null;
   try {
-    const text = await fs.readFile(sessionFile, "utf-8");
-    const match = text.match(/(`{3,})chat role=system scope=agent_base\n([\s\S]*?)\n\1/);
-    if (!match) return null;
-    const content = match[2]?.trim();
-    if (!content) return null;
+    const storedBranches = await loadStoredConversationBranches(runId, conversationId);
+    const activeBranch =
+      storedBranches.find((branch) => branch.active) ??
+      storedBranches.find((branch) => branch.head) ??
+      storedBranches.at(-1) ??
+      null;
+    if (!activeBranch) return null;
     return {
-      kind: "chat",
-      role: "system",
-      header: "```chat role=system scope=agent_base",
-      meta: { role: "system", scope: "agent_base" },
-      content,
-      raw: match[0],
+      conversationId,
+      forkId: activeBranch.forkId,
+      mode: activeBranch.mode,
+      documentText: activeBranch.documentText,
     };
   } catch {
     return null;
   }
+}
+
+export async function activeSessionInfo(runId: string): Promise<SessionMetadata> {
+  const activeBranch = await loadActiveBranchDocument(runId);
+  if (!activeBranch) {
+    return { conversationId: null, forkId: null, mode: null, frontmatterBlock: null };
+  }
+  return {
+    conversationId: activeBranch.conversationId,
+    forkId: activeBranch.forkId,
+    mode: activeBranch.mode,
+    frontmatterBlock: extractFrontmatterBlock(activeBranch.documentText),
+  };
+}
+
+export async function loadAgentBaseBlock(runId: string): Promise<ConversationBlock | null> {
+  const activeBranch = await loadActiveBranchDocument(runId);
+  if (!activeBranch) return null;
+  const match = activeBranch.documentText.match(/(`{3,})chat role=system scope=agent_base\n([\s\S]*?)\n\1/);
+  if (!match) return null;
+  const content = match[2]?.trim();
+  if (!content) return null;
+  return {
+    kind: "chat",
+    role: "system",
+    header: "```chat role=system scope=agent_base",
+    meta: { role: "system", scope: "agent_base" },
+    content,
+    raw: match[0],
+  };
 }
 
 export async function loadConversationForkBranchFallback(
@@ -75,16 +99,16 @@ export async function loadConversationForkBranchFallback(
     };
     const forks = Array.isArray(payload.forks) ? payload.forks : [];
     const branches = forks
-      .map((fork) => {
+      .flatMap((fork): AgentConversationBranch[] => {
         const forkId = typeof fork.id === "string" ? fork.id : null;
-        if (!forkId) return null;
+        if (!forkId) return [];
         const mode =
           typeof fork.mode === "string" && fork.mode.trim()
             ? fork.mode.trim()
             : forkId === active.forkId
               ? active.mode
               : null;
-        return {
+        const branch = {
           key: forkId,
           mode,
           label: mode || "agent",
@@ -95,8 +119,8 @@ export async function loadConversationForkBranchFallback(
           initialUserPreview: null,
           lastAssistantPreview: null,
         } satisfies AgentConversationBranch;
-      })
-      .filter((branch): branch is AgentConversationBranch => Boolean(branch));
+        return [branch];
+      });
     if (branches.length > 0) {
       return { branches };
     }

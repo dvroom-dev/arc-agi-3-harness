@@ -1,7 +1,10 @@
 import fs from "fs/promises";
 import path from "path";
-import { parseConversationBlocks, sliceConversationBlocks } from "@/lib/conversation";
-import { agentDir, ctxDir, runDir } from "@/lib/paths";
+import { agentDir, runDir } from "@/lib/paths";
+import {
+  readSupervisorConversationDocument,
+  resolveActiveSupervisorConversation,
+} from "@/lib/supervisorConversation.server";
 
 export interface ConversationDocument {
   blocks: import("@/lib/conversation").ConversationBlock[];
@@ -12,20 +15,9 @@ export interface ConversationDocument {
   hiddenEvents: number;
 }
 
-interface ConversationHead {
-  conversationId: string;
-  documentText: string;
-}
-
 interface RawEventToolResultContent {
   content: string | null;
   source: string | null;
-}
-
-function trimTrailingBlankLines(lines: string[]) {
-  let end = lines.length;
-  while (end > 0 && lines[end - 1] === "") end -= 1;
-  return lines.slice(0, end);
 }
 
 async function exists(filePath: string) {
@@ -37,71 +29,8 @@ async function exists(filePath: string) {
   }
 }
 
-async function findConversationHead(runId: string): Promise<ConversationHead | null> {
-  const conversationsDir = path.join(runDir(runId), ".ai-supervisor", "conversations");
-  const sessionFile = path.join(ctxDir(runId), "session.md");
-  let preferredConversationId: string | null = null;
-
-  try {
-    const sessionText = await fs.readFile(sessionFile, "utf-8");
-    const match = sessionText.match(/^conversation_id:\s*(.+)$/m);
-    preferredConversationId = match?.[1]?.trim() || null;
-  } catch {
-    preferredConversationId = null;
-  }
-
-  let conversationIds: string[] = [];
-  try {
-    const entries = await fs.readdir(conversationsDir, { withFileTypes: true });
-    conversationIds = entries
-      .filter((entry) => entry.isDirectory())
-      .map((entry) => entry.name)
-      .sort();
-  } catch {
-    return null;
-  }
-
-  if (conversationIds.length === 0) return null;
-
-  const orderedIds = preferredConversationId
-    ? [preferredConversationId, ...conversationIds.filter((id) => id !== preferredConversationId)]
-    : conversationIds;
-
-  for (const conversationId of orderedIds) {
-    const conversationDir = path.join(conversationsDir, conversationId);
-    const indexPath = path.join(conversationDir, "index.json");
-    let headId = "";
-    try {
-      const indexPayload = JSON.parse(await fs.readFile(indexPath, "utf-8")) as {
-        headId?: unknown;
-      };
-      headId = typeof indexPayload.headId === "string" ? indexPayload.headId : "";
-    } catch {
-      headId = "";
-    }
-    if (!headId) continue;
-
-    const forkPath = path.join(conversationDir, "forks", `${headId}.json`);
-    try {
-      const forkPayload = JSON.parse(await fs.readFile(forkPath, "utf-8")) as {
-        documentText?: unknown;
-      };
-      if (typeof forkPayload.documentText === "string" && forkPayload.documentText.trim()) {
-        return {
-          conversationId,
-          documentText: forkPayload.documentText,
-        };
-      }
-    } catch {
-      // Try the next conversation candidate.
-    }
-  }
-
-  return null;
-}
-
 async function conversationRawEventsPath(runId: string): Promise<string | null> {
-  const head = await findConversationHead(runId);
+  const head = await resolveActiveSupervisorConversation(runId);
   if (!head) return null;
   return path.join(
     runDir(runId),
@@ -183,49 +112,7 @@ export async function readConversationDocument(
   runId: string,
   options: { hiddenEvents?: number; maxEvents?: number }
 ): Promise<ConversationDocument> {
-  const sessionFile = path.join(ctxDir(runId), "session.md");
-  try {
-    const content = await fs.readFile(sessionFile, "utf-8");
-    const lines = trimTrailingBlankLines(content.split("\n"));
-    if (lines.length > 0) {
-      const blocks = parseConversationBlocks(lines.join("\n"));
-      const windowed = sliceConversationBlocks(blocks, options);
-      return {
-        blocks: windowed.blocks,
-        source: "session.md",
-        totalLines: lines.length,
-        totalEvents: windowed.totalEvents,
-        shownEvents: windowed.shownEvents,
-        hiddenEvents: windowed.hiddenEvents,
-      };
-    }
-  } catch {
-    // Fall through to the conversation-store snapshot.
-  }
-
-  const head = await findConversationHead(runId);
-  if (head) {
-    const lines = trimTrailingBlankLines(head.documentText.split("\n"));
-    const blocks = parseConversationBlocks(lines.join("\n"));
-    const windowed = sliceConversationBlocks(blocks, options);
-    return {
-      blocks: windowed.blocks,
-      source: `${head.conversationId} snapshot`,
-      totalLines: lines.length,
-      totalEvents: windowed.totalEvents,
-      shownEvents: windowed.shownEvents,
-      hiddenEvents: windowed.hiddenEvents,
-    };
-  }
-
-  return {
-    blocks: [],
-    source: null,
-    totalLines: 0,
-    totalEvents: 0,
-    shownEvents: 0,
-    hiddenEvents: 0,
-  };
+  return readSupervisorConversationDocument(runId, options);
 }
 
 function formatRawEventLine(rawLine: string): string | null {

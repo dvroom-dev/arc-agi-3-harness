@@ -10,8 +10,10 @@ import {
   interventionBlock,
   loadInterventions,
   loadRawEvents,
-  rawEventToBlocks,
+  rawEventsToTimedBlocks,
+  type InterventionEntry,
 } from "@/lib/agentConversationEvents.server";
+import { trimSeedOverlap } from "@/lib/conversation";
 import {
   loadConversationForkBranchFallback,
   activeSessionInfo,
@@ -55,6 +57,35 @@ function sliceBlocks(
   };
 }
 
+function resolveEffectiveActiveForkId(
+  storedBranches: Array<{
+    forkId: string;
+    parentId: string | null;
+    mode: string | null;
+    active: boolean;
+    actionSummary: string | null;
+  }>,
+  activeSession: { forkId: string | null }
+): string | null {
+  const storeActiveForkId = storedBranches.find((branch) => branch.active)?.forkId ?? null;
+  if (storeActiveForkId) {
+    return storeActiveForkId;
+  }
+  if (!activeSession.forkId) return null;
+  const branchByForkId = new Map(storedBranches.map((fork) => [fork.forkId, fork]));
+  const sessionBranch = branchByForkId.get(activeSession.forkId);
+  if (!sessionBranch || sessionBranch.actionSummary !== "fork (hard)") {
+    return activeSession.forkId;
+  }
+  const childStart = storedBranches.find(
+    (candidate) =>
+      candidate.parentId === sessionBranch.forkId &&
+      candidate.mode === sessionBranch.mode &&
+      candidate.actionSummary === "supervise:start"
+  );
+  return childStart?.forkId ?? activeSession.forkId;
+}
+
 export async function listAgentConversationBranches(
   runId: string
 ): Promise<{ branches: AgentConversationBranch[] }> {
@@ -71,19 +102,7 @@ export async function listAgentConversationBranches(
   if (storedBranches.length === 0) {
     return loadConversationForkBranchFallback(runId);
   }
-  const branchByForkId = new Map(storedBranches.map((fork) => [fork.forkId, fork]));
-  const effectiveActiveForkId = (() => {
-    if (!activeSession.forkId) return null;
-    const sessionBranch = branchByForkId.get(activeSession.forkId);
-    if (!sessionBranch || sessionBranch.actionSummary !== "fork (hard)") return activeSession.forkId;
-    const childStart = storedBranches.find(
-      (candidate) =>
-        candidate.parentId === sessionBranch.forkId &&
-        candidate.mode === sessionBranch.mode &&
-        candidate.actionSummary === "supervise:start"
-    );
-    return childStart?.forkId ?? activeSession.forkId;
-  })();
+  const effectiveActiveForkId = resolveEffectiveActiveForkId(storedBranches, activeSession);
 
   const baseBranches = storedBranches.map((fork) => {
     const { eventWindow } = eventsInWindow(rawEvents, interventions, fork.createdAt, fork.nextCreatedAt);
@@ -97,6 +116,7 @@ export async function listAgentConversationBranches(
       parentId: fork.parentId,
       createdAt: fork.createdAt,
       active: fork.forkId === effectiveActiveForkId || (!effectiveActiveForkId && fork.active),
+      head: fork.head,
       actionSummary: fork.actionSummary,
       assistantTurns: activity.assistantTurns,
       toolCallCount: activity.toolCallCount,
@@ -144,6 +164,7 @@ async function readAgentBranchSkeletonDocument(
         key: fork.key,
         mode: fork.mode ?? null,
         active: fork.active,
+        head: fork.head,
         conversationId: fork.conversationId,
         forkId: fork.forkId,
         parentId: fork.parentId,
@@ -173,18 +194,26 @@ async function readAgentBranchSkeletonDocument(
         groupBranch.nextCreatedAt
       );
       eventBlocks.push(
-        ...eventWindow.flatMap((event) => rawEventToBlocks(event)),
-        ...interventionWindow.map((entry) => interventionBlock(entry))
+        ...[
+          ...rawEventsToTimedBlocks(eventWindow),
+          ...interventionWindow.map((entry) => ({
+            ts: entry.ts,
+            blocks: [interventionBlock(entry)],
+          })),
+        ]
+          .sort((a, b) => (parseTime(a.ts) ?? 0) - (parseTime(b.ts) ?? 0))
+          .flatMap((entry) => entry.blocks)
       );
     }
-    const windowed = sliceBlocks(eventBlocks, options);
+    const dedupedEventBlocks = trimSeedOverlap(seedBlocks, eventBlocks);
+    const windowed = sliceBlocks(dedupedEventBlocks, options);
     const seedEventCount = seedBlocks.filter((block) => block.kind !== "frontmatter").length;
     return {
       blocks: [...seedBlocks, ...windowed.blocks],
       source: `${branch.mode || "agent"} conversation`,
       totalLines:
         branch.documentText.split("\n").length +
-        eventBlocks.reduce((sum, block) => sum + block.content.split("\n").length, 0),
+        dedupedEventBlocks.reduce((sum, block) => sum + block.content.split("\n").length, 0),
       totalEvents: seedEventCount + windowed.totalEvents,
       shownEvents: seedEventCount + windowed.shownEvents,
       hiddenEvents: windowed.hiddenEvents,
@@ -231,17 +260,22 @@ export async function readAgentConversationDocument(
     : { eventWindow: rawEvents, interventionWindow: interventions };
 
   const combined: Array<
-    | { ts: string; type: "event"; payload: RawEventEntry }
+    | { ts: string; type: "event"; payload: ConversationBlock[] }
     | { ts: string; type: "intervention"; payload: InterventionEntry }
   > = [
-    ...eventWindow.map((payload) => ({ ts: payload.ts, type: "event" as const, payload })),
+    ...rawEventsToTimedBlocks(eventWindow).map((entry) => ({
+      ts: entry.ts,
+      type: "event" as const,
+      payload: entry.blocks,
+    })),
     ...interventionWindow.map((payload) => ({ ts: payload.ts, type: "intervention" as const, payload })),
   ].sort((a, b) => (parseTime(a.ts) ?? 0) - (parseTime(b.ts) ?? 0));
 
   const eventBlocks = combined.flatMap((entry) =>
-    entry.type === "event" ? rawEventToBlocks(entry.payload) : [interventionBlock(entry.payload)]
+    entry.type === "event" ? entry.payload : [interventionBlock(entry.payload)]
   );
-  const windowed = sliceBlocks(eventBlocks, options);
+  const dedupedEventBlocks = trimSeedOverlap(seedBlocks, eventBlocks);
+  const windowed = sliceBlocks(dedupedEventBlocks, options);
   const seedEventCount = seedBlocks.filter((block) => block.kind !== "frontmatter").length;
 
   return {
@@ -249,7 +283,7 @@ export async function readAgentConversationDocument(
     source: active?.mode ? `${active.mode} raw events` : "agent raw events",
     totalLines:
       (active?.documentText.split("\n").length ?? 0) +
-      eventBlocks.reduce((sum, block) => sum + block.content.split("\n").length, 0),
+      dedupedEventBlocks.reduce((sum, block) => sum + block.content.split("\n").length, 0),
     totalEvents: seedEventCount + windowed.totalEvents,
     shownEvents: seedEventCount + windowed.shownEvents,
     hiddenEvents: windowed.hiddenEvents,

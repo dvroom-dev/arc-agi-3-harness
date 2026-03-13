@@ -6,6 +6,7 @@ export function useAutoFollowScroll() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const autoFollowRef = useRef(true);
   const metricsRef = useRef({ scrollHeight: 0, scrollTop: 0 });
+  const preserveOffsetOnNextSyncRef = useRef(false);
 
   const syncScrollPosition = useCallback(() => {
     const container = scrollRef.current;
@@ -18,14 +19,18 @@ export function useAutoFollowScroll() {
     if (autoFollowRef.current || previous.scrollHeight === 0) {
       container.scrollTop = nextScrollHeight;
       autoFollowRef.current = true;
-    } else if (heightDelta > 0) {
+    } else if (preserveOffsetOnNextSyncRef.current && heightDelta > 0) {
       container.scrollTop = previous.scrollTop + heightDelta;
+    } else {
+      // Detached from tail: preserve the current viewport when new items append below.
+      container.scrollTop = previous.scrollTop;
     }
 
     metricsRef.current = {
       scrollHeight: container.scrollHeight,
       scrollTop: container.scrollTop,
     };
+    preserveOffsetOnNextSyncRef.current = false;
   }, []);
 
   const handleScroll = useCallback(() => {
@@ -41,5 +46,16 @@ export function useAutoFollowScroll() {
     };
   }, []);
 
-  return { scrollRef, handleScroll, syncScrollPosition };
+  const prepareForPrepend = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    metricsRef.current = {
+      scrollHeight: container.scrollHeight,
+      scrollTop: container.scrollTop,
+    };
+    preserveOffsetOnNextSyncRef.current = true;
+  }, []);
+
+  return { scrollRef, handleScroll, syncScrollPosition, prepareForPrepend };
 }

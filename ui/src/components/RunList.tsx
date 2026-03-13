@@ -52,6 +52,7 @@ export function RunList({
 }: RunListProps) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [filter, setFilter] = useState("");
+  const [loadingImportId, setLoadingImportId] = useState<string | null>(null);
 
   useEffect(() => {
     const load = () =>
@@ -85,7 +86,6 @@ export function RunList({
         {filtered.map((run) => (
           <div
             key={run.id}
-            title={run.runParamsTooltip}
             className={`border-b border-zinc-800/50 transition-colors ${
               selectedRunId === run.id ? "bg-zinc-800 border-l-2 border-l-blue-500" : "hover:bg-zinc-800/50"
             }`}
@@ -116,17 +116,28 @@ export function RunList({
               </button>
               <button
                 type="button"
-                onClick={(event) => {
+                onClick={async (event) => {
                   event.stopPropagation();
-                  if (run.runParams) {
-                    onImportParams(run.runParams.params);
+                  if (!run.canImportParams || loadingImportId) return;
+                  setLoadingImportId(run.id);
+                  try {
+                    const response = await fetch(`/api/runs/${run.id}/params`);
+                    const payload = await response.json();
+                    if (!response.ok || !payload.runParams) {
+                      throw new Error(payload.error || "No parameters available");
+                    }
+                    onImportParams(payload.runParams.params);
+                  } catch (error) {
+                    console.error(error);
+                  } finally {
+                    setLoadingImportId(null);
                   }
                 }}
-                disabled={!run.runParams}
-                title={run.runParams ? `Import parameters from ${run.id}\n${run.runParamsTooltip}` : "No parameters available"}
+                disabled={!run.canImportParams || loadingImportId !== null}
+                title={run.canImportParams ? `Import parameters from ${run.id}` : "No parameters available"}
                 className="shrink-0 rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-400 transition-colors hover:border-zinc-500 hover:text-zinc-200 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
               >
-                Use
+                {loadingImportId === run.id ? "..." : "Use"}
               </button>
             </div>
           </div>

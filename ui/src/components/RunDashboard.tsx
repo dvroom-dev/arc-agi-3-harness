@@ -9,6 +9,7 @@ import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
 import { HistoryTable } from "./HistoryTable";
 import { ScoreView } from "./ScoreView";
+import { useStopRun } from "@/lib/runActivityHooks";
 
 interface RunDashboardProps {
   runId: string;
@@ -28,35 +29,7 @@ const TABS: { id: Tab; label: string }[] = [
 export function RunDashboard({ runId, onRunStopped }: RunDashboardProps) {
   const [activeTab, setActiveTab] = useState<Tab>("timeline");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [stopping, setStopping] = useState(false);
-  const [stopMessage, setStopMessage] = useState<string | null>(null);
-
-  async function handleStopRun() {
-    setStopping(true);
-    setStopMessage(null);
-    try {
-      const response = await fetch(`/api/runs/${runId}/stop`, {
-        method: "POST",
-      });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error || "Failed to stop run");
-      }
-
-      if (payload.status === "not-running") {
-        setStopMessage("Run is not active.");
-      } else if (payload.status === "signal-sent") {
-        setStopMessage("Stop signal sent. Waiting for process exit.");
-      } else {
-        setStopMessage("Run stopped.");
-      }
-      onRunStopped?.();
-    } catch (error) {
-      setStopMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setStopping(false);
-    }
-  }
+  const { stopping, stopMessage, stopRun } = useStopRun(runId, onRunStopped);
 
   return (
     <div className="flex h-full min-h-0 min-w-0">
@@ -77,7 +50,7 @@ export function RunDashboard({ runId, onRunStopped }: RunDashboardProps) {
             </div>
             <button
               type="button"
-              onClick={handleStopRun}
+              onClick={stopRun}
               disabled={stopping}
               className="shrink-0 rounded border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs font-medium text-red-200 transition-colors hover:border-red-700 hover:bg-red-950/70 disabled:cursor-wait disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-500"
             >

@@ -113,7 +113,7 @@ export function ConversationView({
       source === "agent"
         ? `/api/runs/${runId}/conversation/agent`
         : `/api/runs/${runId}/conversation`;
-    if (source === "agent" && branchKey) {
+    if (branchKey) {
       params.set("branchKey", branchKey);
     }
     return `${basePath}?${params.toString()}`;
@@ -152,7 +152,7 @@ export function ConversationView({
     hiddenEvents: 0,
   }, handleConversationData);
 
-  const { scrollRef, handleScroll, syncScrollPosition } = useAutoFollowScroll();
+  const { scrollRef, handleScroll, syncScrollPosition, prepareForPrepend } = useAutoFollowScroll();
 
   useLayoutEffect(() => {
     syncScrollPosition();
@@ -178,15 +178,16 @@ export function ConversationView({
         <div className="flex items-center gap-2 shrink-0">
           <button
             type="button"
-            onClick={() =>
+            onClick={() => {
+              prepareForPrepend();
               setWindowState((current) => ({
                 viewKey,
                 hiddenEvents: Math.max(
                   0,
                   ((current.viewKey === viewKey ? current.hiddenEvents : null) ?? 0) - loadEarlierCount
                 ),
-              }))
-            }
+              }));
+            }}
             disabled={showingAll}
             className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-300 disabled:border-zinc-800 disabled:text-zinc-600"
           >
@@ -195,7 +196,10 @@ export function ConversationView({
           {!showingAll ? (
             <button
               type="button"
-              onClick={() => setWindowState({ viewKey, hiddenEvents: 0 })}
+              onClick={() => {
+                prepareForPrepend();
+                setWindowState({ viewKey, hiddenEvents: 0 });
+              }}
               className="rounded-full border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-300"
             >
               {`Load all ${missingEvents}`}

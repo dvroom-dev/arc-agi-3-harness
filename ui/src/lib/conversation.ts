@@ -132,6 +132,38 @@ export function countConversationEvents(blocks: ConversationBlock[]) {
   return blocks.filter((block) => block.kind !== "frontmatter").length;
 }
 
+function blockIdentity(block: ConversationBlock) {
+  return JSON.stringify([
+    block.kind,
+    block.role ?? "",
+    block.title ?? "",
+    block.content,
+  ]);
+}
+
+export function trimSeedOverlap(
+  seedBlocks: ConversationBlock[],
+  appendedBlocks: ConversationBlock[]
+) {
+  const seedEvents = seedBlocks.filter((block) => block.kind !== "frontmatter");
+  const maxOverlap = Math.min(seedEvents.length, appendedBlocks.length);
+  let overlap = 0;
+
+  for (let size = maxOverlap; size > 0; size -= 1) {
+    const seedSlice = seedEvents.slice(-size);
+    const appendedSlice = appendedBlocks.slice(0, size);
+    const matches = seedSlice.every(
+      (block, index) => blockIdentity(block) === blockIdentity(appendedSlice[index]!)
+    );
+    if (matches) {
+      overlap = size;
+      break;
+    }
+  }
+
+  return appendedBlocks.slice(overlap);
+}
+
 export function sliceConversationBlocks(
   blocks: ConversationBlock[],
   options: { hiddenEvents?: number; maxEvents?: number }

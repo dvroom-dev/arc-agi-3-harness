@@ -11,8 +11,7 @@ import { HistoryTable } from "./HistoryTable";
 import { ConversationView } from "./ConversationView";
 import { SuperTimeline } from "./SuperTimeline";
 import { LogStream } from "./LogStream";
-import { usePolling } from "@/lib/hooks";
-import type { AgentConversationBranch } from "@/lib/types";
+import { useAgentBranchSelection, useRunActivitySummary, useStopRun } from "@/lib/runActivityHooks";
 
 interface MobileRunDashboardProps {
   runId: string;
@@ -52,48 +51,13 @@ export function MobileRunDashboard({
 }: MobileRunDashboardProps) {
   const [activeTab, setActiveTab] = useState<MobileTab>("game");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
-  const [stopping, setStopping] = useState(false);
-  const [stopMessage, setStopMessage] = useState<string | null>(null);
-  const [requestedAgentBranchKey, setRequestedAgentBranchKey] = useState<string | null>(null);
-  const { data: agentBranches } = usePolling<{ branches: AgentConversationBranch[] }>(
-    `/api/runs/${runId}/conversation/agent/branches`,
-    5000,
-    { branches: [] }
-  );
-
-  const activeAgentBranchKey = (() => {
-    const branches = agentBranches.branches;
-    if (branches.length === 0) return null;
-    if (requestedAgentBranchKey && branches.some((branch) => branch.key === requestedAgentBranchKey)) {
-      return requestedAgentBranchKey;
-    }
-    const activeBranch = branches.find((branch) => branch.active);
-    return activeBranch?.key ?? branches.at(-1)?.key ?? null;
-  })();
-
-  async function handleStopRun() {
-    setStopping(true);
-    setStopMessage(null);
-    try {
-      const response = await fetch(`/api/runs/${runId}/stop`, { method: "POST" });
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error || "Failed to stop run");
-      }
-      if (payload.status === "not-running") {
-        setStopMessage("Run is not active.");
-      } else if (payload.status === "signal-sent") {
-        setStopMessage("Stop signal sent.");
-      } else {
-        setStopMessage("Run stopped.");
-      }
-      onRunStopped?.();
-    } catch (error) {
-      setStopMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setStopping(false);
-    }
-  }
+  const { data: activity } = useRunActivitySummary(runId);
+  const {
+    activeBranchKey: activeAgentBranchKey,
+    setRequestedBranchKey: setRequestedAgentBranchKey,
+  } = useAgentBranchSelection(activity.branches);
+  const { stopping, stopMessage, stopRun } = useStopRun(runId, onRunStopped);
+  const activeHeadBranch = activity.branches.find((branch) => branch.active) ?? null;
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-zinc-950">
@@ -117,7 +81,7 @@ export function MobileRunDashboard({
           </div>
           <button
             type="button"
-            onClick={handleStopRun}
+            onClick={stopRun}
             disabled={stopping}
             className="shrink-0 rounded border border-red-800 bg-red-950/40 px-3 py-1.5 text-xs font-medium text-red-200 disabled:cursor-wait disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-500"
           >
@@ -140,15 +104,33 @@ export function MobileRunDashboard({
                   : "border-zinc-800 bg-zinc-900 text-zinc-400"
               }`}
             >
-              {tab.label}
+              <span className="flex items-center gap-2">
+                <span>{tab.label}</span>
+                {tab.id === "agent" && activeHeadBranch ? (
+                  <span className="rounded-full border border-emerald-800 bg-emerald-950/60 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-300">
+                    Head: {activeHeadBranch.label}
+                  </span>
+                ) : null}
+                {tab.id === "supervisor" ? (
+                  <span
+                    className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${
+                      activity.supervisor.active
+                        ? "border-sky-800 bg-sky-950/60 text-sky-300"
+                        : "border-zinc-700 bg-zinc-900 text-zinc-400"
+                    }`}
+                  >
+                    {activity.supervisor.active ? "Live" : "Idle"}
+                  </span>
+                ) : null}
+              </span>
             </button>
           ))}
           </div>
         </div>
-        {activeTab === "agent" && agentBranches.branches.length > 0 ? (
+        {activeTab === "agent" && activity.branches.length > 0 ? (
           <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain border-t border-zinc-900 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden touch-pan-x">
             <div className="flex w-max min-w-full gap-2 px-3 py-2">
-              {agentBranches.branches.map((branch) => (
+              {activity.branches.map((branch) => (
                 <button
                   key={branch.key}
                   type="button"
@@ -159,7 +141,14 @@ export function MobileRunDashboard({
                       : "border-zinc-800 bg-zinc-900 text-zinc-400"
                   }`}
                 >
-                  {branch.label}
+                  <span className="flex items-center gap-2">
+                    <span>{branch.label}</span>
+                    {branch.active ? (
+                      <span className="rounded-full border border-emerald-700/70 bg-emerald-950/80 px-1.5 py-0.5 text-[9px] font-semibold text-emerald-300">
+                        Head
+                      </span>
+                    ) : null}
+                  </span>
                 </button>
               ))}
             </div>
@@ -198,7 +187,9 @@ export function MobileRunDashboard({
         {activeTab === "agent" ? (
           <ConversationView runId={runId} source="agent" branchKey={activeAgentBranchKey} />
         ) : null}
-        {activeTab === "supervisor" ? <ConversationView runId={runId} source="supervisor" /> : null}
+        {activeTab === "supervisor" ? (
+          <ConversationView runId={runId} source="supervisor" />
+        ) : null}
         {activeTab === "super" ? <SuperTimeline runId={runId} /> : null}
         {activeTab === "logs" ? <LogStream runId={runId} /> : null}
       </div>

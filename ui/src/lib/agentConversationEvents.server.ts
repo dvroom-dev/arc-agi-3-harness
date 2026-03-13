@@ -101,11 +101,15 @@ export async function loadInterventions(
     };
     if (!Array.isArray(payload.forks)) return [];
     return payload.forks
-      .map((fork) => {
+      .flatMap((fork): InterventionEntry[] => {
         const actionSummary = typeof fork.actionSummary === "string" ? fork.actionSummary : null;
-        if (actionSummary !== "fork (hard)" && actionSummary !== "fork (soft)") return null;
+        if (
+          actionSummary !== "fork (hard)"
+          && actionSummary !== "fork (soft)"
+          && !actionSummary.startsWith("resume_mode_head")
+        ) return [];
         const ts = typeof fork.createdAt === "string" ? fork.createdAt : null;
-        if (!ts) return null;
+        if (!ts) return [];
         const reason =
           Array.isArray(fork.actions) &&
           fork.actions[0] &&
@@ -113,16 +117,15 @@ export async function loadInterventions(
           typeof (fork.actions[0] as { reasoning?: unknown }).reasoning === "string"
             ? (fork.actions[0] as { reasoning: string }).reasoning
             : null;
-        return {
+        return [{
           ts,
           actionSummary,
           forkSummary: typeof fork.forkSummary === "string" ? fork.forkSummary : null,
           reason,
           nextMode:
             typeof fork.id === "string" ? childModeByParentId.get(fork.id) ?? null : null,
-        } satisfies InterventionEntry;
+        } satisfies InterventionEntry];
       })
-      .filter((entry): entry is InterventionEntry => Boolean(entry))
       .sort((a, b) => (parseTime(a.ts) ?? 0) - (parseTime(b.ts) ?? 0));
   } catch {
     return [];
@@ -152,6 +155,28 @@ function contentText(content: unknown): string {
 
 function toolBlockContent(summary: string, status: string, body: string) {
   return [`summary: ${summary}`, `status: ${status}`, "", body.trim()].join("\n").trim();
+}
+
+function assistantEventText(event: RawEventEntry): string | null {
+  const message =
+    event.raw.message && typeof event.raw.message === "object"
+      ? (event.raw.message as { content?: unknown })
+      : null;
+  const content = message?.content;
+
+  if (event.raw.type === "assistant" || event.raw.type === "assistant_message") {
+    const text =
+      (typeof event.raw.text === "string" ? event.raw.text.trim() : "") ||
+      contentText(content);
+    return text || null;
+  }
+
+  if (event.raw.type === "result") {
+    const result = typeof event.raw.result === "string" ? event.raw.result.trim() : "";
+    return result || null;
+  }
+
+  return null;
 }
 
 export function rawEventToBlocks(event: RawEventEntry): ConversationBlock[] {
@@ -322,6 +347,49 @@ export function rawEventToBlocks(event: RawEventEntry): ConversationBlock[] {
   return blocks;
 }
 
+export function rawEventsToTimedBlocks(events: RawEventEntry[]) {
+  const timedBlocks: Array<{ ts: string; blocks: ConversationBlock[] }> = [];
+  let lastAssistantEvent:
+    | {
+        sourceType: "assistant" | "assistant_message" | "result";
+        text: string;
+      }
+    | null = null;
+
+  for (const event of events) {
+    const sourceType =
+      event.raw.type === "assistant" ||
+      event.raw.type === "assistant_message" ||
+      event.raw.type === "result"
+        ? event.raw.type
+        : null;
+    const assistantText = assistantEventText(event);
+    const duplicateTerminalResult =
+      sourceType === "result" &&
+      assistantText &&
+      lastAssistantEvent &&
+      lastAssistantEvent.text === assistantText &&
+      (lastAssistantEvent.sourceType === "assistant" ||
+        lastAssistantEvent.sourceType === "assistant_message");
+
+    if (!duplicateTerminalResult) {
+      const blocks = rawEventToBlocks(event);
+      if (blocks.length > 0) {
+        timedBlocks.push({ ts: event.ts, blocks });
+      }
+    }
+
+    if (sourceType && assistantText) {
+      lastAssistantEvent = {
+        sourceType,
+        text: assistantText,
+      };
+    }
+  }
+
+  return timedBlocks;
+}
+
 export function interventionBlock(entry: InterventionEntry): ConversationBlock {
   const actionText = entry.nextMode
     ? `switch_mode to ${entry.nextMode}`
@@ -393,13 +461,16 @@ export function eventsInWindow(
 ) {
   const start = parseTime(startAt);
   const end = parseTime(endAt);
+  if (start === null) {
+    return { eventWindow: [], interventionWindow: [] };
+  }
   const eventWindow = rawEvents.filter((event) => {
     const ts = parseTime(event.ts);
-    return ts !== null && ts >= start && (endAt === null || ts < end);
+    return ts !== null && ts >= start && (end === null || ts < end);
   });
   const interventionWindow = interventions.filter((entry) => {
     const ts = parseTime(entry.ts);
-    return ts !== null && ts >= start && (endAt === null || ts < end);
+    return ts !== null && ts >= start && (end === null || ts < end);
   });
   return { eventWindow, interventionWindow };
 }

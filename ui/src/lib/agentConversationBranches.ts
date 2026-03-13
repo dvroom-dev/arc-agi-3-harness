@@ -4,6 +4,7 @@ export interface BranchVisibilityCandidate {
   key?: string;
   mode: string | null;
   active: boolean;
+  head?: boolean;
   conversationId: string;
   forkId: string;
   parentId?: string | null;
@@ -30,7 +31,7 @@ export function filterVisibleAgentBranches<T extends BranchVisibilityCandidate>(
 ): T[] {
   return branches.filter((branch) => {
     const actionSummary = branch.actionSummary ?? null;
-    return actionSummary === "supervise:start" || branch.active;
+    return actionSummary === "supervise:start" || branch.active || Boolean(branch.head);
   });
 }
 

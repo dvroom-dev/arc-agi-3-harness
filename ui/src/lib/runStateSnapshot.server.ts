@@ -24,9 +24,24 @@ async function readJsonFile(filePath: string): Promise<Record<string, unknown> |
 }
 
 export async function readRunStateSnapshot(runId: string): Promise<StatePayload | null> {
+  return readRunStateSnapshotWithOptions(runId, { includeHistoryCounts: true });
+}
+
+export async function readRunStateListSnapshot(runId: string): Promise<StatePayload | null> {
+  return readRunStateSnapshotWithOptions(runId, { includeHistoryCounts: false });
+}
+
+async function readRunStateSnapshotWithOptions(
+  runId: string,
+  options: { includeHistoryCounts: boolean }
+): Promise<StatePayload | null> {
   const arcDir = arcStateDir(runId);
   const state = await readJsonFile(path.join(arcDir, "state.json"));
   if (!state) return null;
+
+  if (!options.includeHistoryCounts) {
+    return state;
+  }
 
   const history = await readJsonFile(path.join(arcDir, "tool-engine-history.json"));
   const events = Array.isArray(history?.events) ? (history.events as HistoryEventRecord[]) : [];

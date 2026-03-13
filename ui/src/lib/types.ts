@@ -1,4 +1,4 @@
-import type { RunLaunchParams, StoredRunParams } from "@/lib/runParams";
+import type { RunLaunchParams } from "@/lib/runParams";
 
 // --- Run list ---
 export interface RunSummary {
@@ -10,9 +10,8 @@ export interface RunSummary {
   totalLevels: number;
   totalSteps: number;
   hasLog: boolean;
+  canImportParams: boolean;
   modifiedAt: number; // unix ms
-  runParams: StoredRunParams | null;
-  runParamsTooltip: string;
 }
 
 // --- Game state (state.json) ---
@@ -253,6 +252,45 @@ export interface AgentConversationBranch {
   initialUserPreview: string | null;
   lastAssistantPreview: string | null;
   memberForkIds?: string[];
+}
+
+export type LogEntrySeverity = "error" | "warning" | "success" | "info";
+
+export interface LogFeedEntry {
+  id: string;
+  source: "harness" | "super_raw";
+  severity: LogEntrySeverity;
+  label: string;
+  text: string;
+}
+
+export interface LogFeedStream {
+  id: "harness" | "super_raw";
+  title: string;
+  file: string | null;
+  totalLines?: number;
+  entries: LogFeedEntry[];
+}
+
+export interface LogFeedPayload {
+  streams: LogFeedStream[];
+  errorCount: number;
+  warningCount: number;
+  error: string | null;
+}
+
+export interface RunActivitySummary {
+  branches: AgentConversationBranch[];
+  branchesError: string | null;
+  supervisor: {
+    active: boolean;
+  };
+  logs: {
+    errorCount: number;
+    warningCount: number;
+    harnessFile: string | null;
+    rawEventFile: string | null;
+  };
 }
 
 export type { RunLaunchParams, StoredRunParams };

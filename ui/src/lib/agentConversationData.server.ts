@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import { ctxDir, runDir } from "@/lib/paths";
+import { runDir } from "@/lib/paths";
 
 export interface RunHistoryForkSummaryFile {
   key?: string;
@@ -16,14 +16,47 @@ export interface RunHistoryForkSummaryFile {
   toolResultCount?: number;
 }
 
-export async function preferredConversationId(runId: string): Promise<string | null> {
-  const sessionFile = path.join(ctxDir(runId), "session.md");
+async function latestConversationIdFromRunHistory(runId: string): Promise<string | null> {
+  const indexPath = path.join(
+    runDir(runId),
+    ".ai-supervisor",
+    "supervisor",
+    "run_history",
+    "index.json"
+  );
   try {
-    const text = await fs.readFile(sessionFile, "utf-8");
-    return text.match(/^conversation_id:\s*(.+)$/m)?.[1]?.trim() || null;
+    const payload = JSON.parse(await fs.readFile(indexPath, "utf-8")) as {
+      conversations?: Array<{
+        conversationId?: unknown;
+        lastForkAt?: unknown;
+        firstForkAt?: unknown;
+      }>;
+    };
+    const ranked = (payload.conversations ?? [])
+      .map((entry) => {
+        const conversationId =
+          typeof entry?.conversationId === "string" && entry.conversationId.trim()
+            ? entry.conversationId.trim()
+            : null;
+        const ts = Math.max(
+          Date.parse(typeof entry?.lastForkAt === "string" ? entry.lastForkAt : ""),
+          Date.parse(typeof entry?.firstForkAt === "string" ? entry.firstForkAt : "")
+        );
+        return {
+          conversationId,
+          sortKey: Number.isFinite(ts) ? ts : 0,
+        };
+      })
+      .filter((entry): entry is { conversationId: string; sortKey: number } => Boolean(entry.conversationId))
+      .sort((a, b) => b.sortKey - a.sortKey || a.conversationId.localeCompare(b.conversationId));
+    return ranked[0]?.conversationId ?? null;
   } catch {
     return null;
   }
+}
+
+export async function preferredConversationId(runId: string): Promise<string | null> {
+  return latestConversationIdFromRunHistory(runId);
 }
 
 export async function findConversationId(runId: string): Promise<string | null> {

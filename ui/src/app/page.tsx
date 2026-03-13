@@ -12,10 +12,25 @@ import {
 } from "@/lib/runParams";
 import type { RunLaunchParams } from "@/lib/types";
 
+function useIsDesktop() {
+  const [isDesktop, setIsDesktop] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 768px)");
+    const update = () => setIsDesktop(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+
+  return isDesktop;
+}
+
 export default function Home() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [launchParams, setLaunchParams] = useState<RunLaunchParams | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
+  const isDesktop = useIsDesktop();
 
   useEffect(() => {
     fetch("/api/launcher")
@@ -24,47 +39,57 @@ export default function Home() {
       .catch(() => setLaunchParams(DEFAULT_RUN_LAUNCH_PARAMS));
   }, []);
 
-  return (
-    <div className="h-screen overflow-hidden bg-zinc-950">
-      <div className="flex h-full overflow-hidden md:hidden">
-        {selectedRunId ? (
-          <MobileRunDashboard
-            key={`mobile:${selectedRunId}`}
-            runId={selectedRunId}
-            onBack={() => setSelectedRunId(null)}
-            onRunStopped={() => setRefreshToken((value) => value + 1)}
-          />
-        ) : (
-          <div className="flex h-full w-full flex-col">
-            <div className="border-b border-zinc-800 px-3 py-3">
-              <h1 className="text-sm font-bold tracking-wide text-zinc-300">
-                ARC-AGI Harness
-              </h1>
-              <p className="text-xs text-zinc-600">Run Monitor</p>
-              <RunLauncher
-                params={launchParams}
-                onChange={setLaunchParams}
-                onStarted={(runIds) => {
-                  setRefreshToken((value) => value + 1);
-                  if (runIds[0]) {
-                    setSelectedRunId(runIds[0]);
-                  }
-                }}
-              />
-            </div>
-            <div className="min-h-0 flex-1">
-              <RunList
-                selectedRunId={selectedRunId}
-                onSelectRun={setSelectedRunId}
-                onImportParams={(params) => setLaunchParams(prepareImportedRunLaunchParams(params))}
-                refreshToken={refreshToken}
-              />
-            </div>
-          </div>
-        )}
-      </div>
+  if (isDesktop === null) {
+    return <div className="h-dvh overflow-hidden bg-zinc-950" />;
+  }
 
-      <div className="hidden h-full overflow-hidden md:flex">
+  if (!isDesktop) {
+    return (
+      <div className="h-dvh overflow-hidden bg-zinc-950 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)]">
+        <div className="flex h-full overflow-hidden">
+          {selectedRunId ? (
+            <MobileRunDashboard
+              key={`mobile:${selectedRunId}`}
+              runId={selectedRunId}
+              onBack={() => setSelectedRunId(null)}
+              onRunStopped={() => setRefreshToken((value) => value + 1)}
+            />
+          ) : (
+            <div className="flex h-full w-full flex-col">
+              <div className="border-b border-zinc-800 px-3 py-3">
+                <h1 className="text-sm font-bold tracking-wide text-zinc-300">
+                  ARC-AGI Harness
+                </h1>
+                <p className="text-xs text-zinc-600">Run Monitor</p>
+                <RunLauncher
+                  params={launchParams}
+                  onChange={setLaunchParams}
+                  onStarted={(runIds) => {
+                    setRefreshToken((value) => value + 1);
+                    if (runIds[0]) {
+                      setSelectedRunId(runIds[0]);
+                    }
+                  }}
+                />
+              </div>
+              <div className="min-h-0 flex-1">
+                <RunList
+                  selectedRunId={selectedRunId}
+                  onSelectRun={setSelectedRunId}
+                  onImportParams={(params) => setLaunchParams(prepareImportedRunLaunchParams(params))}
+                  refreshToken={refreshToken}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-dvh overflow-hidden bg-zinc-950">
+      <div className="flex h-full overflow-hidden">
         <div className="flex w-64 shrink-0 flex-col border-r border-zinc-800 bg-zinc-950">
           <div className="border-b border-zinc-800 px-3 py-2">
             <h1 className="text-sm font-bold text-zinc-300 tracking-wide">

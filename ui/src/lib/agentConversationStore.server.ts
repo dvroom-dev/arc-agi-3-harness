@@ -16,9 +16,11 @@ interface ConversationIndexFork {
   id?: string;
   parentId?: string | null;
   createdAt?: string;
+  actionSummary?: string | null;
 }
 
 interface ConversationIndexFile {
+  headId?: string;
   headIds?: string[];
   forks?: ConversationIndexFork[];
 }
@@ -39,6 +41,7 @@ export interface StoredConversationBranch {
   createdAt: string;
   mode: string | null;
   active: boolean;
+  head: boolean;
   actionSummary: string | null;
   documentText: string;
   initialUserPreview: string | null;
@@ -167,8 +170,17 @@ export async function loadStoredConversationBranches(
       typeof fork.id === "string" && typeof fork.createdAt === "string"
     )
     .sort((a, b) => parseTime(a.createdAt) - parseTime(b.createdAt));
+  const headForkIds = new Set(
+    Array.isArray(index.headIds)
+      ? index.headIds.filter((forkId): forkId is string => typeof forkId === "string")
+      : []
+  );
   const activeForkId =
-    Array.isArray(index.headIds) && typeof index.headIds[0] === "string" ? index.headIds[0] : null;
+    typeof index.headId === "string"
+      ? index.headId
+      : Array.isArray(index.headIds) && typeof index.headIds[0] === "string"
+        ? index.headIds[0]
+        : null;
 
   return forks.map((fork, idx) => {
     const documentText = reconstructForkDocument(forkMap, fork.id, memo);
@@ -180,9 +192,10 @@ export async function loadStoredConversationBranches(
       createdAt: fork.createdAt,
       mode: frontmatterValue(documentText, "mode"),
       active: fork.id === activeForkId,
+      head: headForkIds.has(fork.id),
       actionSummary:
-        typeof forkMap.get(fork.id)?.actionSummary === "string"
-          ? forkMap.get(fork.id)?.actionSummary ?? null
+        typeof fork.actionSummary === "string"
+          ? fork.actionSummary ?? null
           : null,
       documentText,
       initialUserPreview: firstUserPreview(documentText),

@@ -292,6 +292,15 @@ export async function readStoredRunParams(runId: string): Promise<StoredRunParam
   return inferParamsForRun(runId);
 }
 
+export async function readRecordedRunParams(runId: string): Promise<StoredRunParams | null> {
+  const stored = await readJsonFile<StoredRunParams>(path.join(runDir(runId), RUN_PARAMS_FILENAME));
+  if (!stored) return null;
+  return {
+    ...stored,
+    params: normalizeRunLaunchParams(stored.params),
+  };
+}
+
 async function writeStoredRunParams(record: StoredRunParams) {
   await writeJsonFile(path.join(runDir(record.runId), RUN_PARAMS_FILENAME), record);
 }
