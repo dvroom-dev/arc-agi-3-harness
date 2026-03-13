@@ -713,6 +713,7 @@ modes:
           write:
             allow:
               - theory.md
+              - components.py
               - model_lib.py
               - play.py
               - play_lib.py
@@ -734,6 +735,7 @@ modes:
           write:
             allow:
               - theory.md
+              - components.py
               - model_lib.py
               - play.py
               - play_lib.py
@@ -1043,7 +1045,7 @@ modes:
 mode_state_machine:
   initial_mode: explore_and_solve
   transitions:
-    theory: [explore_and_solve, code_model]
+    theory: [explore_and_solve, code_model, recover]
     explore_and_solve: [theory, code_model, recover]
     code_model: [theory, solve_model, recover]
     solve_model: [code_model, theory, recover]
