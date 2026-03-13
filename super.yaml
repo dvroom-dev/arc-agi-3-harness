@@ -92,11 +92,14 @@ prompt_parts:
         - `--reason "<sentence>"`: one-sentence justification
         - `--user-message "<text>"` (optional): concise handoff text for the next mode
 
-        Final wrap-up release flags:
-        - `--wrapup-certified`
-        - `--wrapup-level <level>`
+        Generic mode payload flags:
+        - `--mode-payload <key=value>` (repeatable): attach transition metadata to the next mode
 
-        Use the wrap-up flags only on the final switch out of pinned solved-level wrap-up into a non-`theory`, non-`code_model` mode after the supervisor has explicitly certified release. Do not include them on theory <-> code_model handoffs inside wrap-up.
+        For final solved-level wrap-up release, use:
+        - `--mode-payload wrapup_certified=true`
+        - `--mode-payload wrapup_level=<level>`
+
+        Use those wrap-up payload entries only on the final supervisor-certified release out of pinned solved-level wrap-up. Do not include them on theory <-> code_model handoffs inside wrap-up.
 
         Example:
         ```bash
@@ -125,7 +128,7 @@ supervisor:
       - "When model bugs are found outside `code_model`, route to `code_model` with explicit fix targets only if the active level is later than level 1 or the run is already inside solved-level wrap-up."
       - "Do not allow `solve_model` progression while unresolved model-file bugs are known."
       - "Prefer continue unless there is a clear, evidence-backed correction to make."
-      - "When switching to theory or explore_and_solve, prefer resume_mode_head over fork_new_conversation so cross-mode context is preserved. Only fork a new theory/explore_and_solve conversation after a game-state discontinuity (reset_level, level_complete, game_complete, game_over)."
+      - "When switching to theory or explore_and_solve, prefer resume_mode_head over fork_new_conversation so cross-mode context is preserved. Level completion alone is not a reason to fork a fresh agent conversation; only fork after a real discontinuity such as reset_level, game_complete, or game_over, or when a fresh start is explicitly justified."
       - "When choosing `resume_mode_head` or `fork_new_conversation`, always include a concrete handoff message: what was learned, why the mode is changing, and the exact next action or verification target."
       - "Any handoff into `explore_and_solve` must include exactly one target class: either (a) one concrete feature target to probe, (b) one concrete completion theory to test, or (c) one bounded multi-action route that directly tests a single completion theory or reaches one concrete trigger."
       - "If current mode is `theory`, `current_compare.md` is clean, and `theory.md` already contains exactly one concrete `# Explore Plan` target with explicit actions or route plus a stop condition, do not allow more theory churn. Route immediately to `explore_and_solve` via `resume_mode_head` when allowed."
@@ -150,7 +153,7 @@ supervisor:
       - "When a solved-level compare pin is active, keep all visible state, compare work, and model work targeted to the pinned solved level until the supervisor explicitly certifies wrap-up complete."
       - "While a solved-level compare pin is active, only `theory` and `code_model` are valid next modes. Do not route to `explore_and_solve` or `solve_model` until the supervisor certifies wrap-up complete."
       - "Coverage helpers and compare helpers provide evidence only; they do not certify solved-level wrap-up on their own."
-      - "Wrap-up certification is explicit, not implied. When leaving a pinned solved-level wrap-up, include `--wrapup-certified --wrapup-level <pinned level>` on the `switch_mode` CLI call."
+      - "Wrap-up certification is explicit, not implied. When releasing a pinned solved-level wrap-up, include `--mode-payload wrapup_certified=true --mode-payload wrapup_level=<pinned level>` on the `switch_mode` CLI call. The released frontier mode may still be `theory` if that is the best place to start the next level."
   tool_interception:
     rules:
       - name: idle-keepalive

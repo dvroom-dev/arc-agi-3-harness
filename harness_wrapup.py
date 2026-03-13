@@ -190,10 +190,23 @@ def certify_or_block_wrapup_transition_impl(runtime) -> None:
         return
 
     target_mode = load_super_active_mode_impl(runtime)
-    if not target_mode or target_mode in {"theory", "code_model"}:
+    if not target_mode:
         return
 
     target_mode_payload = load_super_active_mode_payload_impl(runtime)
+    certified = str(target_mode_payload.get("wrapup_certified") or "").strip().lower() == "true"
+    certified_level = _int_or_none(target_mode_payload.get("wrapup_level"))
+    if not certified:
+        if target_mode in {"theory", "code_model"}:
+            return
+        raise RuntimeError(
+            "cannot leave solved-level wrap-up without explicit supervisor certification: "
+            f"target_mode={target_mode} "
+            f"wrapup_certified={target_mode_payload.get('wrapup_certified')} "
+            f"wrapup_level={target_mode_payload.get('wrapup_level')} "
+            f"expected_level={status['pinned_level']}"
+        )
+
     if not bool(status["ready_to_certify"]):
         raise RuntimeError(
             "cannot leave solved-level wrap-up while pin is active: "
@@ -206,9 +219,7 @@ def certify_or_block_wrapup_transition_impl(runtime) -> None:
             f"component_mismatch_ok={status['component_mismatch_ok']}"
         )
 
-    certified = str(target_mode_payload.get("wrapup_certified") or "").strip().lower() == "true"
-    certified_level = _int_or_none(target_mode_payload.get("wrapup_level"))
-    if not certified or certified_level != int(status["pinned_level"]):
+    if certified_level != int(status["pinned_level"]):
         raise RuntimeError(
             "cannot leave solved-level wrap-up without explicit supervisor certification: "
             f"target_mode={target_mode} "
