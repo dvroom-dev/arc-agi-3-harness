@@ -164,11 +164,11 @@ async function readConversationHead(
   try {
     const storedBranches = await loadStoredConversationBranches(runId, conversationId);
     const activeBranch =
-      storedBranches.find((branch) => branch.active) ??
-      storedBranches.find((branch) => branch.head) ??
       (preferredForkId
         ? storedBranches.find((branch) => branch.forkId === preferredForkId)
         : null) ??
+      storedBranches.find((branch) => branch.active) ??
+      storedBranches.find((branch) => branch.head) ??
       storedBranches.at(-1) ??
       null;
     if (!activeBranch || !activeBranch.documentText.trim()) {

@@ -103,10 +103,11 @@ export async function loadInterventions(
     return payload.forks
       .flatMap((fork): InterventionEntry[] => {
         const actionSummary = typeof fork.actionSummary === "string" ? fork.actionSummary : null;
+        const isResume = actionSummary?.startsWith("resume_mode_head") ?? false;
         if (
           actionSummary !== "fork (hard)"
           && actionSummary !== "fork (soft)"
-          && !actionSummary.startsWith("resume_mode_head")
+          && !isResume
         ) return [];
         const ts = typeof fork.createdAt === "string" ? fork.createdAt : null;
         if (!ts) return [];
