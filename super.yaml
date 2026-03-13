@@ -119,10 +119,10 @@ supervisor:
   instructions:
     operation: append
     values:
-      - "Mode intent: theory defines components and evidence-backed hypotheses; explore_and_solve performs level-1 real-game discovery and solution search; code_model updates model mechanics against solved-level evidence; solve_model solves later levels in the model then replays once in the real game; recover replays solved levels after regression."
+      - "Mode intent: explore_and_solve performs level-1 real-game bootstrap, discovery, and solution search before the first completion; theory defines components and evidence-backed hypotheses; code_model updates model mechanics only after a level is solved or on later levels; solve_model solves later levels in the model then replays once in the real game; recover replays solved levels after regression."
       - "On every supervisor pass, review `components.py` and `model_lib.py` for concrete bugs/logic errors (missing detectors, state transition mistakes, stale assumptions, inconsistent action effects, missing failure guards)."
       - "If model-file bugs are found, require the agent to fix them before further solve progression."
-      - "When model bugs are found outside `code_model`, route to `code_model` (resume or fork as appropriate) with explicit fix targets and required verification."
+      - "When model bugs are found outside `code_model`, route to `code_model` with explicit fix targets only if the active level is later than level 1 or the run is already inside solved-level wrap-up."
       - "Do not allow `solve_model` progression while unresolved model-file bugs are known."
       - "Prefer continue unless there is a clear, evidence-backed correction to make."
       - "When switching to theory or explore_and_solve, prefer resume_mode_head over fork_new_conversation so cross-mode context is preserved. Only fork a new theory/explore_and_solve conversation after a game-state discontinuity (reset_level, level_complete, game_complete, game_over)."
@@ -139,12 +139,12 @@ supervisor:
       - "Do not assign semantic roles to a feature unless action-linked evidence supports that role. Use neutral feature names until the role is proven."
       - "Do not assume a feature is unique unless evidence shows only one copy matters; prefer reasoning that can track multiple copies."
       - "After any frontier level completes and the game continues, prefer routing next to `theory` so the agent finalizes the solved level before taking more real-game actions."
-      - "If `current_compare.md` shows divergence and current mode is not `code_model`, treat that as an immediate model-repair signal. Route next to `code_model` unless solved-level cleanup explicitly requires `theory` first."
-      - "Treat compare divergence as a major control signal. Outside `code_model`, `__ARC_INTERCEPT_COMPARE_MISMATCH__` should route immediately to `code_model` rather than keeping the agent in `explore_and_solve` or `theory`."
+      - "If `current_compare.md` shows divergence before the first level is completed, treat it as evidence to fold back into `theory`, not a reason to enter `code_model`."
+      - "Treat compare divergence as a major control signal after level 1 is solved or on later levels. Before the first level completes, keep the run inside `theory`/`explore_and_solve`."
       - "Keepalive interrupt protocol (`__ARC_INTERCEPT_IDLE_KEEPALIVE__`): capture `prior_mode` as the mode active when marker is detected; on level 1 use `explore_and_solve` for exactly one real-game action; otherwise use the smallest allowed real-game replay/probe mode; then on the next supervisor pass, return to `prior_mode` via `resume_mode_head` once that one action is evidenced."
       - "During keepalive interrupt handling, do not ask for broad analysis or file churn; require a single valid `arc_repl` game action and concise evidence only."
-      - "If intercept marker is __ARC_INTERCEPT_COMPARE_MISMATCH__, route immediately to `code_model`, attach compare results, and require compare parity across all explored current-level sequences before further real-game progression."
-      - "For `__ARC_INTERCEPT_COMPARE_MISMATCH__`, do not broaden exploration and do not keep the agent in `explore_and_solve`; the next mode should be `code_model` unless solved-level cleanup explicitly requires `theory` first."
+      - "If intercept marker is __ARC_INTERCEPT_COMPARE_MISMATCH__ before level 1 is solved, route to `theory` with the mismatch evidence and require the next handoff to stay inside `explore_and_solve`/`theory`."
+      - "If intercept marker is __ARC_INTERCEPT_COMPARE_MISMATCH__ after level 1 is solved or on later levels, route to `code_model`, attach compare results, and require compare parity across the relevant level scope before further progression."
       - "If intercept marker is __ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__, route to `theory` first to finalize solved-level components and coverage, then route to `code_model` and require model parity repair against the pinned solved level before level advancement continues."
       - "If intercept marker is __ARC_INTERCEPT_RESET_LEVEL__, evaluate whether reset usage is appropriate for the current mode and recent evidence, then decide whether to continue or intervene with corrective guidance."
       - "When a solved-level compare pin is active, keep all visible state, compare work, and model work targeted to the pinned solved level until the supervisor explicitly certifies wrap-up complete."
@@ -168,10 +168,6 @@ supervisor:
         tool: bash
         match_type: contains
         pattern: __ARC_INTERCEPT_COMPARE_MISMATCH__
-        action:
-          type: supervisor_switch_mode
-          target_mode: code_model
-          reason: compare mismatch requires immediate model repair before more real-game progression
       - name: compare-clean
         when: response
         tool: bash
@@ -207,10 +203,10 @@ supervisor:
                    - If using `mode_payload.user_message` (fork/resume path), manually wrap message in:
                      `<supervisor-command trigger="agent_tool_intercept"> ... </supervisor-command>`.
               2) If marker is `__ARC_INTERCEPT_COMPARE_MISMATCH__`:
-                 - Treat the mismatch marker as an immediate `code_model` routing signal.
-                 - Use `resume_mode_head` to `code_model` (or `fork_new_conversation` in `code_model` if a fresh branch is required).
-                 - Put the compare output/details from the intercepted tool response into the handoff.
-                 - Do not send the agent into broad re-analysis; the next stop must be `code_model` unless solved-level cleanup explicitly requires `theory` first.
+                 - Before level 1 is solved, keep the run inside `theory`/`explore_and_solve`.
+                 - Use `resume_mode_head` to `theory` with the compare output/details from the intercepted tool response.
+                 - Require theory to convert that evidence into the next concrete level-1 handoff instead of routing to `code_model`.
+                 - After level 1 is solved or on later levels, treat the mismatch marker as an immediate `code_model` routing signal.
               3) If marker is `__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__`:
                  - Route to `theory` first with a handoff that the solved level is pinned for cleanup.
                  - Require fresh component coverage on the solved level before any `code_model` turn.
@@ -245,7 +241,7 @@ supervisor:
               Cadence review runs asynchronously. Continue immediately if there is no concrete rule violation.
 
               Priorities:
-              1) If the latest `current_compare.md` in the active game workspace shows `all_match: false` or divergent sequences and current mode is not `code_model`, prefer `resume_mode_head` or `fork_new_conversation` to `code_model` after the next tool boundary. Put the compare file path and mismatch summary in the user-facing guidance.
+              1) If the latest `current_compare.md` in the active game workspace shows `all_match: false` or divergent sequences before level 1 is solved, keep the next mode inside `theory`/`explore_and_solve`; if the run is already in wrap-up or on level 2+, then prefer `resume_mode_head` or `fork_new_conversation` to `code_model` after the next tool boundary. Put the compare file path and mismatch summary in the user-facing guidance.
               2) If current mode is `code_model` or `solve_model` and the transcript shows an `arc_repl` shell command, treat that as a mode violation and inject or fork corrective guidance.
               3) If current mode is `theory`, compare is clean, and the latest `theory.md` already names exactly one concrete `# Explore Plan` target with explicit actions or route plus a stop condition, prefer `resume_mode_head` to `explore_and_solve` instead of continuing theory.
               4) If the run has just reached a new frontier level after completing a prior one, prefer `theory` as the next mode so the agent inspects what changed before new real-game probing.
@@ -352,7 +348,7 @@ modes:
     description: "Define evidence-backed components in theory.md/components.py and decide the next step."
     agent_model_reasoning_effort: low
     start_when:
-      - "A new run starts."
+      - "Initial level-1 bootstrap explore returns with action evidence."
       - "A new frontier level is reached."
       - "Compare is clean but the level is not yet solved."
       - "A just-solved level is pinned for post-completion cleanup."
@@ -511,6 +507,7 @@ modes:
     description: "Level-1-only real-game feature probing and minimal solution attempts driven by theory handoffs."
     agent_model_reasoning_effort: low
     start_when:
+      - "A new run starts on level 1; bootstrap with a minimal action sample before theory has enough evidence."
       - "Theory identifies a concrete level-1 real-game feature-target probe."
       - "Keepalive requires exactly one real-game action."
     stop_when:
@@ -584,13 +581,15 @@ modes:
         - literal: |
             Active game: `${vars.game_id}`.
             Explore-and-solve is level-1 only:
-            - read the current `# Explore Plan` section in `theory.md` first and treat it as the entire contract for this turn;
+            - if `theory.md` does not yet contain a concrete `# Explore Plan`, treat this as the initial bootstrap turn: take only a very small action sample to identify the controlled actor, action semantics, and any visible HUD/resource changes, then write that evidence into `theory.md` and switch to theory;
+            - otherwise read the current `# Explore Plan` section in `theory.md` first and treat it as the entire contract for this turn;
             - perform the minimal real-game probes or bounded route needed to answer that one handed-off target class;
             - stay focused only on that handed-off target class until it is answered, falsified, or its explicit bounded-route stop condition is reached;
             - write the observed outcome and its likely implication into `theory.md`;
             - then switch_mode promptly.
-            Do not invent a new route plan, feature target, or solution theory in this mode. If the current `# Explore Plan` is exhausted, switch back to theory.
+            Do not invent a new route plan, feature target, or solution theory in this mode after the bootstrap turn. If the current `# Explore Plan` is exhausted, switch back to theory.
             If the current `# Explore Plan` is a bounded route, do not bounce back to theory after each expected repeated move; keep going until completion, a novel event, the explicit stop condition, or a blocker.
+            The bootstrap turn should stay tiny: one or two distinct actions maximum, only enough to identify the controllable actor and first-order movement/resource effects.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
             For actionful probes, inspect the returned `artifacts.after_state_hex` and `artifacts.diff_hex` first before reopening on-disk turn artifacts.
             Do not use read-only `arc_repl` calls as inspection tools.
@@ -604,11 +603,13 @@ modes:
       operation: append
       requirements:
         - "Use explore_and_solve only on level 1 before the first completion."
-        - "In explore_and_solve, read the current `# Explore Plan` section in `theory.md` and perform only the minimum real-game action sequence or bounded route needed to answer that target class."
+        - "On the initial level-1 turn, if `theory.md` has no concrete `# Explore Plan`, use explore_and_solve only for a tiny bootstrap action sample and then return to theory."
+        - "Otherwise, in explore_and_solve, read the current `# Explore Plan` section in `theory.md` and perform only the minimum real-game action sequence or bounded route needed to answer that target class."
         - "Do not exit explore_and_solve until the current `# Explore Plan` target class has been answered or falsified and recorded, or its explicit bounded-route stop condition has been reached."
         - "Do not switch back to theory from explore_and_solve without new real-game evidence from this explore turn, unless a supervisor or policy blocker prevented action execution."
         - "Do not turn explore_and_solve into free-form route planning or broad solution search; stay inside the current `# Explore Plan` target class."
         - "When the current `# Explore Plan` is a bounded route, continue through expected repeated moves without reopening theory unless a novel event, blocker, completion, or explicit stop condition occurs."
+        - "The initial bootstrap turn may take at most two distinct real-game actions before returning to theory."
         - "After each real-game probe or solution attempt, update `theory.md` before switching modes."
         - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
       violations:
@@ -1034,7 +1035,7 @@ modes:
         - "Reading raw `.hex`, `diff.hex`, or sequence metadata directly in recover mode."
 
 mode_state_machine:
-  initial_mode: theory
+  initial_mode: explore_and_solve
   transitions:
     theory: [explore_and_solve, code_model]
     explore_and_solve: [theory, code_model, recover]
