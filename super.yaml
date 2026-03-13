@@ -179,6 +179,25 @@ supervisor:
         match_type: contains
         pattern: __ARC_INTERCEPT_RESET_LEVEL__
   supervisor_triggers:
+    run_start_bootstrap:
+      supervisor_prompt:
+        operation: append
+        parts:
+          - literal: |
+              This is the first supervisor pass before any agent turn on unsolved level 1.
+
+              Required action:
+              - Use `fork_new_conversation` to the configured initial mode `explore_and_solve`.
+              - Put the bootstrap handoff into `payload.mode_payload.explore_and_solve.user_message`.
+
+              Bootstrap handoff requirements:
+              - Ask for only a tiny real-game action sample: one or two distinct actions maximum.
+              - Goal of the sample:
+                - identify the controllable actor from action-linked evidence
+                - identify first-order action semantics
+                - note any visible HUD/resource changes
+              - Do not ask for route planning, broad map narration, or solution attempts yet.
+              - Tell the mode to record the observed evidence in `theory.md` and then switch to `theory`.
     agent_tool_intercept:
       supervisor_prompt:
         operation: append
