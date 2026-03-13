@@ -27,10 +27,7 @@ from harness_runtime_env import (
     supervisor_args_impl,
     write_idle_keepalive_marker_impl,
 )
-from harness_runtime_cleanup import (
-    cleanup_repl_daemons_impl,
-    close_scorecard_if_needed_impl,
-)
+from harness_runtime_cleanup import cleanup_repl_daemons_impl, close_scorecard_if_needed_impl
 from harness_runtime_conversation import load_conversation_id_impl
 from harness_runtime_prompting import (
     load_current_pixels_impl,
@@ -45,12 +42,11 @@ from harness_runtime_session import (
     session_frontmatter_impl,
     sync_active_conversation_id_from_session_impl,
 )
-from harness_scorecard_helpers import (
-    build_scorecard_client,
-    export_scorecard_cookies_json,
-    resolve_arc_api_key,
-)
+from harness_runtime_validation import validate_run_super_config_text
+from harness_scorecard_helpers import build_scorecard_client, export_scorecard_cookies_json, resolve_arc_api_key
 from tools.proc_utils import read_proc_start_ticks
+
+
 class HarnessRuntime:
     def __init__(
         self,
@@ -95,7 +91,9 @@ class HarnessRuntime:
         self.run_bin_dir, self.run_tools_dir = deps.setup_run_config_dir(self.run_config_dir)
         deps.assert_no_game_files_in_agent_dir(self.agent_dir)
         self.run_super_config = self.run_dir / "super.yaml"
-        self.run_super_config.write_text((deps.PROJECT_ROOT / "super.yaml").read_text())
+        rendered_super_config = (deps.PROJECT_ROOT / "super.yaml").read_text()
+        validate_run_super_config_text(rendered_super_config)
+        self.run_super_config.write_text(rendered_super_config)
         self.super_config = self.run_super_config
 
         if not deps.PROJECT_VENV_PYTHON.exists():

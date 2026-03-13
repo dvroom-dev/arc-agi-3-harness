@@ -106,12 +106,12 @@ prompt_parts:
 
 supervisor:
   enabled: true
+  cadence_enabled: false
   stop_condition: |
     Stop only when one of these is true:
     1) All levels of the current game are complete.
     2) The run is irrecoverably blocked by errors.
   review_timeout_ms: 300000
-  cadence_interrupt_policy: boundary
   disable_synthetic_check_supervisor_on_rule_failure: false
   context_carryover_limit_bytes: 98304
   instructions:
@@ -147,6 +147,7 @@ supervisor:
       - "If intercept marker is __ARC_INTERCEPT_RESET_LEVEL__, evaluate whether reset usage is appropriate for the current mode and recent evidence, then decide whether to continue or intervene with corrective guidance."
       - "When a solved-level compare pin is active, keep all visible state, compare work, and model work targeted to the pinned solved level until the supervisor explicitly certifies wrap-up complete."
       - "While a solved-level compare pin is active, only `theory` and `code_model` are valid next modes. Do not route to `explore_and_solve` or `solve_model` until the supervisor certifies wrap-up complete."
+      - "While a solved-level compare pin is active, frontier-level reasoning is forbidden. If pinned compare is clean, either certify wrap-up complete or name one exact pinned-level blocker; do not draft frontier plans or observations."
       - "Coverage helpers and compare helpers provide evidence only; they do not certify solved-level wrap-up on their own."
       - "Wrap-up certification is explicit, not implied. Keep the release decision separate from the frontier mode choice and from fork-vs-resume. When certifying solved-level wrap-up complete, set supervisor `transition_payload.wrapup_certified=true` and `transition_payload.wrapup_level=<pinned level>`. Then independently choose whether to continue, `resume_mode_head`, or `fork_new_conversation`, and independently choose the best frontier-start mode. The released frontier mode may still be `theory`."
   tool_interception:
@@ -248,27 +249,6 @@ supervisor:
           message_type: user
           text: |
             <supervisor-command trigger="agent_tool_intercept">
-            {{message}}
-            </supervisor-command>
-    cadence:
-      supervisor_prompt:
-        operation: append
-        parts:
-          - literal: |
-              Cadence review runs asynchronously. Continue immediately if there is no concrete rule violation.
-
-              Priorities:
-              1) If the latest `current_compare.md` in the active game workspace shows `all_match: false` or divergent sequences before level 1 is solved, keep the next mode inside `theory`/`explore_and_solve`; if the run is already in wrap-up or on level 2+, then prefer `resume_mode_head` or `fork_new_conversation` to `code_model` after the next tool boundary. Put the compare file path and mismatch summary in the user-facing guidance.
-              2) If current mode is `code_model` or `solve_model` and the transcript shows an `arc_repl` shell command, treat that as a mode violation and inject or fork corrective guidance.
-              3) If current mode is `theory`, compare is clean, and the latest `theory.md` already names exactly one concrete `# Explore Plan` target with explicit actions or route plus a stop condition, prefer `resume_mode_head` to `explore_and_solve` instead of continuing theory.
-              4) If the run has just reached a new frontier level after completing a prior one, prefer `theory` as the next mode so the agent inspects what changed before new real-game probing.
-              5) Otherwise continue.
-      message_templates:
-        - name: supervisor_command
-          description: "Wrap cadence guidance in a supervisor command envelope."
-          message_type: user
-          text: |
-            <supervisor-command trigger="cadence">
             {{message}}
             </supervisor-command>
     agent_error:
@@ -451,6 +431,8 @@ modes:
             `components.py` is primarily theory-owned. Define or revise `find_all_*` detectors here; `code_model` may patch detector details only when compare cannot be interpreted correctly without that detector fix.
             If a solved-level compare pin is active, stay strictly scoped to that pinned level. Do not record frontier-level observations, components, or hypotheses until the pin is cleared.
             Do not exhaustively restate stable geometry. After one initial survey, only reopen a file if it answers a specific open question or verifies a concrete handoff.
+            After the first survey, prioritize controllable actors, resource/HUD state, and the smallest set of unresolved non-wall interactables. Static walls and corridor geometry are supporting evidence, not first-class deliverables.
+            Once a completion theory or trigger path is falsified, do not revisit it without new action-linked evidence.
             If you can already name the smallest next step, switch modes promptly instead of continuing broad analysis.
         - prompt_part: artifact_read_path
         - prompt_part: component_model_runtime
@@ -474,8 +456,11 @@ modes:
             - while a solved-level compare pin is active, do not use or request `arc_repl`; theory remains read-only and mutations belong only in `explore_and_solve`;
             - on level 1 before the first completion, speculate as needed from the visible state, but mark speculation clearly in `theory.md` and turn it into exactly one target class in `# Explore Plan`;
             - on level 1, develop a completion theory in `theory.md`, and hand off to `explore_and_solve` only through the single current `# Explore Plan` target class;
+            - after the first survey, stop expanding static geometry coverage once the controlled actor, any visible resource/HUD state, and the smallest set of unresolved non-wall interactables are named;
+            - if a completion hypothesis or trigger condition was already falsified, do not hand it off again without new evidence that changes the case;
             - when movement semantics and route topology are already confirmed, `# Explore Plan` may hand off one bounded multi-action route instead of splitting each repeated move into its own target;
             - if `current_compare.md` is clean and `# Explore Plan` already contains one concrete target with explicit actions or route plus stop condition, switch immediately instead of doing more theory-side recounting or model introspection;
+            - while a solved-level compare pin is active and compare is clean, either prepare final pinned-level certification or name one exact pinned-level blocker; do not write frontier-level plans;
             - on later levels, decide whether the next step is `code_model`, `solve_model`, or `recover`;
             - if switching, include a concrete handoff message with exact files/evidence to inspect or the exact probe to run.
             Read these agent-workspace files as needed instead of relying on inlined contents:
@@ -500,6 +485,8 @@ modes:
         - "In theory mode, use raw `.hex`/`.diff` evidence to define named components and keep every visible pixel accounted for by component bounding boxes."
         - "On level 1 before the first completion, if a real-game probe is needed, switch_mode to `explore_and_solve` only after writing a fresh `# Explore Plan` section in `theory.md` with exactly one target class."
         - "Use speculation in theory mode when evidence is incomplete, but label it clearly as a hypothesis and keep the active `# Explore Plan` scoped to one target class."
+        - "After the first survey, prioritize the controlled actor, any HUD/resource state, and unresolved non-wall interactables; do not keep expanding static wall/corridor descriptions once those anchors are named."
+        - "Do not revisit a falsified completion hypothesis or trigger path unless new action-linked evidence changes it."
         - "When movement semantics and route topology are already evidenced, a level-1 `# Explore Plan` may hand off one bounded multi-action route to test a single completion theory or reach one concrete trigger."
         - "Do not split a deterministic repeated-move route into separate per-step target classes once the repeated move semantics are already confirmed."
         - "Do not hand off an unbounded route plan, a mixed probe-plus-then-route script, or multiple target classes; `explore_and_solve` should receive one target class with either a minimal probe sequence or one bounded route plus a stop condition."
@@ -519,6 +506,7 @@ modes:
         - "Staying in theory mode after compare is clean and `theory.md` already contains one concrete `# Explore Plan` target with explicit actions or route plus stop condition."
         - "Handing off an unbounded route plan, a mixed staged probe-plus-route script, or multiple target classes from theory mode into `explore_and_solve`."
         - "Writing any file other than `theory.md` or `components.py` in theory mode."
+        - "Planning frontier-level work or recording frontier-level observations while a solved-level compare pin is active."
 
   explore_and_solve:
     description: "Level-1-only real-game feature probing and minimal solution attempts driven by theory handoffs."
@@ -607,6 +595,7 @@ modes:
             Do not invent a new route plan, feature target, or solution theory in this mode after the bootstrap turn. If the current `# Explore Plan` is exhausted, switch back to theory.
             If the current `# Explore Plan` is a bounded route, do not bounce back to theory after each expected repeated move; keep going until completion, a novel event, the explicit stop condition, or a blocker.
             The bootstrap turn should stay tiny: one or two distinct actions maximum, only enough to identify the controllable actor and first-order movement/resource effects.
+            Once a route is deterministic and directly tests the current handed-off completion theory, keep executing it until the explicit stop condition instead of turning repeated moves into fresh micro-plans.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
             For actionful probes, inspect the returned `artifacts.after_state_hex` and `artifacts.diff_hex` first before reopening on-disk turn artifacts.
             Do not use read-only `arc_repl` calls as inspection tools.

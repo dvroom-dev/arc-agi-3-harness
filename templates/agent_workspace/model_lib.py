@@ -38,6 +38,24 @@ def init_level(env, level: int, *, cfg: LevelConfig | None = None) -> None:
     _ = env, level, cfg
 
 
+def action_name(action) -> str:
+    """Normalize an action-like value to a stable ACTION* name.
+
+    Use this helper instead of `int(action)` so model logic works with enum
+    members, action-like objects that expose `.name`, and plain strings.
+    """
+    if hasattr(action, "name"):
+        name = str(getattr(action, "name") or "").strip()
+        if name:
+            return name.upper()
+    text = str(action or "").strip()
+    if not text:
+        return ""
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    return text.upper()
+
+
 def apply_action(env, action, *, data: dict | None = None, reasoning: str | None = None) -> None:
     """Generic mechanics entrypoint called by the harness-owned model entrypoint.
 
@@ -126,7 +144,7 @@ def load_initial_grid(game_dir: str | Path, level: int) -> np.ndarray | None:
 # def apply_example_mechanic(env, feature_positions, action):
 #     \"\"\"Example state transform skeleton using neutral feature names.\"\"\"
 #     feature_x_positions = feature_positions.get("feature_x", [])
-#     if action.name == "ACTION1":
+#     if action_name(action) == "ACTION1":
 #         for row, col in feature_x_positions:
 #             trigger_feature_x_at(env, row, col)
 # ---------------------------------------------------------------------------
