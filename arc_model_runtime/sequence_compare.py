@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 
+from .sequence_compare_render import current_compare_markdown, report_md
 from .utils import (
     action_from_name,
     clear_analysis_level_pin,
@@ -156,95 +157,11 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
     return report
 
 
-def report_md(report: dict) -> str:
-    def _append_diff_summary(lines: list[str], title: str, payload: object) -> None:
-        if not isinstance(payload, dict):
-            return
-        lines.extend(["", f"## {title}"])
-        if bool(payload.get("shape_mismatch")):
-            lines.append("- shape_mismatch: true")
-            lines.append(f"- before_shape: {payload.get('before_shape')}")
-            lines.append(f"- after_shape: {payload.get('after_shape')}")
-            return
-        lines.append(f"- changed_pixels: {payload.get('changed_pixels')}")
-        changes = payload.get("changes")
-        if isinstance(changes, list) and changes:
-            lines.append("- sample_changes:")
-            for change in changes[:5]:
-                if not isinstance(change, dict):
-                    continue
-                lines.append(
-                    "  - "
-                    f"({change.get('row')},{change.get('col')}): "
-                    f"{change.get('before')} -> {change.get('after')}"
-                )
-            remaining = max(0, len(changes) - 5)
-            if remaining:
-                lines.append(f"- remaining_changes_not_shown: {remaining}")
-
-    lines = [f"# Sequence Comparison: {report['sequence_id']}", ""]
-    lines.append(f"- level: {int(report['level'])}")
-    lines.append(f"- actions_total: {int(report['actions_total'])}")
-    lines.append(f"- actions_compared: {int(report['actions_compared'])}")
-    lines.append(f"- matched: {bool(report['matched'])}")
-    if report.get("divergence_step") is not None:
-        lines.append(f"- divergence_step: {int(report['divergence_step'])}")
-        lines.append(f"- divergence_reason: {str(report.get('divergence_reason', ''))}")
-    transition_mismatch = report.get("transition_mismatch")
-    if transition_mismatch:
-        lines.extend(["", "## Transition Mismatch", "```json", json.dumps(transition_mismatch, indent=2), "```"])
-    _append_diff_summary(lines, "Game Step Diff", report.get("game_step_diff"))
-    _append_diff_summary(lines, "Model Step Diff", report.get("model_step_diff"))
-    _append_diff_summary(lines, "State Diff (Game After vs Model After)", report.get("state_diff"))
-    return "\n".join(lines).rstrip() + "\n"
-
-
 def _redact_payload_for_pinned_level(payload: dict[str, Any], *, pinned_level: int | None) -> dict[str, Any]:
     if pinned_level is None:
         return payload
     sanitized = sanitize_visible_json_payload(payload, visible_level=int(pinned_level))
     return sanitized if isinstance(sanitized, dict) else payload
-
-
-def _current_compare_markdown(summary_payload: dict[str, Any]) -> str:
-    lines = [
-        f"# Current Compare (Level {int(summary_payload['level'])})",
-        "",
-        f"- compare_ok: {str(bool(summary_payload['compare_ok'])).lower()}",
-        f"- all_match: {str(bool(summary_payload['all_match'])).lower()}",
-        f"- compared_sequences: {int(summary_payload['compared_sequences'])}",
-        f"- diverged_sequences: {int(summary_payload['diverged_sequences'])}",
-    ]
-    reports = summary_payload.get("reports")
-    if isinstance(reports, list) and reports:
-        lines.extend(["", "## Reports"])
-        for report in reports:
-            if not isinstance(report, dict):
-                continue
-            lines.extend(
-                [
-                    "",
-                    f"### {str(report.get('sequence_id', 'seq_unknown'))}",
-                    f"- matched: {str(bool(report.get('matched'))).lower()}",
-                    f"- actions_total: {int(report.get('actions_total', 0) or 0)}",
-                    f"- actions_compared: {int(report.get('actions_compared', 0) or 0)}",
-                ]
-            )
-            if report.get("divergence_step") is not None:
-                lines.append(f"- divergence_step: {int(report['divergence_step'])}")
-            reason = str(report.get("divergence_reason", "") or "").strip()
-            if reason:
-                lines.append(f"- divergence_reason: {reason}")
-            if report.get("report_file"):
-                lines.append(f"- report_file: {report['report_file']}")
-    lines.extend(
-        [
-            "",
-            "## Full Payload",
-            "- current_compare.json contains the full machine-readable compare payload.",
-        ]
-    )
-    return "\n".join(lines).rstrip() + "\n"
 
 
 def _write_text_atomic(path: Path, text: str) -> None:
@@ -300,7 +217,7 @@ def _persist_current_compare(session, payload: dict[str, Any]) -> None:
         "stderr": "",
     }
     json_text = json.dumps(summary_payload, indent=2) + "\n"
-    md_text = _current_compare_markdown(summary_payload)
+    md_text = current_compare_markdown(summary_payload)
     _write_text_atomic(session.game_dir / "current_compare.json", json_text)
     _write_text_atomic(session.game_dir / "current_compare.md", md_text)
 
@@ -308,11 +225,27 @@ def _persist_current_compare(session, payload: dict[str, Any]) -> None:
     _write_text_atomic(level_current / "current_compare.json", json_text)
     _write_text_atomic(level_current / "current_compare.md", md_text)
 
+    for report in reports:
+        if not isinstance(report, dict):
+            continue
+        sequence_id = str(report.get("sequence_id") or "").strip()
+        if not sequence_id:
+            continue
+        report_text = report_md(report)
+        _write_text_atomic(level_current / f"{sequence_id}.md", report_text)
+
     level_compare = resolve_level_dir(session.game_dir, int(payload.get("level", session.env.current_level)))
     if level_compare is not None:
         compare_dir = level_compare / "sequence_compare"
         _write_text_atomic(compare_dir / "current_compare.json", json_text)
         _write_text_atomic(compare_dir / "current_compare.md", md_text)
+        for report in reports:
+            if not isinstance(report, dict):
+                continue
+            sequence_id = str(report.get("sequence_id") or "").strip()
+            if not sequence_id:
+                continue
+            _write_text_atomic(compare_dir / f"{sequence_id}.md", report_md(report))
 
     mismatch_refresh_error = _refresh_component_mismatch(session)
     if mismatch_refresh_error:
@@ -425,12 +358,12 @@ def compare_sequences(
     diverged = 0
     for _, payload in eligible_payloads:
         report = compare_one_sequence(session, level=target_level, level_dir=level_dir, payload=payload)
+        report["start_action_index"] = int(payload.get("start_action_index", 0) or 0)
+        report["end_action_index"] = int(payload.get("end_action_index", report["start_action_index"]) or report["start_action_index"])
+        report["end_reason"] = str(payload.get("end_reason", "") or "")
         report_file = compare_root / f"{report['sequence_id']}.md"
         report_file.write_text(report_md(report))
-        try:
-            report["report_file"] = str(report_file.relative_to(session.game_dir))
-        except ValueError:
-            report["report_file"] = str(report_file)
+        report["report_file"] = f"level_current/sequence_compare/{report['sequence_id']}.md"
         reports.append(report)
         if not bool(report.get("matched", False)):
             diverged += 1

@@ -11,13 +11,11 @@ from arc_model_runtime.visible_artifacts import LEVEL_TRANSITION_FILE, level_tra
 
 try:
     from arc_repl_session_sequences import (
-        build_diff_hex_rows,
         sync_level_sequences,
         write_hex_grid,
     )
 except Exception:
     from tools.arc_repl_session_sequences import (
-        build_diff_hex_rows,
         sync_level_sequences,
         write_hex_grid,
     )
@@ -219,17 +217,6 @@ def _write_level_turn_files(
         step_snapshots=step_snapshots,
         step_results=step_results,
     )
-    diff_baseline = before_grid
-    if bool(aggregate_diff.get("suppressed_cross_level_diff", False)):
-        try:
-            baseline_step = int(aggregate_diff.get("aggregate_baseline_step", 0) or 0)
-        except Exception:
-            baseline_step = 0
-        if baseline_step > 0 and baseline_step <= len(step_snapshots):
-            diff_baseline = np.array(step_snapshots[baseline_step - 1][1], copy=True)
-    diff_rows = build_diff_hex_rows(diff_baseline, after_grid)
-    (turn_dir / "diff.hex").write_text("\n".join(diff_rows) + "\n")
-
     changed_pixels = aggregate_diff.get("changed_pixels")
     if not isinstance(changed_pixels, int):
         changed_pixels = 0
@@ -264,7 +251,7 @@ def _write_level_turn_files(
         "files": {
             "before_state_hex": "before_state.hex",
             "after_state_hex": "after_state.hex",
-            "diff_hex": "diff.hex",
+            "meta_json": "meta.json",
         },
     }
     (turn_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
@@ -328,12 +315,9 @@ def _write_level_turn_files(
         "before_state_hex": "\n".join(before_rows),
         "after_state_hex_rows": after_rows,
         "after_state_hex": "\n".join(after_rows),
-        "diff_hex_rows": diff_rows,
-        "diff_hex": "\n".join(diff_rows),
         "files": {
             "before_state_hex": f"{turn_dir_rel}/before_state.hex",
             "after_state_hex": f"{turn_dir_rel}/after_state.hex",
-            "diff_hex": f"{turn_dir_rel}/diff.hex",
             "meta_json": f"{turn_dir_rel}/meta.json",
         },
     }

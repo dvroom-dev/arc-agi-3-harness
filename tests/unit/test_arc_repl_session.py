@@ -162,7 +162,6 @@ def test_repl_session_status_reset_exec(monkeypatch, tmp_path: Path) -> None:
     assert result["artifacts"]["changed_pixels"] >= 0
     assert len(result["artifacts"]["after_state_hex_rows"]) == 64
     assert result["artifacts"]["after_state_hex"].count("\n") >= 63
-    assert len(result["artifacts"]["diff_hex_rows"]) == 64
     assert result["artifacts"]["files"]["after_state_hex"].endswith("after_state.hex")
 
 
@@ -376,7 +375,6 @@ def test_repl_writes_level_turn_files(monkeypatch, tmp_path: Path) -> None:
     for turn_dir in (turn_1, turn_2):
         assert (turn_dir / "before_state.hex").exists()
         assert (turn_dir / "after_state.hex").exists()
-        assert (turn_dir / "diff.hex").exists()
         assert (turn_dir / "meta.json").exists()
         meta = json.loads((turn_dir / "meta.json").read_text())
         assert meta["schema_version"] == "arc_repl.level_turn_artifact.v1"
@@ -402,7 +400,6 @@ def test_repl_writes_level_turn_files(monkeypatch, tmp_path: Path) -> None:
     files = first_action["files"]
     assert (level_dir / files["before_state_hex"]).exists()
     assert (level_dir / files["after_state_hex"]).exists()
-    assert (level_dir / files["diff_hex"]).exists()
     assert (level_dir / files["meta_json"]).exists()
 
     assert (level_dir / "initial_state.hex").exists()

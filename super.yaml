@@ -576,7 +576,7 @@ modes:
         - literal: |
             Mode: explore_and_solve.
             Goal: on level 1 only, discover mechanics and find a real level solution.
-            This mode may inspect raw `.hex`, `diff.hex`, and sequence metadata because level-1 completion is not modeled yet.
+            This mode may inspect raw `.hex` state files and sequence metadata because level-1 completion is not modeled yet.
             Keep the loop tight: probe or try a likely solution, update `theory.md`, and switch back once the specific evidence or completion result is known.
             Do not inspect `.ai-supervisor/**`, blob files, provider/runtime source, or control-plane internals here. If a tool result mentions those paths, ignore them and continue with workspace-visible game evidence only.
         - prompt_part: arc_repl_probe_runtime
@@ -597,7 +597,7 @@ modes:
             The bootstrap turn should stay tiny: one or two distinct actions maximum, only enough to identify the controllable actor and first-order movement/resource effects.
             Once a route is deterministic and directly tests the current handed-off completion theory, keep executing it until the explicit stop condition instead of turning repeated moves into fresh micro-plans.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
-            For actionful probes, inspect the returned `artifacts.after_state_hex` and `artifacts.diff_hex` first before reopening on-disk turn artifacts.
+            For actionful probes, inspect the returned `artifacts.after_state_hex` first before reopening on-disk turn artifacts.
             Do not use read-only `arc_repl` calls as inspection tools.
             Do not inspect Python runtime objects inside the probe script; the `arc_repl` response and next-mode artifacts are the inspection surface.
             Do not investigate harness/runtime/tooling behavior in this mode. If compare or intercept behavior looks inconsistent, record the exact workspace artifacts involved and return to the supervisor instead of inspecting internals.
@@ -757,7 +757,7 @@ modes:
             Do not do route planning here; only patch component detectors and state transitions needed to explain observed diffs.
             Use `theory.md`, `components.py`, `component_mismatch.*`, `component_coverage.*`, and compare summaries as the primary evidence surface here.
             If a solved-level compare pin is active, stay scoped to the pinned solved level and ignore frontier-level artifacts until the pin clears.
-            Do not read raw `.hex`, `diff.hex`, or sequence metadata directly in this mode.
+            Do not read raw `.hex` state files or sequence metadata directly in this mode.
             Runtime/harness internals are out of scope: do not read or edit any file under `/config/tools/`.
             Treat `current_compare.json` and `component_mismatch.json` as the authoritative parity artifacts in this mode.
             If they disagree or look broken, report the exact contradiction from workspace artifacts and stay in `code_model`; do not inspect runtime/tooling source.
@@ -801,7 +801,7 @@ modes:
         - "If compare is red and a single exact blocker remains, stay in code_model and report the blocker instead of switching back to theory."
       violations:
         - "Using any `arc_repl` command in code_model."
-        - "Reading raw `.hex`, `diff.hex`, or sequence metadata directly in code_model."
+        - "Reading raw `.hex` state files or sequence metadata directly in code_model."
         - "Reading or editing runtime/harness internals (any path containing `/config/tools/`) in code_model."
         - "Investigating harness/runtime/provider source or control-plane internals instead of reporting a workspace-artifact blocker in code_model."
         - "Editing `model.py` in code_model."
@@ -912,7 +912,7 @@ modes:
             Mode: solve_model.
             Goal: on level 2+, make `play.py` solve the current level from start in the model, then replay that same plan once in the real game.
             Never enter this mode while a solved-level compare pin is active; solved-level wrap-up must be supervisor-certified complete first.
-            Do not read raw `.hex`, `diff.hex`, or sequence metadata directly in this mode.
+            Do not read raw `.hex` state files or sequence metadata directly in this mode.
         - prompt_part: model_runtime
         - prompt_part: arc_repl_playback_runtime
     user_message:
@@ -946,7 +946,7 @@ modes:
         - "Do not enter or remain in solve_model while a solved-level compare pin is active."
       violations:
         - "Using any `arc_repl` command other than one deterministic `arc_repl exec_file ./play.py` replay after model proof succeeds."
-        - "Reading raw `.hex`, `diff.hex`, or sequence metadata directly in solve_model."
+        - "Reading raw `.hex` state files or sequence metadata directly in solve_model."
 
   recover:
     description: "Rapidly replay solved levels to return to the frontier unsolved level."
@@ -1018,7 +1018,7 @@ modes:
             Mode: recover.
             Goal: replay known solved levels quickly and safely to return to frontier work.
             Avoid broad exploration in this mode.
-            Do not inspect raw `.hex`, `diff.hex`, or sequence metadata in this mode.
+            Do not inspect raw `.hex` state files or sequence metadata in this mode.
         - prompt_part: arc_repl_playback_runtime
     user_message:
       operation: append
@@ -1040,7 +1040,7 @@ modes:
         - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
       violations:
         - "Doing broad exploratory probing in recover mode."
-        - "Reading raw `.hex`, `diff.hex`, or sequence metadata directly in recover mode."
+        - "Reading raw `.hex` state files or sequence metadata directly in recover mode."
 
 mode_state_machine:
   initial_mode: explore_and_solve

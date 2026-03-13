@@ -281,7 +281,6 @@ def summarize_sequence_step(
     level_root = level_dir(game_dir, level)
     before_path = level_root / str(files.get("before_state_hex", ""))
     after_path = level_root / str(files.get("after_state_hex", ""))
-    diff_path = level_root / str(files.get("diff_hex", ""))
     meta_rel = files.get("meta_json")
     meta_path = level_root / str(meta_rel) if meta_rel else before_path.parent / "meta.json"
     return {
@@ -302,7 +301,6 @@ def summarize_sequence_step(
             "levels_completed_after": step.get("levels_completed_after"),
             "before_state_hex": display_path(game_dir, before_path),
             "after_state_hex": display_path(game_dir, after_path),
-            "diff_hex": display_path(game_dir, diff_path),
             "meta_json": display_path(game_dir, meta_path),
         },
     }

@@ -89,10 +89,6 @@ def _write_hex_rows(path: Path, rows: list[str]) -> None:
     path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
 
-def _dot_diff_rows(rows: list[str]) -> list[str]:
-    return ["." * len(row) for row in rows]
-
-
 def visible_level_status_payload(
     *,
     visible_level: int,
@@ -179,15 +175,12 @@ def sanitize_visible_level_tree(level_root: Path, *, visible_level: int) -> None
             step_dir = meta_path.parent
             before_path = step_dir / "before_state.hex"
             after_path = step_dir / "after_state.hex"
-            diff_path = step_dir / "diff.hex"
             rel_step_dir = str(step_dir.relative_to(level_root))
             if before_path.exists():
                 before_rows = _load_hex_rows(before_path)
                 if before_rows:
                     if after_path.exists():
                         _write_hex_rows(after_path, before_rows)
-                    if diff_path.exists():
-                        _write_hex_rows(diff_path, _dot_diff_rows(before_rows))
                     current_state_rows = before_rows
             if current_state_rows is None:
                 raise RuntimeError(
@@ -230,6 +223,12 @@ def sanitize_visible_level_tree(level_root: Path, *, visible_level: int) -> None
             dirty = True
         if dirty:
             _write_jsonl_atomic(jsonl_path, rows)
+
+    for diff_path in sorted(level_root.rglob("diff.hex")):
+        try:
+            diff_path.unlink()
+        except Exception:
+            pass
 
     if current_state_rows is not None:
         current_state_path = level_root / "current_state.hex"

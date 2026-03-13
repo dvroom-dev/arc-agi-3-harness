@@ -20,18 +20,6 @@ def write_hex_grid(path: Path, grid: np.ndarray) -> None:
     path.write_text("\n".join(rows) + "\n")
 
 
-def build_diff_hex_rows(before_grid: np.ndarray, after_grid: np.ndarray) -> list[str]:
-    out: list[str] = []
-    for r in range(before_grid.shape[0]):
-        chars: list[str] = []
-        for c in range(before_grid.shape[1]):
-            before = int(before_grid[r, c])
-            after = int(after_grid[r, c])
-            chars.append("." if before == after else f"{after:X}")
-        out.append("".join(chars))
-    return out
-
-
 def _safe_action_slug(name: str) -> str:
     raw = str(name or "").strip().lower()
     safe = re.sub(r"[^a-z0-9_.-]+", "_", raw).strip("._")
@@ -189,8 +177,6 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
             step_dir.mkdir(parents=True, exist_ok=True)
             write_hex_grid(step_dir / "before_state.hex", before_grid)
             write_hex_grid(step_dir / "after_state.hex", after_grid)
-            diff_rows = build_diff_hex_rows(before_grid, after_grid)
-            (step_dir / "diff.hex").write_text("\n".join(diff_rows) + "\n")
 
             meta = {
                 "schema_version": "arc_repl.sequence_action.v1",
@@ -215,7 +201,7 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
                 "files": {
                     "before_state_hex": "before_state.hex",
                     "after_state_hex": "after_state.hex",
-                    "diff_hex": "diff.hex",
+                    "meta_json": "meta.json",
                 },
             }
             (step_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
@@ -223,7 +209,6 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
             action["files"] = {
                 "before_state_hex": str(step_dir.relative_to(level_dir) / "before_state.hex"),
                 "after_state_hex": str(step_dir.relative_to(level_dir) / "after_state.hex"),
-                "diff_hex": str(step_dir.relative_to(level_dir) / "diff.hex"),
                 "meta_json": str(step_dir.relative_to(level_dir) / "meta.json"),
             }
             action.pop("before_rows", None)
