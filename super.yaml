@@ -31,7 +31,7 @@ prompt_parts:
   component_model_runtime:
     - literal: |
         Component workflow:
-        - `components.py` should define a broad `COMPONENT_REGISTRY` (or `iter_components`) whose bounding boxes cover every visible pixel in every seen state for the active level.
+        - `components.py` should define `COMPONENT_REGISTRY` (or `iter_components`) detectors that inspect visual content (pattern/color/connectivity) and whose bounding boxes cover every visible pixel in every seen state for the active level.
         - `python3 inspect_components.py --coverage --level LEVEL` checks that coverage across every seen state and writes `component_coverage.json` / `component_coverage.md`.
         - `python3 inspect_components.py --current-mismatch` writes `component_mismatch.json` / `component_mismatch.md` using component bounding boxes instead of raw grid diffs.
         - `model.py` is harness-owned runtime glue. Do not edit it.
@@ -447,7 +447,7 @@ modes:
             Active game: `${vars.game_id}`.
             Deliverables for this mode:
             - update `theory.md` with components, action effects, completion candidates, and unknowns;
-            - keep `components.py` detectors broad enough that every visible pixel in every seen state for the active level lies inside at least one component bounding box;
+            - keep `components.py` detectors broad enough that every visible pixel in every seen state for the active level lies inside at least one component bounding box, but only through detectors that inspect visual content rather than static coordinates alone;
             - keep `components.py` names neutral; if you think a component has a specific function, record that only as a role hypothesis in `theory.md` with evidence;
             - maintain the `# Explore Plan` section in `theory.md`; it is the only handoff surface for `explore_and_solve`;
             - run `python3 inspect_components.py --coverage --level <LEVEL>` before leaving theory mode;
@@ -459,6 +459,7 @@ modes:
             - on level 1 before the first completion, speculate as needed from the visible state, but mark speculation clearly in `theory.md` and turn it into exactly one target class in `# Explore Plan`;
             - on level 1, develop a completion theory in `theory.md`, and hand off to `explore_and_solve` only through the single current `# Explore Plan` target class;
             - after the first survey, stop expanding static geometry coverage once the main action-responsive features, any visible state-display changes, and the smallest set of unresolved non-wall interactables are named;
+            - do not use giant catch-all background/playfield boxes to pass coverage; if a region contains distinct visible subfeatures, detect those subfeatures by pattern/color/connectivity;
             - when evidence is ambiguous, keep at least two plausible alternative theories live in `theory.md` and choose a next probe that distinguishes between them;
             - do not treat a changed feature as automatically requiring direct exploration; first state what competing explanations remain for that change;
             - if a completion hypothesis or trigger condition was already falsified, do not hand it off again without new evidence that changes the case;
@@ -486,7 +487,8 @@ modes:
         - "In theory mode, do not probe `level_current/sequences/**` unless `current_compare.*`, `component_mismatch.*`, or `turn_index.jsonl` indicate that a real sequence artifact already exists for the question you are answering."
         - "In theory mode, do not inspect `.ai-supervisor/**`, blob files, provider/runtime source, or other control-plane internals. If an error references those paths, summarize the workspace-visible contradiction and stop."
         - "In theory mode, do not read `model.py` or `model_lib.py`; model/runtime debugging belongs in `code_model`."
-        - "In theory mode, use raw `.hex` evidence together with compare/component artifacts to define named components and keep every visible pixel accounted for by component bounding boxes."
+        - "In theory mode, use raw `.hex` evidence together with compare/component artifacts to define named components and keep every visible pixel accounted for by component bounding boxes built from visual-content detectors."
+        - "In theory mode, do not satisfy component coverage with static-coordinate-only detectors or umbrella playfield/background boxes."
         - "On level 1 before the first completion, if a real-game probe is needed, switch_mode to `explore_and_solve` only after writing a fresh `# Explore Plan` section in `theory.md` with exactly one target class."
         - "Use speculation in theory mode when evidence is incomplete, but label it clearly as a hypothesis and keep the active `# Explore Plan` scoped to one target class."
         - "When evidence is weak or ambiguous, keep at least two plausible alternative theories live in `theory.md` and choose the next probe to discriminate between them."

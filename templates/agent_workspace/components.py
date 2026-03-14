@@ -60,6 +60,8 @@ def make_component(
 # Example detector style:
 # - return one ComponentBox per independently moving/recoloring/consumable region
 # - avoid one giant umbrella bbox when separate regions can change independently
+# - detectors must inspect grid contents (pattern/color/connectivity), not just
+#   return a fixed coordinate box or a box derived only from `grid.shape`
 # - prefer neutral names like `feature_x`, `cluster_a`, `shape_1`, `marker_b`
 #   rather than names that assume purpose or behavior
 #

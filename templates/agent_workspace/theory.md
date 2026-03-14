@@ -16,11 +16,13 @@ Game <id> Theory
 Coverage guardrail:
 - Every visible pixel in every seen state for the active level should lie inside at least one component bounding box.
 - Keep `components.py` detectors broad enough that `python3 inspect_components.py --coverage --level <n>` passes before leaving theory mode.
+- Coverage only counts when detectors inspect visual content. Static-coordinate or shape-only boxes do not count as valid component detectors.
 - Use neutral feature names until a semantic role is proven by evidence.
 - Keep semantic meaning out of `components.py` identifiers. Put semantic guesses only in the `Role hypothesis` line here, and only when you can cite evidence.
 - Do not assume a feature is unique; track multiple copies explicitly.
 - Rule of thumb: if a region can move independently, recolor independently, or be consumed independently, it should usually be its own detected component rather than part of one giant bounding box.
 - Prefer multiple specific detectors over one broad umbrella detector when the broad box would hide which sub-part actually changed.
+- Do not use giant catch-all playfield/background boxes to pass coverage. If a region contains distinct visible subfeatures, detect those subfeatures by pattern/color/connectivity instead.
 - Early in level 1, speculation is allowed and expected, but keep it clearly marked as a hypothesis and revise it quickly once action evidence arrives.
 
 # Available Real-Game Actions (exclude RESET)

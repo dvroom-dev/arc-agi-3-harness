@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib.util
 import json
 from pathlib import Path
@@ -15,8 +16,6 @@ import numpy as np
 import artifact_helpers
 
 sys.dont_write_bytecode = True
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--game-dir", default=".", help="Game workspace root (default: current dir)")
@@ -36,12 +35,8 @@ def parse_args() -> argparse.Namespace:
 
 def _component_report_paths(game_dir: Path) -> tuple[Path, Path]:
     return game_dir / "component_coverage.json", game_dir / "component_coverage.md"
-
-
 def _mismatch_report_paths(game_dir: Path) -> tuple[Path, Path]:
     return game_dir / "component_mismatch.json", game_dir / "component_mismatch.md"
-
-
 def _load_components_module(game_dir: Path):
     components_path = game_dir / "components.py"
     target_path = components_path if components_path.exists() else game_dir / "model_lib.py"
@@ -52,6 +47,74 @@ def _load_components_module(game_dir: Path):
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
+def _collect_grid_sensitive_function_names(function_node: ast.FunctionDef, grid_param: str) -> set[str]:
+    loaded_names: set[str] = set()
+
+    class Visitor(ast.NodeVisitor):
+        def visit_Subscript(self, node: ast.Subscript) -> None:
+            if isinstance(node.value, ast.Name) and node.value.id == grid_param:
+                loaded_names.add("__grid_subscript__")
+            self.generic_visit(node)
+
+        def visit_Compare(self, node: ast.Compare) -> None:
+            names = [n.id for n in ast.walk(node) if isinstance(n, ast.Name)]
+            if grid_param in names:
+                loaded_names.add("__grid_compare__")
+            self.generic_visit(node)
+
+        def visit_Call(self, node: ast.Call) -> None:
+            func = node.func
+            func_name = None
+            if isinstance(func, ast.Name):
+                func_name = func.id
+            elif isinstance(func, ast.Attribute):
+                func_name = func.attr
+            if any(isinstance(arg, ast.Name) and arg.id == grid_param for arg in node.args):
+                if func_name:
+                    loaded_names.add(func_name)
+            self.generic_visit(node)
+
+    Visitor().visit(function_node)
+    return loaded_names
+def _detector_source_issues(game_dir: Path, components_module: Any) -> list[dict[str, Any]]:
+    components_path = game_dir / "components.py"
+    if not components_path.exists():
+        return []
+    source = components_path.read_text()
+    tree = ast.parse(source, filename=str(components_path))
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+    }
+
+    registry = getattr(components_module, "COMPONENT_REGISTRY", None)
+    if not isinstance(registry, dict):
+        return []
+
+    issues: list[dict[str, Any]] = []
+    for kind, detector in registry.items():
+        func_name = getattr(detector, "__name__", "")
+        node = functions.get(func_name)
+        if node is None or not node.args.args:
+            continue
+        grid_param = node.args.args[0].arg
+        sensitive_names = _collect_grid_sensitive_function_names(node, grid_param)
+        if sensitive_names:
+            continue
+        lineno = int(getattr(node, "lineno", 1))
+        issues.append(
+            {
+                "kind": str(kind),
+                "detector": func_name or str(kind),
+                "line": lineno,
+                "message": (
+                    "detector does not inspect grid contents; static-coordinate or shape-only "
+                    "detectors do not satisfy component coverage"
+                ),
+            }
+        )
+    return issues
 
 
 def _bbox_from_cells(cells: list[tuple[int, int]]) -> tuple[int, int, int, int]:
@@ -192,6 +255,13 @@ def _component_coverage_markdown(payload: dict[str, Any]) -> str:
     if observed_shapes:
         lines.append(f"observed_shapes: {', '.join(str(shape) for shape in observed_shapes)}")
     failure = payload.get("first_failure")
+    detector_issues = payload.get("detector_issues") or []
+    if detector_issues:
+        lines.extend(["", "detector_issues:"])
+        for issue in detector_issues:
+            lines.append(
+                f"- {issue['kind']} / {issue['detector']} (line {issue['line']}): {issue['message']}"
+            )
     if not failure:
         lines.extend(["", "All seen states for this level are covered by component bounding boxes."])
         return "\n".join(lines) + "\n"
@@ -320,14 +390,20 @@ def run_component_coverage(game_dir: Path, *, level: int | None) -> tuple[dict[s
         "states_checked": len(states),
         "observed_shapes": [],
         "first_failure": None,
+        "detector_issues": _detector_source_issues(game_dir, components_module),
     }
     observed_shapes: list[str] = []
+
+    if payload["detector_issues"]:
+        payload["status"] = "fail"
 
     for state in states:
         grid = artifact_helpers.load_hex_grid(game_dir / state["path"])
         shape_label = f"{int(grid.shape[0])}x{int(grid.shape[1])}"
         if shape_label not in observed_shapes:
             observed_shapes.append(shape_label)
+        if payload["status"] == "fail" and payload["detector_issues"]:
+            continue
         components = _collect_components(components_module, grid)
         covered = _coverage_mask(grid.shape, components)
         uncovered = ~covered
@@ -344,8 +420,7 @@ def run_component_coverage(game_dir: Path, *, level: int | None) -> tuple[dict[s
             }
             break
 
-    if payload["status"] == "pass":
-        payload["observed_shapes"] = observed_shapes
+    payload["observed_shapes"] = observed_shapes
 
     json_path, md_path = _component_report_paths(game_dir)
     _write_json_and_markdown(json_path, md_path, payload, _component_coverage_markdown(payload))
