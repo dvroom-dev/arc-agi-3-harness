@@ -174,6 +174,11 @@ def _state_artifacts_root_for_active_game() -> Path | None:
     return Path(state_dir).expanduser() / "game_artifacts" / f"game_{safe}"
 
 
+def canonical_game_artifacts_dir(game_dir: Path) -> Path | None:
+    del game_dir  # Reserved for future per-workspace routing if needed.
+    return _state_artifacts_root_for_active_game()
+
+
 def _remove_path(path: Path) -> None:
     if not path.exists() and not path.is_symlink():
         return
@@ -276,6 +281,53 @@ def resolve_level_dir(game_dir: Path, level: int) -> Path | None:
     return None
 
 
+def _overlay_latest_compare_artifacts(
+    *,
+    game_dir: Path,
+    temp_level_current: Path,
+    visible_level: int,
+) -> None:
+    current_compare_path = game_dir / "current_compare.json"
+    current_compare_md_path = game_dir / "current_compare.md"
+    try:
+        current_compare = json.loads(current_compare_path.read_text())
+    except Exception:
+        return
+    if not isinstance(current_compare, dict):
+        return
+    try:
+        compare_level = int(current_compare.get("level"))
+    except Exception:
+        return
+    if compare_level != int(visible_level):
+        return
+
+    temp_compare_dir = temp_level_current / "sequence_compare"
+    temp_compare_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(current_compare_path, temp_compare_dir / "current_compare.json")
+    if current_compare_md_path.exists():
+        shutil.copy2(current_compare_md_path, temp_compare_dir / "current_compare.md")
+
+    reports = current_compare.get("reports")
+    if not isinstance(reports, list):
+        return
+    source_dirs = [
+        game_dir / "level_current" / "sequence_compare",
+        game_dir / f"level_{int(visible_level)}" / "sequence_compare",
+    ]
+    for report in reports:
+        if not isinstance(report, dict):
+            continue
+        sequence_id = str(report.get("sequence_id") or "").strip()
+        if not sequence_id:
+            continue
+        for source_dir in source_dirs:
+            candidate = source_dir / f"{sequence_id}.md"
+            if candidate.exists():
+                shutil.copy2(candidate, temp_compare_dir / f"{sequence_id}.md")
+                break
+
+
 def sync_workspace_level_view(game_dir: Path, *, game_id: str, frontier_level: int) -> int | None:
     visible_level = effective_analysis_level(game_dir, frontier_level=frontier_level)
     if visible_level is None:
@@ -294,6 +346,11 @@ def sync_workspace_level_view(game_dir: Path, *, game_id: str, frontier_level: i
     _remove_path(temp)
     shutil.copytree(src, temp)
     sanitize_visible_level_tree(temp, visible_level=int(visible_level))
+    _overlay_latest_compare_artifacts(
+        game_dir=game_dir,
+        temp_level_current=temp,
+        visible_level=int(visible_level),
+    )
     (temp / "meta.json").write_text(
         json.dumps(
             {

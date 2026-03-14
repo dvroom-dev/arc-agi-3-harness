@@ -361,6 +361,76 @@ def test_wrapup_surface_validation_accepts_pinned_level_consistency(tmp_path: Pa
     harness_wrapup.validate_wrapup_surfaces_impl(runtime)
 
 
+def test_wrapup_surface_validation_rejects_stale_visible_compare_surface(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "wrapup-stale-visible-compare"
+    game_dir = run_dir / "agent" / "game_ls20"
+    arc_state_dir = run_dir / "supervisor" / "arc"
+    super_dir = run_dir / "super"
+    game_dir.mkdir(parents=True, exist_ok=True)
+    arc_state_dir.mkdir(parents=True, exist_ok=True)
+    super_dir.mkdir(parents=True, exist_ok=True)
+    (arc_state_dir / "state.json").write_text(json.dumps({"current_level": 2}, indent=2) + "\n")
+    (super_dir / "state.json").write_text(json.dumps({"activeMode": "code_model"}, indent=2) + "\n")
+    (game_dir / ".analysis_level_pin.json").write_text(
+        json.dumps({"level": 1, "phase": "pending_code_model"}, indent=2) + "\n"
+    )
+    (game_dir / "component_coverage.json").write_text(json.dumps({"status": "pass"}, indent=2) + "\n")
+    (game_dir / "current_compare.json").write_text(
+        json.dumps(
+            {
+                "all_match": True,
+                "level": 1,
+                "compared_sequences": 1,
+                "diverged_sequences": 0,
+                "reports": [
+                    {"sequence_id": "seq_0001", "matched": True, "actions_compared": 26, "divergence_step": None}
+                ],
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    (game_dir / "component_mismatch.json").write_text(
+        json.dumps({"status": "clean"}, indent=2) + "\n"
+    )
+    _write_level_current_surface(game_dir, level=1, pinned=True)
+    visible_compare_dir = game_dir / "level_current" / "sequence_compare"
+    visible_compare_dir.mkdir(parents=True, exist_ok=True)
+    (visible_compare_dir / "current_compare.json").write_text(
+        json.dumps(
+            {
+                "all_match": False,
+                "level": 1,
+                "compared_sequences": 1,
+                "diverged_sequences": 1,
+                "reports": [
+                    {"sequence_id": "seq_0001", "matched": False, "actions_compared": 1, "divergence_step": 1}
+                ],
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    (game_dir / "model_status.json").write_text(
+        json.dumps(
+            {
+                "state": {
+                    "current_level": 1,
+                    "levels_completed": 0,
+                    "available_model_levels": [1],
+                }
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+    runtime = _make_runtime(run_dir, arc_state_dir, game_dir)
+
+    with pytest.raises(RuntimeError, match="current_compare mismatch|reports diverged"):
+        harness_wrapup.validate_wrapup_surfaces_impl(runtime)
+
+
 def test_wrapup_transition_requires_explicit_supervisor_certification(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "wrapup-certify-missing-payload"
     game_dir = run_dir / "agent" / "game_ls20"

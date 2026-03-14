@@ -11,6 +11,7 @@ import numpy as np
 from .sequence_compare_render import current_compare_markdown, report_md
 from .utils import (
     action_from_name,
+    canonical_game_artifacts_dir,
     clear_analysis_level_pin,
     diff_payload,
     load_frontier_level_from_arc_state,
@@ -247,6 +248,19 @@ def _persist_current_compare(session, payload: dict[str, Any]) -> None:
                 continue
             _write_text_atomic(compare_dir / f"{sequence_id}.md", report_md(report))
 
+    canonical_artifacts = canonical_game_artifacts_dir(session.game_dir)
+    if canonical_artifacts is not None:
+        canonical_compare_dir = canonical_artifacts / f"level_{int(payload.get('level', session.env.current_level))}" / "sequence_compare"
+        _write_text_atomic(canonical_compare_dir / "current_compare.json", json_text)
+        _write_text_atomic(canonical_compare_dir / "current_compare.md", md_text)
+        for report in reports:
+            if not isinstance(report, dict):
+                continue
+            sequence_id = str(report.get("sequence_id") or "").strip()
+            if not sequence_id:
+                continue
+            _write_text_atomic(canonical_compare_dir / f"{sequence_id}.md", report_md(report))
+
     mismatch_refresh_error = _refresh_component_mismatch(session)
     if mismatch_refresh_error:
         summary_payload["component_mismatch_refresh_error"] = mismatch_refresh_error
@@ -256,6 +270,9 @@ def _persist_current_compare(session, payload: dict[str, Any]) -> None:
         if level_compare is not None:
             compare_dir = level_compare / "sequence_compare"
             _write_text_atomic(compare_dir / "current_compare.json", json_text)
+        if canonical_artifacts is not None:
+            canonical_compare_dir = canonical_artifacts / f"level_{int(payload.get('level', session.env.current_level))}" / "sequence_compare"
+            _write_text_atomic(canonical_compare_dir / "current_compare.json", json_text)
 
 
 def compare_sequences(

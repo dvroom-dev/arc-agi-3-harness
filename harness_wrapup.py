@@ -138,6 +138,9 @@ def validate_wrapup_surfaces_impl(runtime) -> None:
     model_status = _read_json_if_exists(game_dir / "model_status.json") or {}
     model_state = model_status.get("state") if isinstance(model_status.get("state"), dict) else {}
     compare = _read_json_if_exists(game_dir / "current_compare.json") or {}
+    visible_compare = _read_json_if_exists(
+        game_dir / "level_current" / "sequence_compare" / "current_compare.json"
+    ) or {}
 
     level_current_level = _int_or_none(level_current_meta.get("level"))
     level_current_pinned = level_current_meta.get("analysis_level_pinned")
@@ -189,6 +192,46 @@ def validate_wrapup_surfaces_impl(runtime) -> None:
             errors.append(f"model_status.state.available_model_levels leaked frontier levels {leaked}")
     if compare and compare_level != pinned_level:
         errors.append(f"current_compare.level={compare_level} expected={pinned_level}")
+    visible_compare_level = _int_or_none(visible_compare.get("level"))
+    if visible_compare and visible_compare_level != pinned_level:
+        errors.append(
+            "level_current.sequence_compare.current_compare.level="
+            f"{visible_compare_level} expected={pinned_level}"
+        )
+    if compare and visible_compare:
+        for key in ("all_match", "compared_sequences", "diverged_sequences"):
+            if compare.get(key) != visible_compare.get(key):
+                errors.append(
+                    "level_current.sequence_compare.current_compare mismatch on "
+                    f"{key}: root={compare.get(key)!r} visible={visible_compare.get(key)!r}"
+                )
+        root_reports = compare.get("reports")
+        visible_reports = visible_compare.get("reports")
+        if isinstance(root_reports, list) and isinstance(visible_reports, list):
+            root_summary = [
+                (
+                    str(report.get("sequence_id")),
+                    bool(report.get("matched")),
+                    _int_or_none(report.get("actions_compared")),
+                    _int_or_none(report.get("divergence_step")),
+                )
+                for report in root_reports
+                if isinstance(report, dict)
+            ]
+            visible_summary = [
+                (
+                    str(report.get("sequence_id")),
+                    bool(report.get("matched")),
+                    _int_or_none(report.get("actions_compared")),
+                    _int_or_none(report.get("divergence_step")),
+                )
+                for report in visible_reports
+                if isinstance(report, dict)
+            ]
+            if root_summary != visible_summary:
+                errors.append(
+                    "level_current.sequence_compare.current_compare reports diverged from root current_compare"
+                )
 
     visible_completed = max(0, pinned_level - 1)
     for path, payload in _iter_visible_json_payloads(game_dir / "level_current"):

@@ -305,3 +305,76 @@ def test_sync_workspace_level_view_redacts_cross_level_turn_artifacts_while_pinn
         "0000",
         "0000",
     ]
+
+
+def test_sync_workspace_level_view_preserves_latest_pinned_compare_artifacts(tmp_path: Path) -> None:
+    from arc_model_runtime.utils import sync_workspace_level_view
+
+    game_dir = tmp_path / "game_ls20"
+    game_dir.mkdir(parents=True, exist_ok=True)
+    (game_dir / ".analysis_level_pin.json").write_text(
+        json.dumps({"level": 1, "phase": "pending_code_model"}, indent=2)
+    )
+
+    arc_state_dir = tmp_path / "arc"
+    artifacts_root = arc_state_dir / "game_artifacts" / "game_ls20" / "level_1"
+    _write_hex(artifacts_root / "initial_state.hex", ["0000", "0000"])
+    _write_hex(artifacts_root / "current_state.hex", ["0000", "0000"])
+    stale_compare_dir = artifacts_root / "sequence_compare"
+    stale_compare_dir.mkdir(parents=True, exist_ok=True)
+    stale_payload = {
+        "level": 1,
+        "all_match": False,
+        "compared_sequences": 1,
+        "diverged_sequences": 1,
+        "reports": [
+            {
+                "sequence_id": "seq_0001",
+                "matched": False,
+                "actions_compared": 1,
+                "divergence_step": 1,
+            }
+        ],
+    }
+    (stale_compare_dir / "current_compare.json").write_text(
+        json.dumps(stale_payload, indent=2) + "\n"
+    )
+    (stale_compare_dir / "seq_0001.md").write_text("# stale report\n", encoding="utf-8")
+
+    fresh_payload = {
+        "level": 1,
+        "all_match": True,
+        "compared_sequences": 1,
+        "diverged_sequences": 0,
+        "reports": [
+            {
+                "sequence_id": "seq_0001",
+                "matched": True,
+                "actions_compared": 26,
+                "divergence_step": None,
+            }
+        ],
+    }
+    (game_dir / "current_compare.json").write_text(json.dumps(fresh_payload, indent=2) + "\n")
+    (game_dir / "current_compare.md").write_text("# fresh compare\n", encoding="utf-8")
+    live_compare_dir = game_dir / "level_current" / "sequence_compare"
+    live_compare_dir.mkdir(parents=True, exist_ok=True)
+    (live_compare_dir / "seq_0001.md").write_text("# fresh report\n", encoding="utf-8")
+
+    old = os.environ.get("ARC_STATE_DIR")
+    os.environ["ARC_STATE_DIR"] = str(arc_state_dir)
+    try:
+        visible = sync_workspace_level_view(game_dir, game_id="ls20", frontier_level=2)
+    finally:
+        if old is None:
+            os.environ.pop("ARC_STATE_DIR", None)
+        else:
+            os.environ["ARC_STATE_DIR"] = old
+
+    assert visible == 1
+    visible_payload = json.loads(
+        (game_dir / "level_current" / "sequence_compare" / "current_compare.json").read_text()
+    )
+    assert visible_payload["all_match"] is True
+    assert visible_payload["reports"][0]["actions_compared"] == 26
+    assert (game_dir / "level_current" / "sequence_compare" / "seq_0001.md").read_text() == "# fresh report\n"
