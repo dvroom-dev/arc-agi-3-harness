@@ -111,7 +111,6 @@ def test_component_mismatch_helper_reads_wrapped_current_compare_payload(tmp_pat
     step_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
     _write_hex(step_dir / "before_state.hex", ["4444", "4444", "4444", "4444"])
     _write_hex(step_dir / "after_state.hex", ["4444", "4994", "4994", "4444"])
-    _write_hex(step_dir / "diff.hex", ["....", ".99.", ".99.", "...."])
     (step_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
 
     seq_payload = {
@@ -139,7 +138,6 @@ def test_component_mismatch_helper_reads_wrapped_current_compare_payload(tmp_pat
                 "files": {
                     "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
                     "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
-                    "diff_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/diff.hex",
                     "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
                 },
             }
@@ -221,7 +219,6 @@ def test_component_mismatch_helper_does_not_fall_back_to_canonical_level_artifac
     _write_hex(canonical_level / "initial_state.hex", ["4444", "4444", "4444", "4444"])
     _write_hex(canonical_step / "before_state.hex", ["4444", "4444", "4444", "4444"])
     _write_hex(canonical_step / "after_state.hex", ["4444", "4994", "4994", "4444"])
-    _write_hex(canonical_step / "diff.hex", ["....", ".99.", ".99.", "...."])
     (canonical_step / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
     (canonical_level / "sequences" / "seq_0001.json").write_text(
         json.dumps(
@@ -248,7 +245,6 @@ def test_component_mismatch_helper_does_not_fall_back_to_canonical_level_artifac
                         "files": {
                             "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
                             "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
-                            "diff_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/diff.hex",
                             "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
                         },
                     }

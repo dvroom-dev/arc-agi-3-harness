@@ -128,7 +128,6 @@ def test_main_exec_prints_script_stdout(monkeypatch, capsys) -> None:
                 "trace_file": "trace.md",
                 "artifacts": {
                     "after_state_hex": "ABCD",
-                    "diff_hex": "..CD",
                 },
             },
             False,

@@ -57,7 +57,6 @@ def test_model_compare_report_markdown_summarizes_large_diffs(tmp_path: Path) ->
     step_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
     _write_hex(step_dir / "before_state.hex", before_rows)
     _write_hex(step_dir / "after_state.hex", after_rows)
-    _write_hex(step_dir / "diff.hex", ["....", "....", "....", "...."])
     (step_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
 
     seq_payload = {
@@ -91,7 +90,6 @@ def test_model_compare_report_markdown_summarizes_large_diffs(tmp_path: Path) ->
                 "files": {
                     "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
                     "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
-                    "diff_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/diff.hex",
                     "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
                 },
             }

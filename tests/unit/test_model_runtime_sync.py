@@ -166,7 +166,6 @@ def test_compare_sequences_uses_pinned_solved_level_until_theory_and_code_model_
     step_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
     _write_hex(step_dir / "before_state.hex", ["0000", "0000"])
     _write_hex(step_dir / "after_state.hex", ["1111", "1111"])
-    _write_hex(step_dir / "diff.hex", ["1111", "1111"])
     (step_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
     seq_payload = {
         "schema_version": "arc_repl.level_sequence.v1",
@@ -194,7 +193,6 @@ def test_compare_sequences_uses_pinned_solved_level_until_theory_and_code_model_
                 "files": {
                     "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
                     "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
-                    "diff_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/diff.hex",
                     "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
                 },
             }
@@ -267,7 +265,6 @@ def test_sync_workspace_level_view_redacts_cross_level_turn_artifacts_while_pinn
     _write_hex(artifacts_root / "current_state.hex", ["2222", "2222"])
     _write_hex(artifacts_root / "turn_0021" / "before_state.hex", ["0000", "0000"])
     _write_hex(artifacts_root / "turn_0021" / "after_state.hex", ["2222", "2222"])
-    _write_hex(artifacts_root / "turn_0021" / "diff.hex", ["2222", "2222"])
     (artifacts_root / "turn_0021" / "meta.json").write_text(
         json.dumps(
             {

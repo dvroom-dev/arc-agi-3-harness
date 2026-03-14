@@ -224,12 +224,6 @@ def sanitize_visible_level_tree(level_root: Path, *, visible_level: int) -> None
         if dirty:
             _write_jsonl_atomic(jsonl_path, rows)
 
-    for diff_path in sorted(level_root.rglob("diff.hex")):
-        try:
-            diff_path.unlink()
-        except Exception:
-            pass
-
     if current_state_rows is not None:
         current_state_path = level_root / "current_state.hex"
         if current_state_path.exists():

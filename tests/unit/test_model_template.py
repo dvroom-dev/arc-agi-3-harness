@@ -77,7 +77,6 @@ def test_model_compare_sequences_writes_markdown_report(tmp_path: Path) -> None:
     step_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
     _write_hex(step_dir / "before_state.hex", initial_rows)
     _write_hex(step_dir / "after_state.hex", initial_rows)
-    _write_hex(step_dir / "diff.hex", ["....", "....", "....", "...."])
     (step_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
 
     seq_payload = {
@@ -111,7 +110,6 @@ def test_model_compare_sequences_writes_markdown_report(tmp_path: Path) -> None:
                 "files": {
                     "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
                     "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
-                    "diff_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/diff.hex",
                     "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
                 },
             }
@@ -166,7 +164,6 @@ def test_model_compare_sequences_skips_reset_ended_sequences_by_default(tmp_path
         step_dir = game_dir / "level_1" / "sequences" / seq_id / "actions" / "step_0001_action_000001_action1"
         _write_hex(step_dir / "before_state.hex", initial_rows)
         _write_hex(step_dir / "after_state.hex", initial_rows)
-        _write_hex(step_dir / "diff.hex", ["....", "....", "....", "...."])
         (step_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
 
     seq_1 = {
@@ -200,7 +197,6 @@ def test_model_compare_sequences_skips_reset_ended_sequences_by_default(tmp_path
                 "files": {
                     "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
                     "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
-                    "diff_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/diff.hex",
                     "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
                 },
             }
@@ -217,7 +213,6 @@ def test_model_compare_sequences_skips_reset_ended_sequences_by_default(tmp_path
                 "files": {
                     "before_state_hex": "sequences/seq_0002/actions/step_0001_action_000001_action1/before_state.hex",
                     "after_state_hex": "sequences/seq_0002/actions/step_0001_action_000001_action1/after_state.hex",
-                    "diff_hex": "sequences/seq_0002/actions/step_0001_action_000001_action1/diff.hex",
                     "meta_json": "sequences/seq_0002/actions/step_0001_action_000001_action1/meta.json",
                 },
             }
@@ -247,7 +242,6 @@ def test_model_compare_sequences_returns_error_when_no_eligible_sequences(tmp_pa
     step_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
     _write_hex(step_dir / "before_state.hex", initial_rows)
     _write_hex(step_dir / "after_state.hex", initial_rows)
-    _write_hex(step_dir / "diff.hex", ["....", "....", "....", "...."])
     (step_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
 
     seq_payload = {
@@ -281,7 +275,6 @@ def test_model_compare_sequences_returns_error_when_no_eligible_sequences(tmp_pa
                 "files": {
                     "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
                     "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
-                    "diff_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/diff.hex",
                     "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
                 },
             }
@@ -337,7 +330,6 @@ def test_inspect_sequence_current_mismatch_reports_step_artifacts(tmp_path: Path
     step_dir = game_dir / "level_2" / "sequences" / "seq_0002" / "actions" / "step_0001_action_000058_action1"
     _write_hex(step_dir / "before_state.hex", ["0000", "0000"])
     _write_hex(step_dir / "after_state.hex", ["1111", "1111"])
-    _write_hex(step_dir / "diff.hex", ["^^^^", "^^^^"])
     (step_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
 
     seq_payload = {
@@ -371,7 +363,6 @@ def test_inspect_sequence_current_mismatch_reports_step_artifacts(tmp_path: Path
                 "files": {
                     "before_state_hex": "sequences/seq_0002/actions/step_0001_action_000058_action1/before_state.hex",
                     "after_state_hex": "sequences/seq_0002/actions/step_0001_action_000058_action1/after_state.hex",
-                    "diff_hex": "sequences/seq_0002/actions/step_0001_action_000058_action1/diff.hex",
                     "meta_json": "sequences/seq_0002/actions/step_0001_action_000058_action1/meta.json",
                 },
             }
