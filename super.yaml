@@ -28,6 +28,10 @@ prompt_parts:
         Use filesystem artifacts as the canonical read path when the current mode allows them: `level_current/**`, `level_current/sequence_compare/**`, `current_compare.md`, and `theory.md`.
         Do not probe `level_current/sequences/**` just to see whether sequence files exist. First use `current_compare.*`, `level_current/sequence_compare/*.md`, and `turn_index.jsonl`/workspace metadata to determine whether a real action sequence has been recorded.
         `current_compare.md` and `current_compare.json` are generated artifacts. Read them; do not hand-edit them.
+  current_theory_file:
+    - literal: |
+        Current `theory.md`:
+    - agent_file: theory.md
   component_model_runtime:
     - literal: |
         Component workflow:
@@ -479,6 +483,7 @@ modes:
             - `inspect_components.py`
             - `component_coverage.md`
             - `level_current/sequence_compare/current_compare.md`
+        - prompt_part: current_theory_file
         - prompt_part: supervisor_context_block
         - prompt_part: switch_mode_usage
     agent_rules:
@@ -610,6 +615,7 @@ modes:
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
             For actionful probes, inspect the returned `artifacts.after_state_hex` first before reopening on-disk turn artifacts.
             Only write `theory.md` in this mode.
+        - prompt_part: current_theory_file
         - prompt_part: supervisor_context_block
         - prompt_part: switch_mode_usage
     agent_rules:
@@ -723,6 +729,7 @@ modes:
             Do not investigate harness/runtime/tooling behavior in this mode. If compare or intercept behavior looks inconsistent, record the exact workspace artifacts involved and return to the supervisor instead of inspecting internals.
             You may read raw state artifacts in this mode because level-1 discovery depends on them.
             Only write `theory.md` in this mode.
+        - prompt_part: current_theory_file
         - prompt_part: supervisor_context_block
         - prompt_part: switch_mode_usage
     agent_rules:
@@ -919,6 +926,7 @@ modes:
             - `component_coverage.md`
             - `current_compare.md`
             - `level_current/sequence_compare/current_compare.md`
+        - prompt_part: current_theory_file
         - prompt_part: supervisor_context_block
         - prompt_part: switch_mode_usage
     agent_rules:
