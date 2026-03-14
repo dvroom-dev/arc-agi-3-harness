@@ -3,9 +3,9 @@
 Theory mode owns this file.
 Define evidence-backed visible components here and keep every visible pixel in
 every seen state covered by at least one component bounding box.
-Use neutral code names only. Do not encode semantic roles such as player,
-cursor, target, goal, exit, enemy, or HUD into component identifiers unless
-action-linked evidence has already proven that role. Semantic guesses belong in
+Use neutral code names only. Do not encode assumed functions or semantic roles
+into component identifiers unless action-linked evidence has already proven that
+role. Semantic guesses belong in
 `theory.md`, not in this file.
 """
 
@@ -61,7 +61,7 @@ def make_component(
 # - return one ComponentBox per independently moving/recoloring/consumable region
 # - avoid one giant umbrella bbox when separate regions can change independently
 # - prefer neutral names like `feature_x`, `cluster_a`, `shape_1`, `marker_b`
-#   rather than semantic names like `player`, `target`, `goal`, or `cursor`
+#   rather than names that assume purpose or behavior
 #
 # def find_all_feature_x(grid: np.ndarray) -> list[ComponentBox]:
 #     boxes: list[ComponentBox] = []

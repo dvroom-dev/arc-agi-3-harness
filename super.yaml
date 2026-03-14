@@ -192,9 +192,9 @@ supervisor:
               Bootstrap handoff requirements:
               - Ask for only a tiny real-game action sample: one or two distinct actions maximum.
               - Goal of the sample:
-                - identify the controllable actor from action-linked evidence
+                - identify which visible feature(s) respond directly to actions
                 - identify first-order action semantics
-                - note any visible HUD/resource changes
+                - note any visible state-display or budget-like changes
               - Do not ask for route planning, broad map narration, or solution attempts yet.
               - Tell the mode to record the observed evidence in `theory.md` and then switch to `theory`.
     agent_tool_intercept:
@@ -287,7 +287,7 @@ agent:
           - The first level of a game will be simple, do not over-complicate your theories. Each subsequent level will add some twist, but they always build on rules established in earlier levels.
           - Assume mechanics and features are reused across levels, but do not assume feature positions carry over.
           - Define features by visual form/behavior (possibly multi-color, multi-part), not single colors or exact positions.
-          - Some games divide the game's space conceptually between the game map and a HUD. The primary distinction is that elements in the map usually have direct spacial relationships with other map elements but not HUD elements.
+          - Some games divide visible state between an interactive map and a separate status/display area. Elements in the map often have direct spatial relationships with other map elements, while status/display elements may only reflect state.
           - Assume all features in the game state are important to understanding and solving the game. If a feature is unexplained, you probably can't efficiently solve the level yet.
           - Certain conditions can trigger GAME_OVER which resets the game; track causes and prevention theories.
           - A common game over mechanic is a limit to the number of actions that can be taken in a level. If so there will be some visual game state feature representing this limit. Running `arc_repl reset_level` can avoid GAME_OVER at the cost of level progress.
@@ -431,7 +431,9 @@ modes:
             `components.py` is primarily theory-owned. Define or revise `find_all_*` detectors here; `code_model` may patch detector details only when compare cannot be interpreted correctly without that detector fix.
             If a solved-level compare pin is active, stay strictly scoped to that pinned level. Do not record frontier-level observations, components, or hypotheses until the pin is cleared.
             Do not exhaustively restate stable geometry. After one initial survey, only reopen a file if it answers a specific open question or verifies a concrete handoff.
-            After the first survey, prioritize controllable actors, resource/HUD state, and the smallest set of unresolved non-wall interactables. Static walls and corridor geometry are supporting evidence, not first-class deliverables.
+            After the first survey, prioritize the smallest set of action-responsive features, state-display changes, and unresolved non-wall interactables. Static walls and corridor geometry are supporting evidence, not first-class deliverables.
+            A changed feature is not automatically the next thing to revisit. It may be a destination, a trigger, a gate, a progress display, or a side effect. Keep multiple live explanations when the evidence does not discriminate.
+            When evidence is still weak, explicitly record at least two plausible alternative theories before committing the next probe, and make that probe discriminate between them.
             Once a completion theory or trigger path is falsified, do not revisit it without new action-linked evidence.
             If you can already name the smallest next step, switch modes promptly instead of continuing broad analysis.
         - prompt_part: artifact_read_path
@@ -446,7 +448,7 @@ modes:
             Deliverables for this mode:
             - update `theory.md` with components, action effects, completion candidates, and unknowns;
             - keep `components.py` detectors broad enough that every visible pixel in every seen state for the active level lies inside at least one component bounding box;
-            - keep `components.py` names neutral; if you think a component is a player/cursor/target/goal, record that only as a role hypothesis in `theory.md` with evidence;
+            - keep `components.py` names neutral; if you think a component has a specific function, record that only as a role hypothesis in `theory.md` with evidence;
             - maintain the `# Explore Plan` section in `theory.md`; it is the only handoff surface for `explore_and_solve`;
             - run `python3 inspect_components.py --coverage --level <LEVEL>` before leaving theory mode;
             - use `component_coverage.*` as the canonical source for observed grid shapes; do not count rendered `Read` line numbers to infer dimensions;
@@ -456,7 +458,9 @@ modes:
             - while a solved-level compare pin is active, do not use or request `arc_repl`; theory remains read-only and mutations belong only in `explore_and_solve`;
             - on level 1 before the first completion, speculate as needed from the visible state, but mark speculation clearly in `theory.md` and turn it into exactly one target class in `# Explore Plan`;
             - on level 1, develop a completion theory in `theory.md`, and hand off to `explore_and_solve` only through the single current `# Explore Plan` target class;
-            - after the first survey, stop expanding static geometry coverage once the controlled actor, any visible resource/HUD state, and the smallest set of unresolved non-wall interactables are named;
+            - after the first survey, stop expanding static geometry coverage once the main action-responsive features, any visible state-display changes, and the smallest set of unresolved non-wall interactables are named;
+            - when evidence is ambiguous, keep at least two plausible alternative theories live in `theory.md` and choose a next probe that distinguishes between them;
+            - do not treat a changed feature as automatically requiring direct exploration; first state what competing explanations remain for that change;
             - if a completion hypothesis or trigger condition was already falsified, do not hand it off again without new evidence that changes the case;
             - when movement semantics and route topology are already confirmed, `# Explore Plan` may hand off one bounded multi-action route instead of splitting each repeated move into its own target;
             - if `current_compare.md` is clean and `# Explore Plan` already contains one concrete target with explicit actions or route plus stop condition, switch immediately instead of doing more theory-side recounting or model introspection;
@@ -482,10 +486,12 @@ modes:
         - "In theory mode, do not probe `level_current/sequences/**` unless `current_compare.*`, `component_mismatch.*`, or `turn_index.jsonl` indicate that a real sequence artifact already exists for the question you are answering."
         - "In theory mode, do not inspect `.ai-supervisor/**`, blob files, provider/runtime source, or other control-plane internals. If an error references those paths, summarize the workspace-visible contradiction and stop."
         - "In theory mode, do not read `model.py` or `model_lib.py`; model/runtime debugging belongs in `code_model`."
-        - "In theory mode, use raw `.hex`/`.diff` evidence to define named components and keep every visible pixel accounted for by component bounding boxes."
+        - "In theory mode, use raw `.hex` evidence together with compare/component artifacts to define named components and keep every visible pixel accounted for by component bounding boxes."
         - "On level 1 before the first completion, if a real-game probe is needed, switch_mode to `explore_and_solve` only after writing a fresh `# Explore Plan` section in `theory.md` with exactly one target class."
         - "Use speculation in theory mode when evidence is incomplete, but label it clearly as a hypothesis and keep the active `# Explore Plan` scoped to one target class."
-        - "After the first survey, prioritize the controlled actor, any HUD/resource state, and unresolved non-wall interactables; do not keep expanding static wall/corridor descriptions once those anchors are named."
+        - "When evidence is weak or ambiguous, keep at least two plausible alternative theories live in `theory.md` and choose the next probe to discriminate between them."
+        - "A changed feature may be a destination, trigger, gate, progress display, or side effect; do not jump from 'it changed' to one assumed function without discriminating evidence."
+        - "After the first survey, prioritize action-responsive features, state-display changes, and unresolved non-wall interactables; do not keep expanding static wall/corridor descriptions once those anchors are named."
         - "Do not revisit a falsified completion hypothesis or trigger path unless new action-linked evidence changes it."
         - "When movement semantics and route topology are already evidenced, a level-1 `# Explore Plan` may hand off one bounded multi-action route to test a single completion theory or reach one concrete trigger."
         - "Do not split a deterministic repeated-move route into separate per-step target classes once the repeated move semantics are already confirmed."
@@ -586,7 +592,7 @@ modes:
         - literal: |
             Active game: `${vars.game_id}`.
             Explore-and-solve is level-1 only:
-            - if `theory.md` does not yet contain a concrete `# Explore Plan`, treat this as the initial bootstrap turn: take only a very small action sample to identify the controlled actor, action semantics, and any visible HUD/resource changes, then write that evidence into `theory.md` and switch to theory;
+            - if `theory.md` does not yet contain a concrete `# Explore Plan`, treat this as the initial bootstrap turn: take only a very small action sample to identify which visible feature(s) respond directly to actions, the action semantics, and any visible state-display or budget changes, then write that evidence into `theory.md` and switch to theory;
             - otherwise read the current `# Explore Plan` section in `theory.md` first and treat it as the entire contract for this turn;
             - perform the minimal real-game probes or bounded route needed to answer that one handed-off target class;
             - stay focused only on that handed-off target class until it is answered, falsified, or its explicit bounded-route stop condition is reached;
@@ -594,7 +600,7 @@ modes:
             - then switch_mode promptly.
             Do not invent a new route plan, feature target, or solution theory in this mode after the bootstrap turn. If the current `# Explore Plan` is exhausted, switch back to theory.
             If the current `# Explore Plan` is a bounded route, do not bounce back to theory after each expected repeated move; keep going until completion, a novel event, the explicit stop condition, or a blocker.
-            The bootstrap turn should stay tiny: one or two distinct actions maximum, only enough to identify the controllable actor and first-order movement/resource effects.
+            The bootstrap turn should stay tiny: one or two distinct actions maximum, only enough to identify first-order action effects and which visible features respond to them.
             Once a route is deterministic and directly tests the current handed-off completion theory, keep executing it until the explicit stop condition instead of turning repeated moves into fresh micro-plans.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
             For actionful probes, inspect the returned `artifacts.after_state_hex` first before reopening on-disk turn artifacts.

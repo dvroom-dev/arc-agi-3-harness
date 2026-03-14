@@ -2,8 +2,8 @@ Game <id> Theory
 
 # Elements
 - Name:
-  - Code name: neutral identifier used in `components.py` (for example `feature_a`, `cluster_b`, `box_c`). Do not use semantic names like `player`, `cursor`, `target`, `goal`, `enemy`, `exit`, or `hud` here until action-linked evidence proves the role.
-  - Role hypothesis: optional semantic meaning recorded in `theory.md` only, with confidence and evidence. Leave blank or use `unknown` until proven.
+  - Code name: neutral identifier used in `components.py` (for example `feature_a`, `cluster_b`, `box_c`). Do not use names that assume function until action-linked evidence proves that function.
+  - Role hypothesis: optional functional guess recorded in `theory.md` only, with confidence and evidence. Leave blank or use `unknown` until proven.
   - Detector: `find_all_<name>` in `components.py`
   - Covers: which visible pixels/regions this component owns
   - Copies: single|multiple|unknown
@@ -37,10 +37,12 @@ Coverage guardrail:
   - Confidence: High|Medium|Low
   - Evidence:
   - Missing evidence:
+  - Alternative explanations still live:
 
 # Unknowns
 - Unknown:
   - Why it matters:
+  - Plausible alternatives:
   - Smallest next probe or model patch:
 
 # Explore Plan
