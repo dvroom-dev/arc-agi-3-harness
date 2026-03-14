@@ -128,6 +128,7 @@ supervisor:
       - "Any handoff into `explore_and_solve` must include exactly one target class: either (a) one concrete feature target to probe, (b) one concrete completion theory to test, or (c) one bounded multi-action route that directly tests a single completion theory or reaches one concrete trigger."
       - "If current mode is `theory`, `current_compare.md` is clean, and `theory.md` already contains exactly one concrete `# Explore Plan` target with explicit actions or route plus a stop condition, do not allow more theory churn. Route immediately to `explore_and_solve` via `resume_mode_head` when allowed."
       - "A bounded `explore_and_solve` route is allowed only when the movement semantics and path topology needed for that route are already evidenced. It must include an explicit stop condition: completion, novel event, route exhausted, blocked path, or budget boundary."
+      - "When a target is already clear and the route to it is deterministic from existing evidence, prefer one full bounded route to that target over a short route prefix. Do not rewrite a clear route-to-target plan into a 2-3 step fragment unless that fragment is itself the actual discriminating test."
       - "Do not force a return to `theory` after each expected repeated move when the current `explore_and_solve` target is a bounded route and no novel evidence has appeared."
       - "If the trigger is an agent `switch_mode` request that you accept or redirect, carry forward only the supervisor-approved handoff needed for the next mode. Do not forward the agent's full latest assistant message verbatim when it contains extra route planning or mixed objectives."
       - "For rule enforcement decisions, cite concrete evidence pointers (turn/tool/output/file)."
@@ -237,6 +238,7 @@ supervisor:
                  - Put the compare-clean details into the handoff and explicitly name the single highest-value next question to answer.
                  - The supervisor message must tell the agent what to explore next: one concrete unanswered mechanic/completion question and one minimal next real-game probe or solve attempt.
                  - If the next step will be `explore_and_solve`, the handoff must name exactly one target class: either explicit feature targets to probe, one concrete solution theory to test, or one bounded route with a stop condition that directly tests a single completion theory.
+                 - If the evidence already supports a deterministic route to a decisive target, prefer the full bounded route with its stop condition over a short route prefix that would obviously bounce back to theory mid-route.
                  - Inject concise guidance that compare-clean means model parity is clean for explored sequences, not that the level is solved.
               4) If marker is `__ARC_INTERCEPT_RESET_LEVEL__`:
                  - Judge whether the reset is appropriate for the current mode and evidence state.
@@ -463,7 +465,8 @@ modes:
             - when evidence is ambiguous, keep at least two plausible alternative theories live in `theory.md` and choose a next probe that distinguishes between them;
             - do not treat a changed feature as automatically requiring direct exploration; first state what competing explanations remain for that change;
             - if a completion hypothesis or trigger condition was already falsified, do not hand it off again without new evidence that changes the case;
-            - when movement semantics and route topology are already confirmed, `# Explore Plan` may hand off one bounded multi-action route instead of splitting each repeated move into its own target;
+            - when movement semantics and route topology are already confirmed, `# Explore Plan` should hand off one bounded multi-action route to the decisive target instead of splitting each repeated move into its own target;
+            - if the next objective is to reach one visible target or test one completion condition and the full route is already known, write that full bounded route now rather than only the first few moves;
             - if `current_compare.md` is clean and `# Explore Plan` already contains one concrete target with explicit actions or route plus stop condition, switch immediately instead of doing more theory-side recounting or model introspection;
             - while a solved-level compare pin is active and compare is clean, either prepare final pinned-level certification or name one exact pinned-level blocker; do not write frontier-level plans;
             - on later levels, decide whether the next step is `code_model`, `solve_model`, or `recover`;
@@ -596,14 +599,14 @@ modes:
             Explore-and-solve is level-1 only:
             - if `theory.md` does not yet contain a concrete `# Explore Plan`, treat this as the initial bootstrap turn: take only a very small action sample to identify which visible feature(s) respond directly to actions, the action semantics, and any visible state-display or budget changes, then write that evidence into `theory.md` and switch to theory;
             - otherwise read the current `# Explore Plan` section in `theory.md` first and treat it as the entire contract for this turn;
-            - perform the minimal real-game probes or bounded route needed to answer that one handed-off target class;
+            - perform the handed-off bounded route or probe sequence until that one target class is actually answered;
             - stay focused only on that handed-off target class until it is answered, falsified, or its explicit bounded-route stop condition is reached;
             - write the observed outcome and its likely implication into `theory.md`;
             - then switch_mode promptly.
             Do not invent a new route plan, feature target, or solution theory in this mode after the bootstrap turn. If the current `# Explore Plan` is exhausted, switch back to theory.
             If the current `# Explore Plan` is a bounded route, do not bounce back to theory after each expected repeated move; keep going until completion, a novel event, the explicit stop condition, or a blocker.
             The bootstrap turn should stay tiny: one or two distinct actions maximum, only enough to identify first-order action effects and which visible features respond to them.
-            Once a route is deterministic and directly tests the current handed-off completion theory, keep executing it until the explicit stop condition instead of turning repeated moves into fresh micro-plans.
+            Once a route is deterministic and directly tests the current handed-off completion theory or reaches the handed-off target, keep executing it until the explicit stop condition instead of turning repeated moves into fresh micro-plans or short route prefixes.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
             For actionful probes, inspect the returned `artifacts.after_state_hex` first before reopening on-disk turn artifacts.
             Do not use read-only `arc_repl` calls as inspection tools.
@@ -618,11 +621,12 @@ modes:
       requirements:
         - "Use explore_and_solve only on level 1 before the first completion."
         - "On the initial level-1 turn, if `theory.md` has no concrete `# Explore Plan`, use explore_and_solve only for a tiny bootstrap action sample and then return to theory."
-        - "Otherwise, in explore_and_solve, read the current `# Explore Plan` section in `theory.md` and perform only the minimum real-game action sequence or bounded route needed to answer that target class."
+        - "Otherwise, in explore_and_solve, read the current `# Explore Plan` section in `theory.md` and carry out the full handed-off bounded route or probe sequence needed to answer that target class."
         - "Do not exit explore_and_solve until the current `# Explore Plan` target class has been answered or falsified and recorded, or its explicit bounded-route stop condition has been reached."
         - "Do not switch back to theory from explore_and_solve without new real-game evidence from this explore turn, unless a supervisor or policy blocker prevented action execution."
         - "Do not turn explore_and_solve into free-form route planning or broad solution search; stay inside the current `# Explore Plan` target class."
         - "When the current `# Explore Plan` is a bounded route, continue through expected repeated moves without reopening theory unless a novel event, blocker, completion, or explicit stop condition occurs."
+        - "Do not shorten a clear bounded route into a mid-route pause just because several expected repeated moves have already occurred."
         - "The initial bootstrap turn may take at most two distinct real-game actions before returning to theory."
         - "After each real-game probe or solution attempt, update `theory.md` before switching modes."
         - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
