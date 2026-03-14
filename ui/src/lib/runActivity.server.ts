@@ -8,7 +8,7 @@ export async function readRunActivitySummary(
 ): Promise<RunActivitySummary> {
   let branches: AgentConversationBranch[] = [];
   let branchesError: string | null = null;
-  let supervisorActive = false;
+  let supervisorStatus: RunActivitySummary["supervisor"]["status"] = "disabled";
 
   try {
     const payload = await listAgentConversationBranches(runId);
@@ -19,9 +19,13 @@ export async function readRunActivitySummary(
 
   try {
     const timeline = await buildSuperTimeline(runId);
-    supervisorActive = timeline.active;
+    supervisorStatus = timeline.active
+      ? "running"
+      : timeline.conversationId
+        ? "idle"
+        : "disabled";
   } catch {
-    supervisorActive = false;
+    supervisorStatus = "disabled";
   }
 
   const logs = await readLogFeed(runId, 300);
@@ -30,7 +34,7 @@ export async function readRunActivitySummary(
     branches,
     branchesError,
     supervisor: {
-      active: supervisorActive,
+      status: supervisorStatus,
     },
     logs: {
       errorCount: logs.errorCount,

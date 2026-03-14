@@ -283,7 +283,7 @@ export interface RunActivitySummary {
   branches: AgentConversationBranch[];
   branchesError: string | null;
   supervisor: {
-    active: boolean;
+    status: "running" | "idle" | "disabled";
   };
   logs: {
     errorCount: number;

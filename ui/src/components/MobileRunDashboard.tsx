@@ -58,6 +58,21 @@ export function MobileRunDashboard({
   } = useAgentBranchSelection(activity.branches);
   const { stopping, stopMessage, stopRun } = useStopRun(runId, onRunStopped);
   const activeHeadBranch = activity.branches.find((branch) => branch.active) ?? null;
+  const supervisorBadge =
+    activity.supervisor.status === "running"
+      ? {
+          label: "Running",
+          className: "border-sky-800 bg-sky-950/60 text-sky-300",
+        }
+      : activity.supervisor.status === "idle"
+        ? {
+            label: "Idle",
+            className: "border-zinc-700 bg-zinc-900 text-zinc-400",
+          }
+        : {
+            label: "Disabled",
+            className: "border-zinc-800 bg-zinc-950/70 text-zinc-600",
+          };
 
   return (
     <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-zinc-950">
@@ -112,14 +127,8 @@ export function MobileRunDashboard({
                   </span>
                 ) : null}
                 {tab.id === "supervisor" ? (
-                  <span
-                    className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${
-                      activity.supervisor.active
-                        ? "border-sky-800 bg-sky-950/60 text-sky-300"
-                        : "border-zinc-700 bg-zinc-900 text-zinc-400"
-                    }`}
-                  >
-                    {activity.supervisor.active ? "Live" : "Idle"}
+                  <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-semibold ${supervisorBadge.className}`}>
+                    {supervisorBadge.label}
                   </span>
                 ) : null}
               </span>

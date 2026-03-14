@@ -196,6 +196,45 @@ async function loadConversationForks(runId: string): Promise<{
   return { conversationId: null, forks: [] };
 }
 
+async function hasPendingSupervisorReview(
+  runId: string,
+  conversationId: string | null
+): Promise<boolean> {
+  if (!conversationId) return false;
+  const reviewsDir = path.join(
+    runDir(runId),
+    ".ai-supervisor",
+    "conversations",
+    conversationId,
+    "reviews"
+  );
+
+  let names: string[] = [];
+  try {
+    names = await fs.readdir(reviewsDir);
+  } catch {
+    return false;
+  }
+
+  const prompts = new Set(
+    names
+      .map((name) => name.match(/^(review_[^_]+(?:-[^_]+)*)_prompt\.txt$/)?.[1] ?? null)
+      .filter((value): value is string => Boolean(value))
+  );
+  const responses = new Set(
+    names
+      .map((name) => name.match(/^(review_[^_]+(?:-[^_]+)*)_response\.txt$/)?.[1] ?? null)
+      .filter((value): value is string => Boolean(value))
+  );
+
+  for (const reviewId of prompts) {
+    if (!responses.has(reviewId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 async function loadRunHistorySummaries(runId: string): Promise<SuperConversationSummary[]> {
   const indexPath = path.join(runDir(runId), ".ai-supervisor", "supervisor", "run_history", "index.json");
   try {
@@ -256,6 +295,7 @@ export async function buildSuperTimeline(runId: string): Promise<SuperTimelinePa
   const { events: rawEvents, sessionMetadata } = await loadRawEvents(runId, conversationId, parseTime);
   const reviewChecksByReason = await loadReviewChecks(runId, conversationId);
   const conversationSummaries = await loadRunHistorySummaries(runId);
+  const pendingReview = await hasPendingSupervisorReview(runId, conversationId);
   const startForks = forks.filter((fork) => fork.actionSummary === "supervise:start");
   const entries: (SuperCycleEntry | SuperInterventionEntry)[] = [];
   const modeTotals = new Map<string, number>();
@@ -368,7 +408,7 @@ export async function buildSuperTimeline(runId: string): Promise<SuperTimelinePa
   return {
     runId,
     conversationId,
-    active: conversationId != null && cycleEntries.length > 0 && !cycleEntries.at(-1)?.endedAt,
+    active: pendingReview,
     totalCycles: cycleEntries.length,
     totalInterventions: interventionEntries.length,
     totalDurationMs,

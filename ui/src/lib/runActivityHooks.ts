@@ -8,7 +8,7 @@ const EMPTY_ACTIVITY_SUMMARY: RunActivitySummary = {
   branches: [],
   branchesError: null,
   supervisor: {
-    active: false,
+    status: "disabled",
   },
   logs: {
     errorCount: 0,

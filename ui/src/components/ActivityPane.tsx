@@ -30,6 +30,21 @@ export function ActivityPane({ runId }: ActivityPaneProps) {
     setRequestedBranchKey: setRequestedAgentBranchKey,
   } = useAgentBranchSelection(activity.branches);
   const activeHeadBranch = activity.branches.find((branch) => branch.active) ?? null;
+  const supervisorBadge =
+    activity.supervisor.status === "running"
+      ? {
+          label: "Running",
+          className: "border-sky-800 bg-sky-950/60 text-sky-300",
+        }
+      : activity.supervisor.status === "idle"
+        ? {
+            label: "Idle",
+            className: "border-zinc-700 bg-zinc-900 text-zinc-400",
+          }
+        : {
+            label: "Disabled",
+            className: "border-zinc-800 bg-zinc-950/70 text-zinc-600",
+          };
 
   return (
     <aside className="w-[45rem] shrink-0 border-l border-zinc-800 bg-zinc-950/40 flex flex-col min-h-0">
@@ -51,14 +66,8 @@ export function ActivityPane({ runId }: ActivityPaneProps) {
               </span>
             ) : null}
             {tab.id === "supervisor" ? (
-              <span
-                className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${
-                  activity.supervisor.active
-                    ? "border-sky-800 bg-sky-950/60 text-sky-300"
-                    : "border-zinc-700 bg-zinc-900 text-zinc-400"
-                }`}
-              >
-                {activity.supervisor.active ? "Live" : "Idle"}
+              <span className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${supervisorBadge.className}`}>
+                {supervisorBadge.label}
               </span>
             ) : null}
             {tab.id === "logs" && activity.logs.errorCount > 0 ? (
