@@ -340,6 +340,7 @@ def test_sync_workspace_level_view_preserves_latest_pinned_compare_artifacts(tmp
         json.dumps(stale_payload, indent=2) + "\n"
     )
     (stale_compare_dir / "seq_0001.md").write_text("# stale report\n", encoding="utf-8")
+    (stale_compare_dir / "seq_0002.md").write_text("# stale report 2\n", encoding="utf-8")
 
     fresh_payload = {
         "level": 1,
@@ -378,3 +379,4 @@ def test_sync_workspace_level_view_preserves_latest_pinned_compare_artifacts(tmp
     assert visible_payload["all_match"] is True
     assert visible_payload["reports"][0]["actions_compared"] == 26
     assert (game_dir / "level_current" / "sequence_compare" / "seq_0001.md").read_text() == "# fresh report\n"
+    assert not (game_dir / "level_current" / "sequence_compare" / "seq_0002.md").exists()
