@@ -199,17 +199,13 @@ function parseLegacyToolCall(block: ConversationBlock) {
     const payload = JSON.parse(block.content) as {
       type?: string;
       summary?: string;
-      details?: { first_tool_input?: string };
     };
     const summary = typeof payload.summary === "string" ? payload.summary : block.raw;
     const nameMatch = summary.match(/^tool_call\s+(.+)$/);
     return {
       type: typeof payload.type === "string" ? payload.type : null,
       name: headerName || nameMatch?.[1] || summary || "tool",
-      call:
-        typeof payload.details?.first_tool_input === "string"
-          ? payload.details.first_tool_input
-          : block.content || "(call details unavailable)",
+      call: block.content || "(call details unavailable)",
     };
   } catch {
     return {
@@ -230,7 +226,7 @@ function parseLegacyToolResult(block: ConversationBlock) {
   const status =
     rawStatus === "completed" || rawStatus === "ok"
       ? "ok"
-      : rawStatus === "error"
+      : rawStatus === "error" || rawStatus === "failed"
         ? "error"
         : "pending";
   return {
