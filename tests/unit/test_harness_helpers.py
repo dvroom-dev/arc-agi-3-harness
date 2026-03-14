@@ -282,11 +282,21 @@ beta
         def wait(self):
             return 0
 
-    monkeypatch.setattr(harness.subprocess, "Popen", lambda *a, **k: FakeProc())
+        def poll(self):
+            return self.returncode
+
+    captured = {}
+
+    def fake_popen(*args, **kwargs):
+        captured["start_new_session"] = kwargs.get("start_new_session")
+        return FakeProc()
+
+    monkeypatch.setattr(harness.subprocess, "Popen", fake_popen)
     out_path = tmp_path / "session.md"
     last = harness._run_super_streaming(["super"], out_path, cwd=".")
     assert last == "beta"
     assert out_path.read_text() == transcript
+    assert captured["start_new_session"] is True
     _ = capsys.readouterr().err
 
 

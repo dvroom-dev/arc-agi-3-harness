@@ -144,6 +144,7 @@ def test_harness_runs_multiple_games_under_one_shared_scorecard(
     monkeypatch.setattr(harness, "PROJECT_VENV_PYTHON", Path(sys.executable))
     monkeypatch.setattr(harness, "parse_args", lambda: args)
     monkeypatch.setattr(harness, "cleanup_orphan_repl_daemons", lambda *a, **k: {"killed": 0, "stale_files_removed": 0, "skipped_active": 0})
+    monkeypatch.setattr(harness, "cleanup_orphan_run_processes", lambda *a, **k: {"killed": 0, "skipped_active": 0, "scanned": 0})
     monkeypatch.setattr(harness, "run_super", fake_run_super)
     monkeypatch.setattr(harness.subprocess, "run", fake_subprocess_run)
 
@@ -271,6 +272,7 @@ def test_harness_multi_game_reused_scorecard_validates_per_game(
         "cleanup_orphan_repl_daemons",
         lambda *a, **k: {"killed": 0, "stale_files_removed": 0, "skipped_active": 0},
     )
+    monkeypatch.setattr(harness, "cleanup_orphan_run_processes", lambda *a, **k: {"killed": 0, "skipped_active": 0, "scanned": 0})
     monkeypatch.setattr(harness, "run_super", fake_run_super)
     monkeypatch.setattr(harness.subprocess, "run", fake_subprocess_run)
 

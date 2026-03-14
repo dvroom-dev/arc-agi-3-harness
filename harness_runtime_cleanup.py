@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
+import subprocess
 import time
 from pathlib import Path
 
@@ -49,6 +51,200 @@ def _terminate_pid_local(pid: int) -> bool:
         os.kill(pid, 0)
     except OSError:
         return True
+
+
+def _terminate_process_tree_local(pid: int) -> bool:
+    try:
+        pgid = os.getpgid(pid)
+    except OSError:
+        return True
+    if pgid != pid:
+        return _terminate_pid_local(pid)
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except OSError:
+        return True
+    deadline = time.time() + 1.5
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return True
+        time.sleep(0.05)
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except OSError:
+        return True
+    time.sleep(0.05)
+    try:
+        os.kill(pid, 0)
+        return False
+    except OSError:
+        return True
+
+
+def _read_pid_cmdline_local(pid: int) -> str:
+    cmdline_path = Path("/proc") / str(pid) / "cmdline"
+    try:
+        raw = cmdline_path.read_bytes()
+    except Exception:
+        return ""
+    return raw.replace(b"\x00", b" ").decode("utf-8", errors="replace").strip()
+
+
+def _read_pid_environ_local(pid: int) -> str:
+    env_path = Path("/proc") / str(pid) / "environ"
+    try:
+        raw = env_path.read_bytes()
+    except Exception:
+        return ""
+    return raw.replace(b"\x00", b"\n").decode("utf-8", errors="replace")
+
+
+def _read_pid_cwd_local(pid: int) -> str:
+    try:
+        return str((Path("/proc") / str(pid) / "cwd").resolve())
+    except Exception:
+        return ""
+
+
+def collect_active_run_ids_impl(project_root: Path) -> set[str]:
+    run_ids: set[str] = set()
+    try:
+        ps = subprocess.run(
+            ["ps", "-eo", "args="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return run_ids
+    if ps.returncode != 0:
+        return run_ids
+    for line in ps.stdout.splitlines():
+        if "harness.py" not in line and "run-config.ts" not in line:
+            continue
+        for match in re.finditer(r"/runs/([^/\s]+)/", line):
+            run_ids.add(match.group(1))
+        session_match = re.search(r"--session-name\s+([^\s]+)", line)
+        if session_match:
+            run_ids.add(session_match.group(1))
+    return run_ids
+
+
+def cleanup_orphan_repl_daemons_impl(
+    project_root: Path,
+    *,
+    preserve_run_ids: set[str] | None = None,
+) -> dict[str, int]:
+    preserve = set(preserve_run_ids or set())
+    active_run_ids = collect_active_run_ids_impl(project_root).union(preserve)
+    runs_root = project_root / "runs"
+    if not runs_root.exists():
+        return {"killed": 0, "stale_files_removed": 0, "skipped_active": 0}
+
+    killed = 0
+    stale_files_removed = 0
+    skipped_active = 0
+
+    for pid_file in runs_root.glob("*/supervisor/arc/repl-sessions/*/daemon.pid"):
+        try:
+            run_id = pid_file.relative_to(runs_root).parts[0]
+        except Exception:
+            continue
+        if run_id in active_run_ids:
+            skipped_active += 1
+            continue
+        try:
+            pid = int(pid_file.read_text().strip())
+        except Exception:
+            try:
+                pid_file.unlink()
+                stale_files_removed += 1
+            except Exception:
+                pass
+            continue
+
+        cmdline = _read_pid_cmdline_local(pid)
+        if not cmdline:
+            try:
+                pid_file.unlink()
+                stale_files_removed += 1
+            except Exception:
+                pass
+            continue
+        if "arc_repl.py" not in cmdline or "--daemon" not in cmdline:
+            continue
+        if _terminate_pid_local(pid):
+            killed += 1
+            try:
+                pid_file.unlink()
+            except Exception:
+                pass
+    return {
+        "killed": killed,
+        "stale_files_removed": stale_files_removed,
+        "skipped_active": skipped_active,
+    }
+
+
+def _run_id_from_process_context_local(pid: int, project_root: Path) -> str | None:
+    root = str((project_root / "runs").resolve()) + os.sep
+    for haystack in (
+        _read_pid_cmdline_local(pid),
+        _read_pid_environ_local(pid),
+        _read_pid_cwd_local(pid),
+    ):
+        if not haystack:
+            continue
+        idx = haystack.find(root)
+        if idx == -1:
+            continue
+        tail = haystack[idx + len(root) :]
+        run_id = tail.split("/", 1)[0].split(None, 1)[0].strip()
+        if run_id:
+            return run_id
+    return None
+
+
+def cleanup_orphan_run_processes_impl(
+    project_root: Path,
+    *,
+    preserve_run_ids: set[str] | None = None,
+) -> dict[str, int]:
+    preserve = set(preserve_run_ids or set())
+    active_run_ids = collect_active_run_ids_impl(project_root).union(preserve)
+    killed = 0
+    skipped_active = 0
+    scanned = 0
+    for proc_dir in Path("/proc").iterdir():
+        if not proc_dir.name.isdigit():
+            continue
+        pid = int(proc_dir.name)
+        scanned += 1
+        cmdline = _read_pid_cmdline_local(pid)
+        if not cmdline:
+            continue
+        if "claude-agent-sdk/cli.js" not in cmdline and "/src/bin/super.ts" not in cmdline:
+            continue
+        run_id = _run_id_from_process_context_local(pid, project_root)
+        if not run_id:
+            continue
+        if run_id in active_run_ids:
+            skipped_active += 1
+            continue
+        terminated = (
+            _terminate_process_tree_local(pid)
+            if "/src/bin/super.ts" in cmdline
+            else _terminate_pid_local(pid)
+        )
+        if terminated:
+            killed += 1
+    return {
+        "killed": killed,
+        "skipped_active": skipped_active,
+        "scanned": scanned,
+    }
     try:
         os.kill(pid, signal.SIGTERM)
     except OSError:

@@ -37,6 +37,12 @@ from harness_history_helpers import (
     write_prompt_file,
 )
 from harness_runner import run_main
+from harness_runtime_cleanup import (
+    cleanup_orphan_repl_daemons_impl,
+    cleanup_orphan_run_processes_impl,
+    collect_active_run_ids_impl,
+    _terminate_process_tree_local,
+)
 from harness_setup_helpers import (
     assert_no_game_files_in_agent_dir_impl,
     parse_args_impl,
@@ -221,6 +227,7 @@ def _run_super_streaming(
         text=True,
         cwd=cwd or str(PROJECT_ROOT),
         env=env,
+        start_new_session=True,
     )
 
     stderr_thread = threading.Thread(target=_drain_stderr, args=(proc,), daemon=True)
@@ -237,37 +244,40 @@ def _run_super_streaming(
 
     chunks: list[str] = []
     assert proc.stdout is not None
-    while True:
-        chunk = proc.stdout.read(256)
-        if not chunk:
-            break
-        chunks.append(chunk)
-        sys.stderr.write(chunk)
-        sys.stderr.flush()
+    try:
+        while True:
+            chunk = proc.stdout.read(256)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            sys.stderr.write(chunk)
+            sys.stderr.flush()
 
-    proc.wait()
-    artifact_stop_event.set()
-    stderr_thread.join(timeout=2)
-    if artifact_thread is not None:
-        artifact_thread.join(timeout=1)
+        proc.wait()
+        transcript = _fix_streamed_transcript("".join(chunks))
 
-    transcript = _fix_streamed_transcript("".join(chunks))
+        if proc.returncode != 0:
+            raise RuntimeError(f"super exited with code {proc.returncode}")
 
-    if proc.returncode != 0:
-        raise RuntimeError(f"super exited with code {proc.returncode}")
-
-    if output_path is not None:
-        existing_text = ""
-        try:
-            if output_path.exists():
-                existing_text = output_path.read_text()
-        except Exception:
+        if output_path is not None:
             existing_text = ""
-        if not existing_text.lstrip().startswith("---"):
-            output_path.write_text(transcript)
-        _sync_live_stream_conversation_artifacts(output_path, cwd or str(PROJECT_ROOT))
+            try:
+                if output_path.exists():
+                    existing_text = output_path.read_text()
+            except Exception:
+                existing_text = ""
+            if not existing_text.lstrip().startswith("---"):
+                output_path.write_text(transcript)
+            _sync_live_stream_conversation_artifacts(output_path, cwd or str(PROJECT_ROOT))
 
-    return extract_last_assistant_message(transcript)
+        return extract_last_assistant_message(transcript)
+    finally:
+        artifact_stop_event.set()
+        stderr_thread.join(timeout=2)
+        if artifact_thread is not None:
+            artifact_thread.join(timeout=1)
+        if proc.poll() is None:
+            _terminate_process_tree(proc.pid)
 
 
 def _pid_exists(pid: int) -> bool:
@@ -296,6 +306,10 @@ def _terminate_pid(pid: int, *, timeout_s: float = 1.5) -> bool:
     return not _pid_exists(pid)
 
 
+def _terminate_process_tree(pid: int, *, timeout_s: float = 1.5) -> bool:
+    return _terminate_process_tree_local(pid)
+
+
 def _read_pid_cmdline(pid: int) -> str:
     cmdline_path = Path("/proc") / str(pid) / "cmdline"
     try:
@@ -305,86 +319,24 @@ def _read_pid_cmdline(pid: int) -> str:
     return raw.replace(b"\x00", b" ").decode("utf-8", errors="replace").strip()
 
 
-def _collect_active_run_ids(project_root: Path) -> set[str]:
-    run_ids: set[str] = set()
-    try:
-        ps = subprocess.run(
-            ["ps", "-eo", "args="],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-    except Exception:
-        return run_ids
-    if ps.returncode != 0:
-        return run_ids
-    for line in ps.stdout.splitlines():
-        if "harness.py" not in line and "run-config.ts" not in line:
-            continue
-        for match in re.finditer(r"/runs/([^/\s]+)/", line):
-            run_ids.add(match.group(1))
-        session_match = re.search(r"--session-name\s+([^\s]+)", line)
-        if session_match:
-            run_ids.add(session_match.group(1))
-    return run_ids
-
-
 def cleanup_orphan_repl_daemons(
     project_root: Path,
     *,
     preserve_run_ids: set[str] | None = None,
 ) -> dict[str, int]:
-    """Best-effort cleanup for leaked arc_repl daemons from inactive runs."""
-    preserve = set(preserve_run_ids or set())
-    active_run_ids = _collect_active_run_ids(project_root).union(preserve)
-    runs_root = project_root / "runs"
-    if not runs_root.exists():
-        return {"killed": 0, "stale_files_removed": 0, "skipped_active": 0}
+    return cleanup_orphan_repl_daemons_impl(project_root, preserve_run_ids=preserve_run_ids)
 
-    killed = 0
-    stale_files_removed = 0
-    skipped_active = 0
 
-    for pid_file in runs_root.glob("*/supervisor/arc/repl-sessions/*/daemon.pid"):
-        try:
-            run_id = pid_file.relative_to(runs_root).parts[0]
-        except Exception:
-            continue
-        if run_id in active_run_ids:
-            skipped_active += 1
-            continue
-        try:
-            pid_raw = pid_file.read_text().strip()
-            pid = int(pid_raw)
-        except Exception:
-            try:
-                pid_file.unlink()
-                stale_files_removed += 1
-            except Exception:
-                pass
-            continue
+def cleanup_orphan_run_processes(
+    project_root: Path,
+    *,
+    preserve_run_ids: set[str] | None = None,
+) -> dict[str, int]:
+    return cleanup_orphan_run_processes_impl(project_root, preserve_run_ids=preserve_run_ids)
 
-        cmdline = _read_pid_cmdline(pid)
-        if not cmdline:
-            try:
-                pid_file.unlink()
-                stale_files_removed += 1
-            except Exception:
-                pass
-            continue
-        if "arc_repl.py" not in cmdline or "--daemon" not in cmdline:
-            continue
-        if _terminate_pid(pid):
-            killed += 1
-            try:
-                pid_file.unlink()
-            except Exception:
-                pass
-    return {
-        "killed": killed,
-        "stale_files_removed": stale_files_removed,
-        "skipped_active": skipped_active,
-    }
+
+def _collect_active_run_ids(project_root: Path) -> set[str]:
+    return collect_active_run_ids_impl(project_root)
 
 
 def parse_args():

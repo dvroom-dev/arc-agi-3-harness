@@ -79,6 +79,7 @@ def test_harness_main_smoke_no_llm_calls(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(harness, "PROJECT_VENV_PYTHON", Path(sys.executable))
     monkeypatch.setattr(harness, "parse_args", lambda: args)
     monkeypatch.setattr(harness, "cleanup_orphan_repl_daemons", lambda *a, **k: {"killed": 0, "stale_files_removed": 0, "skipped_active": 0})
+    monkeypatch.setattr(harness, "cleanup_orphan_run_processes", lambda *a, **k: {"killed": 0, "skipped_active": 0, "scanned": 0})
     monkeypatch.setattr(harness, "run_super", fake_run_super)
     monkeypatch.setattr(harness.subprocess, "run", fake_subprocess_run)
 
@@ -167,6 +168,7 @@ def test_harness_sets_only_reset_levels_in_child_and_super_envs(
     monkeypatch.setattr(harness, "PROJECT_VENV_PYTHON", Path(sys.executable))
     monkeypatch.setattr(harness, "parse_args", lambda: args)
     monkeypatch.setattr(harness, "cleanup_orphan_repl_daemons", lambda *a, **k: {"killed": 0, "stale_files_removed": 0, "skipped_active": 0})
+    monkeypatch.setattr(harness, "cleanup_orphan_run_processes", lambda *a, **k: {"killed": 0, "skipped_active": 0, "scanned": 0})
     monkeypatch.setattr(harness, "run_super", fake_run_super)
     monkeypatch.setattr(harness.subprocess, "run", fake_subprocess_run)
 
@@ -318,6 +320,7 @@ def test_harness_recovers_session_md_from_workspace_store_before_resume(
     monkeypatch.setattr(harness, "PROJECT_VENV_PYTHON", Path(sys.executable))
     monkeypatch.setattr(harness, "parse_args", lambda: args)
     monkeypatch.setattr(harness, "cleanup_orphan_repl_daemons", lambda *a, **k: {"killed": 0, "stale_files_removed": 0, "skipped_active": 0})
+    monkeypatch.setattr(harness, "cleanup_orphan_run_processes", lambda *a, **k: {"killed": 0, "skipped_active": 0, "scanned": 0})
     monkeypatch.setattr(harness, "run_super", fake_run_super)
     monkeypatch.setattr(harness.subprocess, "run", fake_subprocess_run)
 
@@ -458,6 +461,7 @@ def test_harness_fails_loudly_on_noop_provider_cycle(
     monkeypatch.setattr(harness, "PROJECT_VENV_PYTHON", Path(sys.executable))
     monkeypatch.setattr(harness, "parse_args", lambda: args)
     monkeypatch.setattr(harness, "cleanup_orphan_repl_daemons", lambda *a, **k: {"killed": 0, "stale_files_removed": 0, "skipped_active": 0})
+    monkeypatch.setattr(harness, "cleanup_orphan_run_processes", lambda *a, **k: {"killed": 0, "skipped_active": 0, "scanned": 0})
     monkeypatch.setattr(harness, "run_super", fake_run_super)
     monkeypatch.setattr(harness.subprocess, "run", fake_subprocess_run)
 

@@ -82,6 +82,16 @@ class HarnessRuntime:
                 f"stale_pid_files_removed={cleanup_stats['stale_files_removed']} "
                 f"skipped_active={cleanup_stats['skipped_active']}"
             )
+        orphan_run_process_stats = deps.cleanup_orphan_run_processes(
+            deps.PROJECT_ROOT,
+            preserve_run_ids={self.session_name},
+        )
+        if orphan_run_process_stats["killed"]:
+            self.log(
+                "[harness] cleaned orphan run processes: "
+                f"killed={orphan_run_process_stats['killed']} "
+                f"skipped_active={orphan_run_process_stats['skipped_active']}"
+            )
 
         self.agent_dir = self.run_dir / "agent"
         self.supervisor_dir = self.run_dir / "supervisor"

@@ -122,6 +122,7 @@ def test_harness_main_handles_game_over_then_reset(tmp_path: Path, monkeypatch) 
     monkeypatch.setattr(harness, "PROJECT_VENV_PYTHON", Path(sys.executable))
     monkeypatch.setattr(harness, "parse_args", lambda: args)
     monkeypatch.setattr(harness, "cleanup_orphan_repl_daemons", lambda *a, **k: {"killed": 0, "stale_files_removed": 0, "skipped_active": 0})
+    monkeypatch.setattr(harness, "cleanup_orphan_run_processes", lambda *a, **k: {"killed": 0, "skipped_active": 0, "scanned": 0})
     monkeypatch.setattr(harness, "run_super", fake_run_super)
     monkeypatch.setattr(harness.subprocess, "run", fake_subprocess_run)
 
@@ -221,6 +222,7 @@ def test_harness_main_stops_on_game_over_when_auto_reset_disabled(
     monkeypatch.setattr(harness, "PROJECT_VENV_PYTHON", Path(sys.executable))
     monkeypatch.setattr(harness, "parse_args", lambda: args)
     monkeypatch.setattr(harness, "cleanup_orphan_repl_daemons", lambda *a, **k: {"killed": 0, "stale_files_removed": 0, "skipped_active": 0})
+    monkeypatch.setattr(harness, "cleanup_orphan_run_processes", lambda *a, **k: {"killed": 0, "skipped_active": 0, "scanned": 0})
     monkeypatch.setattr(harness, "run_super", fake_run_super)
     monkeypatch.setattr(harness.subprocess, "run", fake_subprocess_run)
 

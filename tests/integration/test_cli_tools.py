@@ -10,6 +10,7 @@ import pytest
 
 import arc_repl_cli
 import harness
+import harness_runtime_cleanup
 
 
 class _FakeStdin(io.StringIO):
@@ -133,9 +134,57 @@ def test_cleanup_orphan_repl_daemons_kills_stale(
     runs.mkdir(parents=True)
     (runs / "daemon.pid").write_text("12345\n")
 
-    monkeypatch.setattr(harness, "_collect_active_run_ids", lambda _p: set())
-    monkeypatch.setattr(harness, "_read_pid_cmdline", lambda _pid: "python arc_repl.py --daemon")
-    monkeypatch.setattr(harness, "_terminate_pid", lambda _pid, timeout_s=1.5: True)
+    monkeypatch.setattr(harness_runtime_cleanup, "collect_active_run_ids_impl", lambda _p: set())
+    monkeypatch.setattr(
+        harness_runtime_cleanup, "_read_pid_cmdline_local", lambda _pid: "python arc_repl.py --daemon"
+    )
+    monkeypatch.setattr(harness_runtime_cleanup, "_terminate_pid_local", lambda _pid: True)
 
     stats = harness.cleanup_orphan_repl_daemons(tmp_path)
     assert stats["killed"] == 1
+
+
+def test_cleanup_orphan_run_processes_kills_stale_provider(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    runs_root = tmp_path / "runs" / "oldrun"
+    runs_root.mkdir(parents=True)
+
+    monkeypatch.setattr(harness_runtime_cleanup, "collect_active_run_ids_impl", lambda _p: {"active"})
+    original_iterdir = harness_runtime_cleanup.Path.iterdir
+
+    def fake_iterdir(self):
+        if str(self) == "/proc":
+            return iter([Path("/proc/111"), Path("/proc/222")])
+        return original_iterdir(self)
+
+    monkeypatch.setattr(harness_runtime_cleanup.Path, "iterdir", fake_iterdir)
+    monkeypatch.setattr(
+        harness_runtime_cleanup,
+        "_read_pid_cmdline_local",
+        lambda pid: (
+            "bun /x/claude-agent-sdk/cli.js" if pid == 111 else "bun /home/dvroom/projs/super/src/bin/super.ts"
+        ),
+    )
+    monkeypatch.setattr(
+        harness_runtime_cleanup,
+        "_run_id_from_process_context_local",
+        lambda pid, _root: "oldrun" if pid == 111 else "active",
+    )
+    killed: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        harness_runtime_cleanup,
+        "_terminate_pid_local",
+        lambda pid: killed.append(("pid", pid)) or True,
+    )
+    monkeypatch.setattr(
+        harness_runtime_cleanup,
+        "_terminate_process_tree_local",
+        lambda pid: killed.append(("tree", pid)) or True,
+    )
+
+    stats = harness.cleanup_orphan_run_processes(tmp_path)
+    assert stats["killed"] == 1
+    assert stats["skipped_active"] == 1
+    assert killed == [("pid", 111)]

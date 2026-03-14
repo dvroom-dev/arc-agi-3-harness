@@ -28,6 +28,9 @@ def test_run_super_streaming_preserves_existing_session_export(
         def wait(self):
             return 0
 
+        def poll(self):
+            return self.returncode
+
     monkeypatch.setattr(harness.subprocess, "Popen", lambda *a, **k: FakeProc())
     out_path = tmp_path / "session.md"
     out_path.write_text(exported)
