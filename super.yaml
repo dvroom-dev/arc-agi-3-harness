@@ -427,7 +427,7 @@ modes:
             Provider `Read` output adds line numbers and can show a blank numbered trailing line; infer grid dimensions only from non-empty hex rows or from `component_coverage.*`, not from the rendered line count.
             Use neutral feature names until evidence proves a stronger role.
             In `components.py`, keep detector names and component kinds neutral and structural; record semantic meaning only in `theory.md`.
-            `components.py` is primarily theory-owned. Define or revise `find_all_*` detectors here; `code_model` may patch detector details only when compare cannot be interpreted correctly without that detector fix.
+            `theory` and `code_model` co-own `components.py`, but with different edit authority. In theory mode, you may create new detectors and edit detector code or names that theory previously introduced. Do not rename or rewrite detector implementations last introduced by `code_model`; if one of those seems wrong, record the exact issue in `theory.md` and hand it back to `code_model`.
             If a solved-level compare pin is active, stay strictly scoped to that pinned level. Do not record frontier-level observations, components, or hypotheses until the pin is cleared.
             Do not exhaustively restate stable geometry. After one initial survey, only reopen a file if it answers a specific open question or verifies a concrete handoff.
             After the first survey, prioritize the smallest set of action-responsive features, state-display changes, and unresolved non-wall interactables. Static walls and corridor geometry are supporting evidence, not first-class deliverables.
@@ -448,6 +448,7 @@ modes:
             - update `theory.md` with components, action effects, completion candidates, and unknowns;
             - keep `components.py` detectors broad enough that every visible pixel in every seen state for the active level lies inside at least one component bounding box, but only through detectors that inspect visual content rather than static coordinates alone;
             - keep `components.py` names neutral; if you think a component has a specific function, record that only as a role hypothesis in `theory.md` with evidence;
+            - in theory mode, you may add new detectors freely, but only rename or rewrite detector code that theory previously introduced;
             - on level 1, maintain the `# Explore Plan` section in `theory.md`; it is the only handoff surface for `explore_and_solve`;
             - on level 2+, keep exactly one `# Evidence Gap` section when one bounded real-game observation is still missing, and exactly one `# Model Plan` section when frontier model/play work is ready;
             - run `python3 inspect_components.py --coverage --level <LEVEL>` before leaving theory mode;
@@ -875,7 +876,7 @@ modes:
             Do not use `arc_repl` in this mode.
             `model.py` is harness-owned runtime glue. Do not edit it or use it as a Python scratchpad.
             Keep component definitions in `components.py` and reusable mechanics/helpers in `model_lib.py`.
-            `components.py` is primarily theory-owned; only update it here if a missing or incorrect detector makes compare impossible to interpret. Prefer repairing mechanics in `model_lib.py`.
+            `theory` and `code_model` co-own `components.py`. In `code_model`, you may reshape detector implementations and names whenever that gives the model a cleaner, more faithful component basis, provided the resulting detectors still match observed evidence and pass coverage.
             Valid `model.py` usage here is limited to CLI subcommands such as:
             - `python3 model.py status --game-id "${vars.game_id}"`
             - `python3 model.py compare_sequences --game-id "${vars.game_id}"`
@@ -899,7 +900,7 @@ modes:
             Required loop:
             1) inspect `theory.md`, `components.py`, `current_compare.md`, and the referenced `level_current/sequence_compare/*.md` report;
             2) if needed, run `python3 inspect_sequence.py --current-mismatch` to print the first mismatching compare report target and step;
-            3) name the exact mismatching sampled diff cells, match them to `theory.md`, and patch only the missing mechanics, completion transitions, or frontier branch logic in `model_lib.py`/`play.py`/`play_lib.py`;
+            3) name the exact mismatching sampled diff cells, match them to `theory.md`, and patch the missing mechanics, completion transitions, frontier branch logic, or component detectors/names needed in `model_lib.py`/`play.py`/`play_lib.py`/`components.py`;
             4) run `python3 model.py compare_sequences` with no explicit level so the runtime can honor any solved-level compare pin and keep work focused on the pinned solved level while wrap-up is active;
             5) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes;
             5) if compare is clean across all explored current-level sequences:
