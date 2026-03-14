@@ -3,6 +3,12 @@ import path from "path";
 import type { ConversationBlock } from "@/lib/conversation";
 import { runDir } from "@/lib/paths";
 import { loadStoredConversationBranches } from "@/lib/agentConversationStore.server";
+import {
+  buildToolEventBlock,
+  parseToolCallEvent,
+  parseToolResultEvent,
+  type ParsedToolCall,
+} from "@/lib/agentConversationTools.server";
 
 export interface RawEventEntry {
   ts: string;
@@ -154,10 +160,6 @@ function contentText(content: unknown): string {
     .trim();
 }
 
-function toolBlockContent(summary: string, status: string, body: string) {
-  return [`summary: ${summary}`, `status: ${status}`, "", body.trim()].join("\n").trim();
-}
-
 function assistantEventText(event: RawEventEntry): string | null {
   const message =
     event.raw.message && typeof event.raw.message === "object"
@@ -206,64 +208,7 @@ export function rawEventToBlocks(event: RawEventEntry): ConversationBlock[] {
       : null;
   const content = message?.content;
 
-  if (event.itemKind === "tool_call") {
-    let summary = event.itemSummary || "tool_call";
-    let body = "";
-    if (Array.isArray(content)) {
-      const toolUse = content.find(
-        (entry) =>
-          entry &&
-          typeof entry === "object" &&
-          (entry as { type?: unknown }).type === "tool_use"
-      ) as
-        | { name?: unknown; input?: unknown }
-        | undefined;
-      if (toolUse) {
-        const name = typeof toolUse.name === "string" ? toolUse.name : summary;
-        summary = name;
-        body =
-          typeof toolUse.input === "string"
-            ? toolUse.input
-            : JSON.stringify(toolUse.input ?? {}, null, 2);
-      }
-    }
-    blocks.push({
-      kind: "tool_call",
-      content: toolBlockContent(summary, "ok", body || summary),
-      raw: summary,
-    });
-    return blocks;
-  }
-
-  if (event.itemKind === "tool_result" || event.itemKind === "tool_error") {
-    const summary = event.itemSummary || event.itemKind || "tool_result";
-    let body = contentText(content);
-    let toolUseId: string | null = null;
-    if (Array.isArray(content)) {
-      const toolResult = content.find(
-        (entry) =>
-          entry &&
-          typeof entry === "object" &&
-          (entry as { type?: unknown }).type === "tool_result"
-      ) as { tool_use_id?: unknown } | undefined;
-      if (toolResult && typeof toolResult.tool_use_id === "string") {
-        toolUseId = toolResult.tool_use_id;
-      }
-    }
-    if (!body && typeof event.raw.tool_use_result === "string") {
-      body = event.raw.tool_use_result;
-    } else if (!body && event.raw.tool_use_result && typeof event.raw.tool_use_result === "object") {
-      body = JSON.stringify(event.raw.tool_use_result, null, 2);
-    }
-    blocks.push({
-      kind: "tool_result",
-      content: toolBlockContent(
-        toolUseId ? `${summary} ${toolUseId}` : summary,
-        event.itemKind === "tool_error" ? "error" : "ok",
-        body || summary
-      ),
-      raw: summary,
-    });
+  if (event.itemKind === "tool_call" || event.itemKind === "tool_result" || event.itemKind === "tool_error") {
     return blocks;
   }
 
@@ -279,9 +224,9 @@ export function rawEventToBlocks(event: RawEventEntry): ConversationBlock[] {
       "assistant_reasoning";
     if (body) {
       blocks.push({
-        kind: "chat",
-        role: "assistant",
-        content: `Reasoning summary:\n${body}`,
+        kind: "reasoning",
+        title: "Reasoning Summary",
+        content: body,
         raw: body,
       });
     }
@@ -350,6 +295,7 @@ export function rawEventToBlocks(event: RawEventEntry): ConversationBlock[] {
 
 export function rawEventsToTimedBlocks(events: RawEventEntry[]) {
   const timedBlocks: Array<{ ts: string; blocks: ConversationBlock[] }> = [];
+  const pendingToolCalls = new Map<string, number>();
   let lastAssistantEvent:
     | {
         sourceType: "assistant" | "assistant_message" | "result";
@@ -358,6 +304,56 @@ export function rawEventsToTimedBlocks(events: RawEventEntry[]) {
     | null = null;
 
   for (const event of events) {
+    if (event.itemKind === "tool_call") {
+      const toolCall = parseToolCallEvent(event);
+      if (!toolCall) continue;
+      timedBlocks.push({
+        ts: event.ts,
+        blocks: [buildToolEventBlock(toolCall, null)],
+      });
+      if (toolCall.toolUseId) {
+        pendingToolCalls.set(toolCall.toolUseId, timedBlocks.length - 1);
+      }
+      continue;
+    }
+
+    if (event.itemKind === "tool_result" || event.itemKind === "tool_error") {
+      const toolResult = parseToolResultEvent(event);
+      if (!toolResult) continue;
+      const pendingIndex =
+        toolResult.toolUseId ? pendingToolCalls.get(toolResult.toolUseId) : undefined;
+      if (pendingIndex !== undefined) {
+        const pendingEntry = timedBlocks[pendingIndex];
+        const pendingBlock = pendingEntry?.blocks[0];
+        if (pendingEntry && pendingBlock?.kind === "tool" && pendingBlock.tool) {
+          pendingEntry.blocks = [
+            buildToolEventBlock(
+              {
+                name: pendingBlock.tool.name,
+                toolUseId: pendingBlock.tool.toolUseId,
+                body: pendingBlock.tool.call,
+              },
+              toolResult
+            ),
+          ];
+        }
+        if (toolResult.toolUseId) {
+          pendingToolCalls.delete(toolResult.toolUseId);
+        }
+      } else {
+        const fallbackCall: ParsedToolCall = {
+          name: event.itemSummary || event.itemKind || "tool",
+          toolUseId: toolResult.toolUseId,
+          body: "(call details unavailable)",
+        };
+        timedBlocks.push({
+          ts: event.ts,
+          blocks: [buildToolEventBlock(fallbackCall, toolResult)],
+        });
+      }
+      continue;
+    }
+
     const sourceType =
       event.raw.type === "assistant" ||
       event.raw.type === "assistant_message" ||

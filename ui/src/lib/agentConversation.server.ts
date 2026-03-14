@@ -13,7 +13,7 @@ import {
   rawEventsToTimedBlocks,
   type InterventionEntry,
 } from "@/lib/agentConversationEvents.server";
-import { trimSeedOverlap } from "@/lib/conversation";
+import { compactConversationBlocks, trimSeedOverlap } from "@/lib/conversation";
 import {
   loadConversationForkBranchFallback,
   activeSessionInfo,
@@ -184,7 +184,7 @@ async function readAgentBranchSkeletonDocument(
       .sort((a, b) => (parseTime(a.createdAt) ?? 0) - (parseTime(b.createdAt) ?? 0));
     const branch = groupedBranches.at(-1);
     if (!branch) throw new Error("branch not found");
-    const seedBlocks = sliceBranchDocumentSeed(branch.documentText);
+    const seedBlocks = compactConversationBlocks(sliceBranchDocumentSeed(branch.documentText));
     const eventBlocks: ConversationBlock[] = [];
     for (const groupBranch of groupedBranches) {
       const { eventWindow, interventionWindow } = eventsInWindow(
@@ -254,7 +254,7 @@ export async function readAgentConversationDocument(
     loadInterventions(runId, conversationId),
   ]);
   const active = storedBranches.find((branch) => branch.active) ?? storedBranches.at(-1) ?? null;
-  const seedBlocks = active ? sliceBranchDocumentSeed(active.documentText) : [];
+  const seedBlocks = active ? compactConversationBlocks(sliceBranchDocumentSeed(active.documentText)) : [];
   const { eventWindow, interventionWindow } = active
     ? eventsInWindow(rawEvents, interventions, active.createdAt, active.nextCreatedAt)
     : { eventWindow: rawEvents, interventionWindow: interventions };

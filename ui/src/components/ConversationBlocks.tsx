@@ -29,18 +29,33 @@ function fileTone(title: string | undefined) {
   };
 }
 
-function toolTone(kind: "tool_call" | "tool_result") {
-  if (kind === "tool_call") {
+function toolTone(status: "ok" | "error" | "pending") {
+  if (status === "pending") {
     return {
       badge: "border-orange-800 bg-orange-950/70 text-orange-300",
       panel: "border-orange-900/70 bg-orange-950/15",
       text: "text-orange-50",
     };
   }
+  if (status === "ok") {
+    return {
+      badge: "border-sky-800 bg-sky-950/70 text-sky-300",
+      panel: "border-sky-900/70 bg-sky-950/15",
+      text: "text-sky-50",
+    };
+  }
   return {
     badge: "border-rose-800 bg-rose-950/70 text-rose-300",
     panel: "border-rose-900/70 bg-rose-950/15",
     text: "text-rose-50",
+  };
+}
+
+function reasoningTone() {
+  return {
+    badge: "border-emerald-800 bg-emerald-950/70 text-emerald-300",
+    panel: "border-emerald-900/70 bg-emerald-950/15",
+    text: "text-emerald-50",
   };
 }
 
@@ -100,6 +115,16 @@ export function isSupervisorDecisionBlock(content: string) {
 }
 
 function parseToolBlock(block: ConversationBlock) {
+  if (block.tool) {
+    return {
+      name: block.tool.name,
+      status: block.tool.status,
+      toolUseId: block.tool.toolUseId,
+      call: block.tool.call,
+      result: block.tool.result,
+    };
+  }
+
   const lines = block.content.split("\n");
   const summaryLine = lines.find((line) => line.startsWith("summary: "));
   const statusLine = lines.find((line) => line.startsWith("status: "));
@@ -111,10 +136,16 @@ function parseToolBlock(block: ConversationBlock) {
       : lines.join("\n").trim();
 
   return {
-    summary: summaryLine?.replace(/^summary:\s*/, "") || block.kind,
-    status: statusLine?.replace(/^status:\s*/, "") || "",
+    name: summaryLine?.replace(/^summary:\s*/, "") || block.kind,
+    status: (() => {
+      const rawStatus = statusLine?.replace(/^status:\s*/, "").trim().toLowerCase() || "pending";
+      if (rawStatus === "completed" || rawStatus === "ok") return "ok";
+      if (rawStatus === "error") return "error";
+      return "pending";
+    })(),
     toolUseId: toolUseIdMatch?.[0] || null,
-    body,
+    call: body,
+    result: null,
   };
 }
 
@@ -180,84 +211,6 @@ export function ContentPreview({
   );
 }
 
-function ToolResultBody({
-  runId,
-  toolUseId,
-  inlineBody,
-  textClassName,
-}: {
-  runId: string;
-  toolUseId: string | null;
-  inlineBody: string;
-  textClassName: string;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [fullBody, setFullBody] = useState<string | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const hasBody = inlineBody.trim().length > 0;
-  const isExpandable = hasBody;
-  const preview = buildSingleLinePreview(inlineBody);
-
-  async function handleToggle() {
-    if (expanded) {
-      setExpanded(false);
-      return;
-    }
-    if (!toolUseId || fullBody) {
-      setExpanded(true);
-      return;
-    }
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const response = await fetch(
-        `/api/runs/${runId}/conversation/tool-result?toolUseId=${encodeURIComponent(toolUseId)}`
-      );
-      const payload = await response.json();
-      if (!response.ok) {
-        throw new Error(payload.error || "Failed to load full tool result");
-      }
-      if (typeof payload.content === "string" && payload.content.trim()) {
-        setFullBody(payload.content);
-      }
-      setExpanded(true);
-    } catch (error) {
-      setLoadError(error instanceof Error ? error.message : String(error));
-      setExpanded(true);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  const displayed = expanded ? fullBody || inlineBody : preview;
-
-  return (
-    <div>
-      {expanded ? (
-        <pre className={`whitespace-pre-wrap text-[11px] leading-6 ${textClassName}`}>
-          {displayed}
-        </pre>
-      ) : (
-        <OneLinePreview content={displayed} textClassName={textClassName} />
-      )}
-      {loadError ? (
-        <div className="mt-2 text-[10px] text-red-300">{loadError}</div>
-      ) : null}
-      {isExpandable ? (
-        <button
-          type="button"
-          onClick={handleToggle}
-          disabled={loading}
-          className="mt-2 rounded border border-zinc-700 bg-zinc-900/80 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-60"
-        >
-          {expanded ? "Show less" : loading ? "Loading..." : "Show full"}
-        </button>
-      ) : null}
-    </div>
-  );
-}
-
 export function FileCard({ title, content }: { title?: string; content: string }) {
   const tone = fileTone(title);
   return (
@@ -276,57 +229,79 @@ export function FileCard({ title, content }: { title?: string; content: string }
   );
 }
 
-export function ToolBlock({ runId, block }: { runId: string; block: ConversationBlock }) {
-  const tone = toolTone(block.kind as "tool_call" | "tool_result");
+export function ToolBlock({ block }: { block: ConversationBlock }) {
   const parsed = parseToolBlock(block);
+  const tone = toolTone(parsed.status);
   const [expanded, setExpanded] = useState(false);
-  const preview = buildSingleLinePreview(parsed.body);
-  const hasBody = parsed.body.trim().length > 0;
-  const isExpandable = hasBody;
+  const callPreview = buildSingleLinePreview(parsed.call);
+  const resultPreview = parsed.result ? buildSingleLinePreview(parsed.result) : null;
+  const isExpandable = parsed.call.trim().length > 0 || Boolean(parsed.result?.trim());
+  const statusLabel = parsed.status.toUpperCase();
+  const icon = expanded ? "v" : ">";
   return (
     <div className={`rounded-lg border p-3 ${tone.panel}`}>
-      <div className="mb-3 flex items-center gap-2">
-        <span
-          className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${tone.badge}`}
-        >
-          {block.kind.replace("_", " ")}
-        </span>
-        {parsed.status ? (
-          <span className="text-[10px] uppercase tracking-[0.12em] text-zinc-500">
-            {parsed.status}
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        disabled={!isExpandable}
+        aria-expanded={expanded}
+        className="w-full text-left disabled:cursor-default"
+      >
+        <div className="mb-2 flex items-center gap-2">
+          <span className={`text-[11px] font-semibold ${tone.text}`}>{icon}</span>
+          <span className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${tone.badge}`}>
+            tool
           </span>
-        ) : null}
-      </div>
-      <div className="mb-2 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-semibold text-zinc-200">
-        {parsed.summary}
-      </div>
-      {block.kind === "tool_result" ? (
-        <ToolResultBody
-          runId={runId}
-          toolUseId={parsed.toolUseId}
-          inlineBody={parsed.body}
-          textClassName={tone.text}
-        />
-      ) : (
-        <div>
-          {expanded ? (
-            <pre className={`whitespace-pre-wrap text-[11px] leading-6 ${tone.text}`}>
-              {parsed.body}
-            </pre>
-          ) : (
-            <OneLinePreview content={preview} textClassName={tone.text} />
-          )}
-          {isExpandable ? (
-            <button
-              type="button"
-              onClick={() => setExpanded((value) => !value)}
-              className="mt-2 rounded border border-zinc-700 bg-zinc-900/80 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400 hover:border-zinc-600 hover:text-zinc-200"
-            >
-              {expanded ? "Show less" : "Show full"}
-            </button>
-          ) : null}
+          <span className="text-[11px] font-semibold text-zinc-100">
+            {`call ${parsed.name} ${statusLabel}`}
+          </span>
         </div>
-      )}
+        <div className="space-y-1">
+          <OneLinePreview content={`Call: ${callPreview}`} textClassName={tone.text} />
+          <OneLinePreview
+            content={
+              resultPreview === null
+                ? "Result pending"
+                : `Result ${statusLabel}: ${resultPreview}`
+            }
+            textClassName={tone.text}
+          />
+        </div>
+      </button>
+      {expanded ? (
+        <div className="mt-3 space-y-3 border-t border-white/10 pt-3">
+          <div>
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+              Call
+            </div>
+            <pre className={`whitespace-pre-wrap text-[11px] leading-6 ${tone.text}`}>
+              {parsed.call}
+            </pre>
+          </div>
+          <div>
+            <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-zinc-400">
+              {resultPreview === null ? "Result Pending" : `Result ${statusLabel}`}
+            </div>
+            <pre className={`whitespace-pre-wrap text-[11px] leading-6 ${tone.text}`}>
+              {parsed.result ?? "(awaiting result)"}
+            </pre>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function ReasoningBlock({ block }: { block: ConversationBlock }) {
+  const tone = reasoningTone();
+  return (
+    <div className={`rounded-lg border p-3 ${tone.panel}`}>
+      <div className="mb-3">
+        <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${tone.badge}`}>
+          reasoning summary
+        </span>
+      </div>
+      <ContentPreview content={block.content} textClassName={tone.text} previewLines={8} />
     </div>
   );
 }

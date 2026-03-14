@@ -5,6 +5,7 @@ import {
   ContentPreview,
   FileCard,
   isSupervisorDecisionBlock,
+  ReasoningBlock,
   SupervisorDecisionBlock,
   ToolBlock,
 } from "@/components/ConversationBlocks";
@@ -20,6 +21,26 @@ interface ContentSegment {
   kind: "text" | "file";
   title?: string;
   content: string;
+}
+
+function hashString(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function blockIdentity(block: ConversationBlock) {
+  return JSON.stringify([
+    block.kind,
+    block.role ?? "",
+    block.title ?? "",
+    block.content,
+    block.header ?? "",
+    block.tool ?? null,
+  ]);
 }
 
 function parseInlineSegments(content: string): ContentSegment[] {
@@ -153,6 +174,18 @@ export function ConversationView({
   }, handleConversationData);
 
   const { scrollRef, handleScroll, syncScrollPosition, prepareForPrepend } = useAutoFollowScroll();
+  const keyedBlocks = useMemo(() => {
+    const occurrences = new Map<string, number>();
+    return data.blocks.map((block) => {
+      const base = hashString(blockIdentity(block));
+      const occurrence = (occurrences.get(base) ?? 0) + 1;
+      occurrences.set(base, occurrence);
+      return {
+        block,
+        key: `${base}:${occurrence}`,
+      };
+    });
+  }, [data.blocks]);
 
   useLayoutEffect(() => {
     syncScrollPosition();
@@ -215,10 +248,10 @@ export function ConversationView({
         ref={scrollRef}
         onScroll={handleScroll}
       >
-        {data.blocks.map((block, index) => {
+        {keyedBlocks.map(({ block, key }, index) => {
           if (block.kind === "frontmatter") {
             return (
-              <div key={index} className="rounded-lg border border-zinc-800 bg-zinc-950/80 p-3">
+              <div key={key} className="rounded-lg border border-zinc-800 bg-zinc-950/80 p-3">
                 <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
                   Session
                 </div>
@@ -231,7 +264,7 @@ export function ConversationView({
             const tone = roleTone(block.role);
             const segments = parseInlineSegments(block.content);
             return (
-              <div key={index} className={`rounded-lg border p-3 ${tone.panel}`}>
+              <div key={key} className={`rounded-lg border p-3 ${tone.panel}`}>
                 <div className="mb-3">
                   <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] ${tone.badge}`}>
                     {block.role || "chat"}
@@ -260,20 +293,29 @@ export function ConversationView({
             );
           }
 
-          if (block.kind === "tool_call" || block.kind === "tool_result") {
-            return <ToolBlock key={index} runId={runId} block={block} />;
+          if (block.kind === "tool" || block.kind === "tool_call" || block.kind === "tool_result") {
+            return <ToolBlock key={key} block={block} />;
+          }
+
+          if (block.kind === "reasoning") {
+            return <ReasoningBlock key={key} block={block} />;
           }
 
           if (block.kind === "file") {
-            return <FileCard key={index} title={block.title} content={block.content} />;
+            return <FileCard key={key} title={block.title} content={block.content} />;
           }
 
           if (isSupervisorDecisionBlock(block.content)) {
-            return <SupervisorDecisionBlock key={index} content={block.content} />;
+            return <SupervisorDecisionBlock key={key} content={block.content} />;
           }
 
           return (
-            <div key={index} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+            <div key={key} className="rounded-lg border border-zinc-800 bg-zinc-950/60 p-3">
+              {block.title ? (
+                <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-500">
+                  {block.title}
+                </div>
+              ) : null}
               <ContentPreview content={block.content} textClassName="text-zinc-300" previewLines={16} />
             </div>
           );

@@ -1,10 +1,17 @@
 export interface ConversationBlock {
-  kind: "frontmatter" | "chat" | "file" | "text" | "tool_call" | "tool_result";
+  kind: "frontmatter" | "chat" | "file" | "text" | "tool_call" | "tool_result" | "tool" | "reasoning";
   title?: string;
   role?: string;
   content: string;
   header?: string;
   meta?: Record<string, string>;
+  tool?: {
+    name: string;
+    status: "ok" | "error" | "pending";
+    call: string;
+    result: string | null;
+    toolUseId: string | null;
+  };
   raw: string;
 }
 
@@ -138,6 +145,7 @@ function blockIdentity(block: ConversationBlock) {
     block.role ?? "",
     block.title ?? "",
     block.content,
+    block.tool ?? null,
   ]);
 }
 
@@ -183,4 +191,124 @@ export function sliceConversationBlocks(
     shownEvents: shownBlocks.length,
     hiddenEvents,
   };
+}
+
+function parseLegacyToolCall(block: ConversationBlock) {
+  const headerName = typeof block.meta?.name === "string" ? block.meta.name.trim() : "";
+  try {
+    const payload = JSON.parse(block.content) as {
+      type?: string;
+      summary?: string;
+      details?: { first_tool_input?: string };
+    };
+    const summary = typeof payload.summary === "string" ? payload.summary : block.raw;
+    const nameMatch = summary.match(/^tool_call\s+(.+)$/);
+    return {
+      type: typeof payload.type === "string" ? payload.type : null,
+      name: headerName || nameMatch?.[1] || summary || "tool",
+      call:
+        typeof payload.details?.first_tool_input === "string"
+          ? payload.details.first_tool_input
+          : block.content || "(call details unavailable)",
+    };
+  } catch {
+    return {
+      type: null,
+      name: headerName || block.raw || "tool",
+      call: block.content || "(call details unavailable)",
+    };
+  }
+}
+
+function parseLegacyToolResult(block: ConversationBlock) {
+  const lines = block.content.split("\n");
+  const statusLine = lines.find((line) => line.startsWith("status: "));
+  const bodyStart = lines.findIndex((line) => line.trim() === "");
+  const prefixedBody = bodyStart >= 0 ? lines.slice(bodyStart + 1).join("\n").trim() : block.content.trim();
+  const compactBody = prefixedBody.replace(/^\(ok=(true|false)\)\s*\n?/, "").trim();
+  const rawStatus = statusLine?.replace(/^status:\s*/, "").trim().toLowerCase() || "ok";
+  const status =
+    rawStatus === "completed" || rawStatus === "ok"
+      ? "ok"
+      : rawStatus === "error"
+        ? "error"
+        : "pending";
+  return {
+    status,
+    body: compactBody || prefixedBody || "(empty)",
+  };
+}
+
+export function compactConversationBlocks(blocks: ConversationBlock[]) {
+  const compacted: ConversationBlock[] = [];
+
+  for (let index = 0; index < blocks.length; index += 1) {
+    const block = blocks[index]!;
+
+    if (block.kind === "chat" && block.content.startsWith("Reasoning summary:\n")) {
+      compacted.push({
+        kind: "reasoning",
+        title: "Reasoning Summary",
+        content: block.content.replace(/^Reasoning summary:\n/, "").trim(),
+        raw: block.raw,
+      });
+      continue;
+    }
+
+    if (block.kind !== "tool_call") {
+      if (block.kind === "tool_result") {
+        const parsedResult = parseLegacyToolResult(block);
+        compacted.push({
+          kind: "tool",
+          content: `tool call tool ${parsedResult.status.toUpperCase()}`,
+          tool: {
+            name: "tool",
+            status: parsedResult.status,
+            call: "(call details unavailable)",
+            result: parsedResult.body,
+            toolUseId: null,
+          },
+          raw: block.raw,
+        });
+        continue;
+      }
+      compacted.push(block);
+      continue;
+    }
+
+    const parsedCall = parseLegacyToolCall(block);
+    const nextBlock = blocks[index + 1];
+    const pairedResult = nextBlock?.kind === "tool_result" ? parseLegacyToolResult(nextBlock) : null;
+
+    if (parsedCall.type === "assistant.reasoning") {
+      compacted.push({
+        kind: "reasoning",
+        title: "Reasoning Summary",
+        content: pairedResult?.body || "(reasoning summary unavailable)",
+        raw: [block.raw, nextBlock?.raw || ""].filter(Boolean).join("\n"),
+      });
+      if (pairedResult) index += 1;
+      continue;
+    }
+
+    compacted.push({
+      kind: "tool",
+      content: [
+        `tool call ${parsedCall.name} ${(pairedResult?.status || "pending").toUpperCase()}`,
+        `Call: ${parsedCall.call}`,
+        pairedResult ? `Result ${pairedResult.status.toUpperCase()}: ${pairedResult.body}` : "Result pending",
+      ].join("\n"),
+      tool: {
+        name: parsedCall.name,
+        status: pairedResult?.status || "pending",
+        call: parsedCall.call,
+        result: pairedResult?.body || null,
+        toolUseId: null,
+      },
+      raw: [block.raw, nextBlock?.raw || ""].filter(Boolean).join("\n"),
+    });
+    if (pairedResult) index += 1;
+  }
+
+  return compacted;
 }
