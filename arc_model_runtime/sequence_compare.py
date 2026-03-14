@@ -172,23 +172,6 @@ def _write_text_atomic(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
-def _refresh_component_mismatch(session) -> str | None:
-    inspect_script = session.game_dir / "inspect_components.py"
-    if not inspect_script.exists():
-        return f"missing component helper: {inspect_script}"
-    proc = subprocess.run(
-        [sys.executable, str(inspect_script), "--current-mismatch"],
-        cwd=str(session.game_dir),
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        detail = (proc.stderr or proc.stdout or "").strip()
-        return f"inspect_components --current-mismatch failed: {detail}"
-    return None
-
-
 def _persist_current_compare(session, payload: dict[str, Any]) -> None:
     pin = load_analysis_level_pin(session.game_dir)
     pinned_level: int | None = None
@@ -260,20 +243,6 @@ def _persist_current_compare(session, payload: dict[str, Any]) -> None:
             if not sequence_id:
                 continue
             _write_text_atomic(canonical_compare_dir / f"{sequence_id}.md", report_md(report))
-
-    mismatch_refresh_error = _refresh_component_mismatch(session)
-    if mismatch_refresh_error:
-        summary_payload["component_mismatch_refresh_error"] = mismatch_refresh_error
-        json_text = json.dumps(summary_payload, indent=2) + "\n"
-        _write_text_atomic(session.game_dir / "current_compare.json", json_text)
-        _write_text_atomic(level_current / "current_compare.json", json_text)
-        if level_compare is not None:
-            compare_dir = level_compare / "sequence_compare"
-            _write_text_atomic(compare_dir / "current_compare.json", json_text)
-        if canonical_artifacts is not None:
-            canonical_compare_dir = canonical_artifacts / f"level_{int(payload.get('level', session.env.current_level))}" / "sequence_compare"
-            _write_text_atomic(canonical_compare_dir / "current_compare.json", json_text)
-
 
 def compare_sequences(
     session,

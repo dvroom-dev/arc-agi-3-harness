@@ -35,10 +35,6 @@ def sanitize_visible_json_payload(payload: object, *, visible_level: int) -> obj
         for key, value in payload.items():
             if key in {"frontier_level", "source", "game_dir", "artifacts_dir", "state_file", "action_history_file"}:
                 continue
-            if key == "changes" and isinstance(value, list):
-                out["changes_redacted"] = True
-                out["changed_pixels"] = out.get("changed_pixels", len(value))
-                continue
             sanitized = sanitize_visible_json_payload(value, visible_level=visible_level)
             if key in {"current_level", "level_after", "compare_level", "last_compare_level"}:
                 sanitized = _coerce_capped_int(sanitized, visible_level)

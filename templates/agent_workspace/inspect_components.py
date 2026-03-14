@@ -25,18 +25,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Check component bounding-box coverage across every seen state for the level",
     )
-    parser.add_argument(
-        "--current-mismatch",
-        action="store_true",
-        help="Summarize the first current compare mismatch using component bounding boxes",
-    )
     return parser.parse_args()
 
 
 def _component_report_paths(game_dir: Path) -> tuple[Path, Path]:
     return game_dir / "component_coverage.json", game_dir / "component_coverage.md"
-def _mismatch_report_paths(game_dir: Path) -> tuple[Path, Path]:
-    return game_dir / "component_mismatch.json", game_dir / "component_mismatch.md"
 def _load_components_module(game_dir: Path):
     components_path = game_dir / "components.py"
     target_path = components_path if components_path.exists() else game_dir / "model_lib.py"
@@ -284,99 +277,6 @@ def _component_coverage_markdown(payload: dict[str, Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _iou(box_a: list[int], box_b: list[int]) -> float:
-    top = max(box_a[0], box_b[0])
-    left = max(box_a[1], box_b[1])
-    bottom = min(box_a[2], box_b[2])
-    right = min(box_a[3], box_b[3])
-    if top > bottom or left > right:
-        return 0.0
-    intersection = (bottom - top + 1) * (right - left + 1)
-    area_a = (box_a[2] - box_a[0] + 1) * (box_a[3] - box_a[1] + 1)
-    area_b = (box_b[2] - box_b[0] + 1) * (box_b[3] - box_b[1] + 1)
-    union = area_a + area_b - intersection
-    return intersection / union if union else 0.0
-
-
-def _pair_components(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> dict[str, Any]:
-    used_after: set[int] = set()
-    moved: list[dict[str, Any]] = []
-    disappeared: list[dict[str, Any]] = []
-    unchanged: list[dict[str, Any]] = []
-
-    for before_component in before:
-        before_kind = before_component["kind"]
-        before_bbox = before_component["bbox"]
-        best_index = None
-        best_score = 0.0
-        for index, after_component in enumerate(after):
-            if index in used_after or after_component["kind"] != before_kind:
-                continue
-            score = _iou(before_bbox, after_component["bbox"])
-            if score > best_score:
-                best_score = score
-                best_index = index
-        if best_index is None:
-            disappeared.append(before_component)
-            continue
-        used_after.add(best_index)
-        after_component = after[best_index]
-        if before_bbox == after_component["bbox"]:
-            unchanged.append(before_component)
-        else:
-            moved.append(
-                {
-                    "id": before_component["id"],
-                    "kind": before_kind,
-                    "before_bbox": before_bbox,
-                    "after_bbox": after_component["bbox"],
-                }
-            )
-
-    appeared = [component for index, component in enumerate(after) if index not in used_after]
-    return {
-        "moved": moved,
-        "appeared": appeared,
-        "disappeared": disappeared,
-        "unchanged": unchanged,
-    }
-
-
-def _component_mismatch_markdown(payload: dict[str, Any]) -> str:
-    lines = [
-        "# Component Mismatch",
-        "",
-        f"status: {payload['status']}",
-    ]
-    if payload["status"] != "mismatch":
-        lines.append("")
-        lines.append(payload.get("message", "No mismatch"))
-        return "\n".join(lines) + "\n"
-
-    compare = payload["compare"]
-    lines.extend(
-        [
-            f"sequence_id: {compare.get('sequence_id')}",
-            f"divergence_step: {compare.get('divergence_step')}",
-            f"divergence_reason: {compare.get('divergence_reason')}",
-            "",
-            "moved_components:",
-        ]
-    )
-    for item in payload["moved_components"]:
-        lines.append(f"- {item['id']}: {item['before_bbox']} -> {item['after_bbox']}")
-    lines.extend(["", "appeared_components:"])
-    for item in payload["appeared_components"]:
-        lines.append(f"- {item['id']}: bbox={item['bbox']}")
-    lines.extend(["", "disappeared_components:"])
-    for item in payload["disappeared_components"]:
-        lines.append(f"- {item['id']}: bbox={item['bbox']}")
-    lines.extend(["", "unchanged_components:"])
-    for item in payload["unchanged_components"]:
-        lines.append(f"- {item['id']}: bbox={item['bbox']}")
-    return "\n".join(lines) + "\n"
-
-
 def run_component_coverage(game_dir: Path, *, level: int | None) -> tuple[dict[str, Any], int]:
     components_module = _load_components_module(game_dir)
     level_value = level or artifact_helpers.current_level_number(game_dir)
@@ -427,64 +327,14 @@ def run_component_coverage(game_dir: Path, *, level: int | None) -> tuple[dict[s
     return payload, 0 if payload["status"] == "pass" else 1
 
 
-def run_component_mismatch(game_dir: Path) -> tuple[dict[str, Any], int]:
-    mismatch = artifact_helpers.inspect_current_mismatch(game_dir)
-    if mismatch.get("status") == "clean":
-        payload = {
-            "status": "clean",
-            "message": mismatch.get("message"),
-        }
-        json_path, md_path = _mismatch_report_paths(game_dir)
-        _write_json_and_markdown(json_path, md_path, payload, _component_mismatch_markdown(payload))
-        return payload, 0
-    if mismatch.get("status") == "error":
-        payload = {
-            "status": "error",
-            "message": mismatch.get("message"),
-            "compare": mismatch.get("compare"),
-        }
-        json_path, md_path = _mismatch_report_paths(game_dir)
-        _write_json_and_markdown(json_path, md_path, payload, _component_mismatch_markdown(payload))
-        return payload, 1
-
-    components_module = _load_components_module(game_dir)
-    step = mismatch["step"]
-    before_grid = artifact_helpers.load_hex_grid(game_dir / step["before_state_hex"])
-    after_grid = artifact_helpers.load_hex_grid(game_dir / step["after_state_hex"])
-    before_components = _collect_components(components_module, before_grid)
-    after_components = _collect_components(components_module, after_grid)
-    paired = _pair_components(before_components, after_components)
-
-    payload = {
-        "status": "mismatch",
-        "compare": mismatch["compare"],
-        "sequence": {
-            "level": mismatch["level"],
-            "sequence_id": mismatch["sequence_id"],
-            "local_step": step["local_step"],
-            "action_name": step["action_name"],
-        },
-        "moved_components": paired["moved"],
-        "appeared_components": paired["appeared"],
-        "disappeared_components": paired["disappeared"],
-        "unchanged_components": paired["unchanged"],
-    }
-    json_path, md_path = _mismatch_report_paths(game_dir)
-    _write_json_and_markdown(json_path, md_path, payload, _component_mismatch_markdown(payload))
-    return payload, 0
-
-
 def main() -> int:
     try:
         args = parse_args()
         game_dir = Path(args.game_dir).resolve()
-        if args.coverage == args.current_mismatch:
-            raise RuntimeError("choose exactly one of --coverage or --current-mismatch")
+        if not args.coverage:
+            raise RuntimeError("inspect_components.py only supports --coverage")
 
-        if args.coverage:
-            payload, code = run_component_coverage(game_dir, level=args.level)
-        else:
-            payload, code = run_component_mismatch(game_dir)
+        payload, code = run_component_coverage(game_dir, level=args.level)
     except Exception as exc:
         payload = {"status": "error", "message": str(exc)}
         code = 1

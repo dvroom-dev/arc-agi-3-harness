@@ -137,9 +137,6 @@ def test_model_compare_sequences_writes_markdown_report(tmp_path: Path) -> None:
     assert current_compare["reports"][0]["sequence_id"] == "seq_0001"
     assert current_compare["mismatched_reports"] == []
 
-    component_mismatch = json.loads((game_dir / "component_mismatch.json").read_text())
-    assert component_mismatch["status"] == "clean"
-
     model_status = json.loads((game_dir / "model_status.json").read_text())
     assert model_status["runtime"] == "model"
     assert model_status["last_action_name"] == "compare_sequences"

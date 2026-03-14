@@ -97,7 +97,6 @@ def load_wrapup_status_impl(runtime) -> dict[str, Any]:
 
     coverage = _read_json_if_exists(game_dir / "component_coverage.json")
     compare = _read_json_if_exists(game_dir / "current_compare.json")
-    component_mismatch = _read_json_if_exists(game_dir / "component_mismatch.json")
     coverage_passed = str((coverage or {}).get("status") or "") == "pass"
     compare_clean = (compare or {}).get("all_match") is True
     compare_level: int | None = None
@@ -105,7 +104,6 @@ def load_wrapup_status_impl(runtime) -> dict[str, Any]:
         compare_level = int((compare or {}).get("level"))
     except Exception:
         compare_level = None
-    component_mismatch_ok = str((component_mismatch or {}).get("status") or "") in {"clean", "mismatch"}
     active = (
         pinned_level is not None
         and frontier_level is not None
@@ -119,8 +117,7 @@ def load_wrapup_status_impl(runtime) -> dict[str, Any]:
         "coverage_passed": bool(coverage_passed),
         "compare_clean": bool(compare_clean),
         "compare_level": compare_level,
-        "component_mismatch_ok": bool(component_mismatch_ok),
-        "ready_to_certify": bool(active and coverage_passed and compare_ready and component_mismatch_ok),
+        "ready_to_certify": bool(active and coverage_passed and compare_ready),
     }
 
 
@@ -297,8 +294,7 @@ def certify_or_block_wrapup_transition_impl(runtime) -> None:
             f"frontier_level={status['frontier_level']} "
             f"coverage_passed={status['coverage_passed']} "
             f"compare_clean={status['compare_clean']} "
-            f"compare_level={status['compare_level']} "
-            f"component_mismatch_ok={status['component_mismatch_ok']}"
+            f"compare_level={status['compare_level']}"
         )
 
     if certified_level != int(status["pinned_level"]):

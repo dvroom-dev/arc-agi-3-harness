@@ -7,7 +7,6 @@ import sys
 from pathlib import Path
 
 from arc_model_runtime.utils import sync_workspace_level_view, write_analysis_level_pin
-from arc_repl_component_sync import refresh_component_mismatch
 
 LEVEL_COMPLETE_MODEL_MISMATCH_MARKER = "__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__"
 COMPARE_CLEAN_INTERCEPT_MARKER = "__ARC_INTERCEPT_COMPARE_CLEAN__"
@@ -257,8 +256,6 @@ def run_exec_compare_intercept(cwd: Path, result: object) -> str | None:
         artifacts_dir=artifacts_dir,
         summary_payload=summary_payload,
     )
-    refresh_component_mismatch(cwd)
-
     try:
         levels_gained = int(result.get("levels_gained_in_call", 0) or 0)
     except Exception:

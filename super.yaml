@@ -26,16 +26,15 @@ prompt_parts:
   artifact_read_path:
     - literal: |
         Use filesystem artifacts as the canonical read path when the current mode allows them: `level_current/**`, `level_current/sequence_compare/**`, `current_compare.md`, and `theory.md`.
-        Do not probe `level_current/sequences/**` just to see whether sequence files exist. First use `current_compare.*`, `component_mismatch.*`, and `turn_index.jsonl`/workspace metadata to determine whether a real action sequence has been recorded.
+        Do not probe `level_current/sequences/**` just to see whether sequence files exist. First use `current_compare.*`, `level_current/sequence_compare/*.md`, and `turn_index.jsonl`/workspace metadata to determine whether a real action sequence has been recorded.
         `current_compare.md` and `current_compare.json` are generated artifacts. Read them; do not hand-edit them.
   component_model_runtime:
     - literal: |
         Component workflow:
         - `components.py` should define `COMPONENT_REGISTRY` (or `iter_components`) detectors that inspect visual content (pattern/color/connectivity) and whose bounding boxes cover every visible pixel in every seen state for the active level.
         - `python3 inspect_components.py --coverage --level LEVEL` checks that coverage across every seen state and writes `component_coverage.json` / `component_coverage.md`.
-        - `python3 inspect_components.py --current-mismatch` writes `component_mismatch.json` / `component_mismatch.md` using component bounding boxes instead of raw grid diffs.
         - `model.py` is harness-owned runtime glue. Do not edit it.
-        - Outside theory mode, prefer these component summaries over direct hex-grid or diff inspection.
+        - Outside theory mode, prefer compare reports and coverage summaries over direct raw hex-grid inspection.
         - Detector rule of thumb: if a region can move independently, recolor independently, or be consumed independently, it should usually be its own detected component rather than part of one giant bounding box.
         - Prefer multiple specific detectors over one broad umbrella detector when the broad box would hide which sub-part actually changed.
   official_grid_schema:
@@ -78,7 +77,6 @@ prompt_parts:
         - `python3 model.py print(1+1)`
         - `python3 model.py status grid=env.grid`
         - `python3 model.py compare_sequences ... ; print(...)`
-        Use `python3 inspect_components.py --current-mismatch` to summarize the first compare mismatch in component terms.
         Use `python3 inspect_components.py --coverage --level LEVEL` to verify that component bounding boxes cover every seen state for the current level.
         When using provider file-edit tools, read the file first, then edit/write it.
         Do not use private/underscored internals.
@@ -373,6 +371,9 @@ modes:
           - match_type: regex
             pattern: '^python3 (\./)?inspect_components\.py(\s|$)'
             case_sensitive: true
+          - match_type: regex
+            pattern: '^python3 (\./)?inspect_sequence\.py(\s|$)'
+            case_sensitive: true
       provider_builtin_tools:
         claude:
           allow:
@@ -451,7 +452,7 @@ modes:
             - on level 2+, keep exactly one `# Evidence Gap` section when one bounded real-game observation is still missing, and exactly one `# Model Plan` section when frontier model/play work is ready;
             - run `python3 inspect_components.py --coverage --level <LEVEL>` before leaving theory mode;
             - use `component_coverage.*` as the canonical source for observed grid shapes; do not count rendered `Read` line numbers to infer dimensions;
-            - use `current_compare.*`, `component_mismatch.*`, and `turn_index.jsonl` to decide whether sequence artifacts exist before looking for `level_current/sequences/**`;
+            - use `current_compare.*`, `level_current/sequence_compare/*.md`, and `turn_index.jsonl` to decide whether sequence artifacts exist before looking for `level_current/sequences/**`;
             - record the available non-RESET actions from the prompt or existing artifacts; do not propose read-only action-discovery probes;
             - if a solved-level compare pin is active, keep `theory.md` and `components.py` scoped to the pinned solved level only;
             - while a solved-level compare pin is active, do not use or request `arc_repl`; theory remains read-only and mutations belong only in real-game modes after the pin clears;
@@ -476,7 +477,7 @@ modes:
             - `components.py`
             - `inspect_components.py`
             - `component_coverage.md`
-            - `component_mismatch.md`
+            - `level_current/sequence_compare/current_compare.md`
         - prompt_part: supervisor_context_block
         - prompt_part: switch_mode_usage
     agent_rules:
@@ -487,7 +488,7 @@ modes:
         - "Before leaving theory mode, run `python3 inspect_components.py --coverage --level <active level>` and ensure it passes for the current level."
         - "In theory mode, after an initial survey, reread only the files needed for one specific unresolved question or handoff."
         - "In theory mode, when reading a full-grid file such as `current_state.hex`, read it whole once before any targeted reread; use offset/limit reads only for a specific unresolved question."
-        - "In theory mode, do not probe `level_current/sequences/**` unless `current_compare.*`, `component_mismatch.*`, or `turn_index.jsonl` indicate that a real sequence artifact already exists for the question you are answering."
+        - "In theory mode, do not probe `level_current/sequences/**` unless `current_compare.*`, `level_current/sequence_compare/*.md`, or `turn_index.jsonl` indicate that a real sequence artifact already exists for the question you are answering."
         - "In theory mode, do not inspect `.ai-supervisor/**`, blob files, provider/runtime source, or other control-plane internals. If an error references those paths, summarize the workspace-visible contradiction and stop."
         - "In theory mode, do not read `model.py` or `model_lib.py`; model/runtime debugging belongs in `code_model`."
         - "In theory mode, use raw `.hex` evidence together with compare/component artifacts to define named components and keep every visible pixel accounted for by component bounding boxes built from visual-content detectors."
@@ -784,6 +785,9 @@ modes:
           - match_type: regex
             pattern: '^python3 (\./)?inspect_components\.py(\s|$)'
             case_sensitive: true
+          - match_type: regex
+            pattern: '^python3 (\./)?inspect_sequence\.py(\s|$)'
+            case_sensitive: true
         disallow:
           - match_type: contains
             pattern: ARC_CONFIG_DIR
@@ -824,11 +828,13 @@ modes:
               - model_lib.py
               - play.py
               - play_lib.py
+              - inspect_sequence.py
               - inspect_components.py
               - component_coverage.json
               - component_coverage.md
-              - component_mismatch.json
-              - component_mismatch.md
+              - current_compare.json
+              - current_compare.md
+              - level_current/sequence_compare
           write:
             allow:
               - theory.md
@@ -846,11 +852,13 @@ modes:
               - model_lib.py
               - play.py
               - play_lib.py
+              - inspect_sequence.py
               - inspect_components.py
               - component_coverage.json
               - component_coverage.md
-              - component_mismatch.json
-              - component_mismatch.md
+              - current_compare.json
+              - current_compare.md
+              - level_current/sequence_compare
           write:
             allow:
               - theory.md
@@ -875,11 +883,11 @@ modes:
             Never append ad hoc Python expressions or scratch commands onto `model.py` invocations.
             On level 2+, do not treat this mode as a generic readiness review. Either patch the frontier mechanics/play branch needed for model proof, or identify one exact missing real-game observation that theory must resolve next.
             Do not do open-ended route planning here; write only the smallest deterministic frontier branch that current evidence supports.
-            Use `theory.md`, `components.py`, `component_mismatch.*`, `component_coverage.*`, and compare summaries as the primary evidence surface here.
+            Use `theory.md`, `components.py`, `component_coverage.*`, `current_compare.*`, and `level_current/sequence_compare/*.md` as the primary evidence surface here.
             If a solved-level compare pin is active, stay scoped to the pinned solved level and ignore frontier-level artifacts until the pin clears.
-            Do not read raw `.hex` state files or sequence metadata directly in this mode.
+            Do not read raw `.hex` state files or sequence metadata directly in this mode. Use compare report markdown and sampled diff cells instead.
             Runtime/harness internals are out of scope: do not read or edit any file under `/config/tools/`.
-            Treat `current_compare.json` and `component_mismatch.json` as the authoritative parity artifacts in this mode.
+            Treat `current_compare.json`, `current_compare.md`, and `level_current/sequence_compare/*.md` as the authoritative parity artifacts in this mode.
             If they disagree or look broken, report the exact contradiction from workspace artifacts and stay in `code_model`; do not inspect runtime/tooling source.
             If compare is red and you have one exact blocker, stay in `code_model` and report that blocker precisely; do not bounce back to `theory` while parity remains red.
         - prompt_part: model_runtime
@@ -889,9 +897,9 @@ modes:
         - literal: |
             Active game: `${vars.game_id}`.
             Required loop:
-            1) inspect `theory.md`, `components.py`, and `component_mismatch.md`;
-            2) run `python3 inspect_components.py --current-mismatch`;
-            3) name changed elements, match them to `theory.md`, and patch only the missing mechanics, completion transitions, or frontier branch logic in `model_lib.py`/`play.py`/`play_lib.py`;
+            1) inspect `theory.md`, `components.py`, `current_compare.md`, and the referenced `level_current/sequence_compare/*.md` report;
+            2) if needed, run `python3 inspect_sequence.py --current-mismatch` to print the first mismatching compare report target and step;
+            3) name the exact mismatching sampled diff cells, match them to `theory.md`, and patch only the missing mechanics, completion transitions, or frontier branch logic in `model_lib.py`/`play.py`/`play_lib.py`;
             4) run `python3 model.py compare_sequences` with no explicit level so the runtime can honor any solved-level compare pin and keep work focused on the pinned solved level while wrap-up is active;
             5) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes;
             5) if compare is clean across all explored current-level sequences:
@@ -908,7 +916,8 @@ modes:
             - `play.py`
             - `play_lib.py`
             - `component_coverage.md`
-            - `component_mismatch.md`
+            - `current_compare.md`
+            - `level_current/sequence_compare/current_compare.md`
         - prompt_part: supervisor_context_block
         - prompt_part: switch_mode_usage
     agent_rules:
@@ -964,6 +973,9 @@ modes:
             pattern: '^python3 (\./)?inspect_components\.py(\s|$)'
             case_sensitive: true
           - match_type: regex
+            pattern: '^python3 (\./)?inspect_sequence\.py(\s|$)'
+            case_sensitive: true
+          - match_type: regex
             pattern: '^arc_repl exec_file(\s|$)'
             case_sensitive: true
       provider_builtin_tools:
@@ -996,11 +1008,13 @@ modes:
               - model_lib.py
               - play.py
               - play_lib.py
+              - inspect_sequence.py
               - inspect_components.py
               - component_coverage.json
               - component_coverage.md
-              - component_mismatch.json
-              - component_mismatch.md
+              - current_compare.json
+              - current_compare.md
+              - level_current/sequence_compare
           write:
             allow:
               - theory.md
@@ -1016,11 +1030,13 @@ modes:
               - model_lib.py
               - play.py
               - play_lib.py
+              - inspect_sequence.py
               - inspect_components.py
               - component_coverage.json
               - component_coverage.md
-              - component_mismatch.json
-              - component_mismatch.md
+              - current_compare.json
+              - current_compare.md
+              - level_current/sequence_compare
           write:
             allow:
               - theory.md
@@ -1058,7 +1074,8 @@ modes:
             - `play.py`
             - `play_lib.py`
             - `component_coverage.md`
-            - `component_mismatch.md`
+            - `current_compare.md`
+            - `level_current/sequence_compare/current_compare.md`
         - prompt_part: supervisor_context_block
         - prompt_part: switch_mode_usage
     agent_rules:

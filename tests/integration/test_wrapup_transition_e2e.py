@@ -112,10 +112,6 @@ def test_level_transition_end_to_end_release_path(tmp_path: Path) -> None:
         json.dumps({"all_match": True, "level": 1}, indent=2) + "\n",
         encoding="utf-8",
     )
-    (agent_game_dir / "component_mismatch.json").write_text(
-        json.dumps({"status": "clean"}, indent=2) + "\n",
-        encoding="utf-8",
-    )
     (agent_game_dir / "model_status.json").write_text(
         json.dumps(
             {

@@ -124,9 +124,6 @@ def test_wrapup_transition_clears_pin_and_restores_frontier_view_when_ready(tmp_
     (game_dir / "current_compare.json").write_text(
         json.dumps({"all_match": True, "level": 1}, indent=2) + "\n"
     )
-    (game_dir / "component_mismatch.json").write_text(
-        json.dumps({"status": "clean"}, indent=2) + "\n"
-    )
     _write_level_current_surface(game_dir, level=1, pinned=True, initial_rows="0000\n")
     (game_dir / "model_status.json").write_text(
         json.dumps(
@@ -187,9 +184,6 @@ def test_wrapup_transition_can_release_directly_into_theory_when_certified(tmp_p
     (game_dir / "current_compare.json").write_text(
         json.dumps({"all_match": True, "level": 1}, indent=2) + "\n"
     )
-    (game_dir / "component_mismatch.json").write_text(
-        json.dumps({"status": "clean"}, indent=2) + "\n"
-    )
     _write_level_current_surface(game_dir, level=1, pinned=True, initial_rows="0000\n")
     (game_dir / "model_status.json").write_text(
         json.dumps(
@@ -244,9 +238,6 @@ def test_wrapup_transition_blocks_when_compare_level_does_not_match_pin(tmp_path
     (game_dir / "current_compare.json").write_text(
         json.dumps({"all_match": True, "level": 2}, indent=2) + "\n"
     )
-    (game_dir / "component_mismatch.json").write_text(
-        json.dumps({"status": "clean"}, indent=2) + "\n"
-    )
     _write_level_current_surface(game_dir, level=1, pinned=True)
     (game_dir / "model_status.json").write_text(
         json.dumps(
@@ -284,9 +275,6 @@ def test_wrapup_surface_validation_blocks_frontier_leakage_while_pin_is_active(t
     (game_dir / "component_coverage.json").write_text(json.dumps({"status": "pass"}, indent=2) + "\n")
     (game_dir / "current_compare.json").write_text(
         json.dumps({"all_match": False, "level": 1}, indent=2) + "\n"
-    )
-    (game_dir / "component_mismatch.json").write_text(
-        json.dumps({"status": "mismatch"}, indent=2) + "\n"
     )
     (game_dir / "level_current").mkdir(parents=True, exist_ok=True)
     (game_dir / "level_current" / "meta.json").write_text(
@@ -338,9 +326,6 @@ def test_wrapup_surface_validation_accepts_pinned_level_consistency(tmp_path: Pa
     (game_dir / "current_compare.json").write_text(
         json.dumps({"all_match": False, "level": 1}, indent=2) + "\n"
     )
-    (game_dir / "component_mismatch.json").write_text(
-        json.dumps({"status": "mismatch"}, indent=2) + "\n"
-    )
     _write_level_current_surface(game_dir, level=1, pinned=True)
     (game_dir / "model_status.json").write_text(
         json.dumps(
@@ -389,9 +374,6 @@ def test_wrapup_surface_validation_rejects_stale_visible_compare_surface(tmp_pat
             indent=2,
         )
         + "\n"
-    )
-    (game_dir / "component_mismatch.json").write_text(
-        json.dumps({"status": "clean"}, indent=2) + "\n"
     )
     _write_level_current_surface(game_dir, level=1, pinned=True)
     visible_compare_dir = game_dir / "level_current" / "sequence_compare"
@@ -453,9 +435,6 @@ def test_wrapup_transition_requires_explicit_supervisor_certification(tmp_path: 
     (game_dir / "component_coverage.json").write_text(json.dumps({"status": "pass"}, indent=2) + "\n")
     (game_dir / "current_compare.json").write_text(
         json.dumps({"all_match": True, "level": 1}, indent=2) + "\n"
-    )
-    (game_dir / "component_mismatch.json").write_text(
-        json.dumps({"status": "clean"}, indent=2) + "\n"
     )
     _write_level_current_surface(game_dir, level=1, pinned=True, initial_rows="0000\n")
     (game_dir / "model_status.json").write_text(

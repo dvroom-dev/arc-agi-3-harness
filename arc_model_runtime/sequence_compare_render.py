@@ -100,6 +100,10 @@ def current_compare_markdown(summary_payload: dict[str, Any]) -> str:
                 lines.append(f"- divergence_reason: {reason}")
             if report.get("report_file"):
                 lines.append(f"- report_file: {report['report_file']}")
+            if report.get("matched") is False:
+                _append_diff_summary(lines, "Game Step Diff", report.get("game_step_diff"))
+                _append_diff_summary(lines, "Model Step Diff", report.get("model_step_diff"))
+                _append_diff_summary(lines, "State Diff (Game After vs Model After)", report.get("state_diff"))
     lines.extend(
         [
             "",
