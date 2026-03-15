@@ -424,7 +424,7 @@ modes:
             Mode: theory.
             Goal: define evidence-backed components, keep `theory.md` and `components.py` aligned, and decide the smallest next step.
             Theory mode owns raw grid/diff inspection.
-            You may read any workspace file, but you may only edit `theory.md` and `components.py`.
+            Read/write permissions for this mode are shown in the generated `Mode Permissions (agent-visible)` section. Treat that section as authoritative and do not attempt writes outside those enforced permissions.
             Do not use `arc_repl` in this mode.
             The only Python command allowed here is `python3 inspect_components.py ...` for component coverage/mismatch checks.
             Use raw `.hex`, sequence metadata, and compare artifacts to define components and map every visible pixel to named elements.
