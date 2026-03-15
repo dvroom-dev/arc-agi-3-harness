@@ -7,6 +7,7 @@ interface RunListProps {
   selectedRunId: string | null;
   onSelectRun: (runId: string) => void;
   onImportParams: (params: RunLaunchParams) => void;
+  onContinueRun: (runId: string) => void;
   refreshToken: number;
 }
 
@@ -48,11 +49,13 @@ export function RunList({
   selectedRunId,
   onSelectRun,
   onImportParams,
+  onContinueRun,
   refreshToken,
 }: RunListProps) {
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [filter, setFilter] = useState("");
   const [loadingImportId, setLoadingImportId] = useState<string | null>(null);
+  const [loadingContinueId, setLoadingContinueId] = useState<string | null>(null);
 
   useEffect(() => {
     const load = () =>
@@ -114,31 +117,60 @@ export function RunList({
                   )}
                 </div>
               </button>
-              <button
-                type="button"
-                onClick={async (event) => {
-                  event.stopPropagation();
-                  if (!run.canImportParams || loadingImportId) return;
-                  setLoadingImportId(run.id);
-                  try {
-                    const response = await fetch(`/api/runs/${run.id}/params`);
-                    const payload = await response.json();
-                    if (!response.ok || !payload.runParams) {
-                      throw new Error(payload.error || "No parameters available");
+              <div className="shrink-0 flex flex-col gap-1">
+                <button
+                  type="button"
+                  onClick={async (event) => {
+                    event.stopPropagation();
+                    if (!run.canContinue || loadingContinueId || loadingImportId) return;
+                    setLoadingContinueId(run.id);
+                    try {
+                      const response = await fetch(`/api/runs/${run.id}/continue`, {
+                        method: "POST",
+                      });
+                      const payload = await response.json();
+                      if (!response.ok) {
+                        throw new Error(payload.error || "Failed to continue run");
+                      }
+                      onContinueRun(run.id);
+                    } catch (error) {
+                      console.error(error);
+                    } finally {
+                      setLoadingContinueId(null);
                     }
-                    onImportParams(payload.runParams.params);
-                  } catch (error) {
-                    console.error(error);
-                  } finally {
-                    setLoadingImportId(null);
-                  }
-                }}
-                disabled={!run.canImportParams || loadingImportId !== null}
-                title={run.canImportParams ? `Import parameters from ${run.id}` : "No parameters available"}
-                className="shrink-0 rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-400 transition-colors hover:border-zinc-500 hover:text-zinc-200 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
-              >
-                {loadingImportId === run.id ? "..." : "Use"}
-              </button>
+                  }}
+                  disabled={!run.canContinue || loadingContinueId !== null || loadingImportId !== null}
+                  title={run.canContinue ? `Continue ${run.id}` : "Run is not resumable"}
+                  className="rounded border border-emerald-800 px-2 py-1 text-[11px] text-emerald-300 transition-colors hover:border-emerald-600 hover:text-emerald-200 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
+                >
+                  {loadingContinueId === run.id ? "..." : "Continue"}
+                </button>
+                <button
+                  type="button"
+                  onClick={async (event) => {
+                    event.stopPropagation();
+                    if (!run.canImportParams || loadingImportId || loadingContinueId) return;
+                    setLoadingImportId(run.id);
+                    try {
+                      const response = await fetch(`/api/runs/${run.id}/params`);
+                      const payload = await response.json();
+                      if (!response.ok || !payload.runParams) {
+                        throw new Error(payload.error || "No parameters available");
+                      }
+                      onImportParams(payload.runParams.params);
+                    } catch (error) {
+                      console.error(error);
+                    } finally {
+                      setLoadingImportId(null);
+                    }
+                  }}
+                  disabled={!run.canImportParams || loadingImportId !== null || loadingContinueId !== null}
+                  title={run.canImportParams ? `Import parameters from ${run.id}` : "No parameters available"}
+                  className="rounded border border-zinc-700 px-2 py-1 text-[11px] text-zinc-400 transition-colors hover:border-zinc-500 hover:text-zinc-200 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:text-zinc-700"
+                >
+                  {loadingImportId === run.id ? "..." : "Use"}
+                </button>
+              </div>
             </div>
           </div>
         ))}

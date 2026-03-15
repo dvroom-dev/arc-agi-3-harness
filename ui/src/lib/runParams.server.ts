@@ -313,6 +313,13 @@ async function writeRecentRunParams(params: RunLaunchParams) {
   });
 }
 
+async function readRunScorecardMeta(runId: string): Promise<{
+  scorecard_id?: string;
+  operation_mode?: string;
+} | null> {
+  return readJsonFile(path.join(ctxDir(runId), "scorecard.json"));
+}
+
 function buildStoredRecord(
   params: RunLaunchParams,
   options: {
@@ -400,6 +407,60 @@ export async function launchRun(paramsInput: unknown): Promise<{
   return {
     params: requestedParams,
     runIds,
+    logFile,
+  };
+}
+
+export async function continueRun(runId: string): Promise<{
+  runId: string;
+  params: RunLaunchParams;
+  logFile: string;
+}> {
+  const stored = await readStoredRunParams(runId);
+  if (!stored) {
+    throw new Error(`No recorded parameters available for run ${runId}.`);
+  }
+
+  const scorecardMeta = await readRunScorecardMeta(runId);
+  const requestedParams = normalizeRunLaunchParams({
+    ...stored.params,
+    gameId: stored.effectiveGameId || stored.params.gameId,
+    gameIds: "",
+    sessionName: runId,
+    openScorecard: false,
+    scoreAfterSolve: false,
+    scorecardId: scorecardMeta?.scorecard_id || stored.params.scorecardId,
+    operationMode:
+      scorecardMeta?.operation_mode === "ONLINE"
+        ? "ONLINE"
+        : stored.params.operationMode,
+  });
+
+  await ensureDir(LOGS_DIR);
+  await ensureDir(CTXS_DIR);
+  await ensureDir(RUNS_DIR);
+  await writeRecentRunParams(requestedParams);
+
+  const logFile = `${runId}.log`;
+  const logPath = path.join(LOGS_DIR, logFile);
+  const logHandle = await fs.open(logPath, "a");
+  const pythonPath = path.join(PROJECT_ROOT, ".venv", "bin", "python");
+  const child = spawn(
+    pythonPath,
+    ["harness.py", ...buildHarnessArgs(requestedParams), "--continue-run"],
+    {
+      cwd: PROJECT_ROOT,
+      detached: true,
+      env: process.env,
+      stdio: ["ignore", logHandle.fd, logHandle.fd],
+    }
+  );
+  child.unref();
+  await logHandle.close();
+
+  return {
+    runId,
+    params: requestedParams,
     logFile,
   };
 }

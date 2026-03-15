@@ -11,6 +11,7 @@ export interface RunSummary {
   totalSteps: number;
   hasLog: boolean;
   canImportParams: boolean;
+  canContinue: boolean;
   modifiedAt: number; // unix ms
 }
 

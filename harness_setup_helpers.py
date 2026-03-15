@@ -32,6 +32,14 @@ def parse_args_impl() -> argparse.Namespace:
         help="Session directory name (default: timestamp)",
     )
     parser.add_argument(
+        "--continue-run",
+        action="store_true",
+        help=(
+            "Continue an existing run/session instead of starting a fresh `super new`. "
+            "Requires --session-name pointing at an existing run id."
+        ),
+    )
+    parser.add_argument(
         "-v", "--verbose", action="store_true",
         help="Print colored game grid to terminal after each state change",
     )

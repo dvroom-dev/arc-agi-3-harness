@@ -10,6 +10,7 @@ from harness_explore import run_input_exploration_from_reset
 from harness_repl_health import collect_repl_health, format_repl_crash_diagnostics, format_repl_health_summary
 from harness_runner_keepalive import IDLE_KEEPALIVE_MARKER, IDLE_KEEPALIVE_TRIGGER_SECONDS, events_include_real_game_action, log_keepalive_resolution
 from harness_runner_args import resolve_arc_base_url, resolve_game_ids, session_name_for_game
+from harness_runner_continue import continue_existing_run, has_recoverable_run_state, log_monitor_sources
 from harness_runner_regression import _classify_level_drop
 from harness_runner_super_cycle import noop_super_cycle_error
 from harness_runtime import HarnessRuntime
@@ -124,15 +125,7 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
                 )
             runtime.recover_session_file_from_workspace(reason="post-new", force=True)
             runtime.sync_active_conversation_id_from_session(); runtime.certify_or_block_wrapup_transition()
-            monitor = runtime.monitor_snapshot()
-            runtime.log(
-                "[harness] monitor sources: "
-                f"state={monitor['state_path']} "
-                f"history={monitor['history_path']} "
-                f"model_status={monitor['model_status_path']} "
-                f"session={monitor['session_path']} "
-                f"raw_events={monitor.get('raw_events_path') or '(not-found-yet)'}"
-            )
+            log_monitor_sources(runtime)
 
         def _run_super_loop() -> bool:
             nonlocal super_turn
@@ -338,7 +331,18 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
         replay_start_mode = str(
             getattr(args, "score_after_solve_start_mode", "recover") or "recover"
         ).strip() or "recover"
-        _start_super_new(phase_label="discovery")
+        continue_run = bool(getattr(args, "continue_run", False))
+        if continue_run:
+            if has_recoverable_run_state(runtime):
+                continue_existing_run(runtime)
+            else:
+                runtime.log(
+                    "[harness] continue requested, but no recoverable conversation state was found; "
+                    "starting a fresh supervisor session in the existing run directory."
+                )
+                _start_super_new(phase_label="continue-fallback-new")
+        else:
+            _start_super_new(phase_label="discovery")
         discovery_won = _run_super_loop()
         if score_after_solve and discovery_won and not runtime.active_scorecard_id:
             scorecard_id = runtime.open_scorecard_now()
@@ -398,11 +402,11 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
         runtime.close_scorecard_if_needed()
         runtime.cleanup_repl_daemons()
 
-
 def run_main(deps) -> None:
     args = deps.parse_args()
     operation_mode_name = str(args.operation_mode).strip().upper()
     score_after_solve = bool(getattr(args, "score_after_solve", False))
+    continue_run = bool(getattr(args, "continue_run", False))
     if args.open_scorecard and args.scorecard_id:
         raise RuntimeError(
             "Use either --open-scorecard (create new) or --scorecard-id (reuse existing), not both."
@@ -415,15 +419,17 @@ def run_main(deps) -> None:
     game_ids = resolve_game_ids(args)
     if score_after_solve and len(game_ids) != 1:
         raise RuntimeError("--score-after-solve currently supports exactly one game ID.")
+    if continue_run and len(game_ids) != 1:
+        raise RuntimeError("--continue-run currently supports exactly one game ID.")
+    if continue_run and not str(args.session_name or "").strip():
+        raise RuntimeError("--continue-run requires --session-name pointing at an existing run id.")
     arc_base_url = resolve_arc_base_url(args)
 
     session_base = args.session_name or datetime.now().strftime("%Y%m%d_%H%M%S")
     shared_scorecard_id = str(args.scorecard_id or "").strip() or None
     shared_scorecard_client = None
     shared_scorecard_created_here = False
-    shared_scorecard_cookies_json = (
-        str(getattr(args, "scorecard_cookies_json", "") or "").strip() or None
-    )
+    shared_scorecard_cookies_json = str(getattr(args, "scorecard_cookies_json", "") or "").strip() or None
 
     if args.open_scorecard or shared_scorecard_id or score_after_solve:
         validate_scorecard_owner_check(
@@ -455,11 +461,7 @@ def run_main(deps) -> None:
             session_base=session_base,
         )
         shared_scorecard_created_here = True
-        print(
-            f"[harness] scorecard: {shared_scorecard_id} (created_new, shared across {len(game_ids)} games)",
-            file=sys.stderr,
-            flush=True,
-        )
+        print(f"[harness] scorecard: {shared_scorecard_id} (created_new, shared across {len(game_ids)} games)", file=sys.stderr, flush=True)
         print(f"[harness] scorecard web url: {scorecard_web_url}", file=sys.stderr, flush=True)
         print(f"[harness] scorecard api url: {scorecard_api_url}", file=sys.stderr, flush=True)
 
@@ -473,18 +475,10 @@ def run_main(deps) -> None:
                 game_args.open_scorecard = False
                 game_args.scorecard_id = shared_scorecard_id
                 game_args.scorecard_cookies_json = shared_scorecard_cookies_json
-                # Only skip per-game GET validation when the shared scorecard
-                # was created by this process. For a user-supplied scorecard ID,
-                # revalidate in each game session to avoid silent bad-ID runs.
+                # Only skip per-game GET validation when this process created the shared scorecard.
+                # For a user-supplied scorecard ID, revalidate in each game session.
                 game_args.skip_scorecard_get_validation = bool(shared_scorecard_created_here)
-            _run_single_game(
-                deps,
-                game_args,
-                operation_mode_name=operation_mode_name,
-                arc_base_url=arc_base_url,
-                game_index=index,
-                total_games=len(game_ids),
-            )
+            _run_single_game(deps, game_args, operation_mode_name=operation_mode_name, arc_base_url=arc_base_url, game_index=index, total_games=len(game_ids))
     finally:
         if (
             len(game_ids) > 1

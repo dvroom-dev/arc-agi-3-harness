@@ -77,6 +77,10 @@ export default function Home() {
                   selectedRunId={selectedRunId}
                   onSelectRun={setSelectedRunId}
                   onImportParams={(params) => setLaunchParams(prepareImportedRunLaunchParams(params))}
+                  onContinueRun={(runId) => {
+                    setRefreshToken((value) => value + 1);
+                    setSelectedRunId(runId);
+                  }}
                   refreshToken={refreshToken}
                 />
               </div>
@@ -111,6 +115,10 @@ export default function Home() {
             selectedRunId={selectedRunId}
             onSelectRun={setSelectedRunId}
             onImportParams={(params) => setLaunchParams(prepareImportedRunLaunchParams(params))}
+            onContinueRun={(runId) => {
+              setRefreshToken((value) => value + 1);
+              setSelectedRunId(runId);
+            }}
             refreshToken={refreshToken}
           />
         </div>
