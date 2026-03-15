@@ -196,3 +196,36 @@ def test_component_coverage_rejects_bbox_only_component_output(tmp_path: Path) -
     assert payload["status"] == "fail"
     assert payload["geometry_issues"]
     assert "exact geometry" in payload["geometry_issues"][0]["message"]
+    markdown = (game_dir / "component_coverage.md").read_text()
+    assert "Coverage validation failed before uncovered-pixel analysis." in markdown
+    assert "All seen states for this level are covered by exact component geometry." not in markdown
+
+
+def test_component_coverage_accepts_mask_geometry(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["0000", "0110", "0110", "0000"])
+    (game_dir / "components.py").write_text(
+        "from dataclasses import dataclass, field\n"
+        "from typing import Callable\n"
+        "import numpy as np\n"
+        "@dataclass(frozen=True)\n"
+        "class ComponentMask:\n"
+        "    kind: str\n"
+        "    mask: np.ndarray\n"
+        "    attrs: dict[str, object] = field(default_factory=dict)\n"
+        "ComponentDetector = Callable[[np.ndarray], list[ComponentMask]]\n"
+        "COMPONENT_REGISTRY = {}\n"
+        "def find_all_nonzero(grid):\n"
+        "    return [ComponentMask(kind='nonzero', mask=(grid != 0))]\n"
+        "def find_all_zero(grid):\n"
+        "    return [ComponentMask(kind='zero', mask=(grid == 0))]\n"
+        "COMPONENT_REGISTRY['nonzero'] = find_all_nonzero\n"
+        "COMPONENT_REGISTRY['zero'] = find_all_zero\n"
+    )
+
+    proc = _run_helper(game_dir, ["--coverage", "--level", "1"])
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["status"] == "pass"
+    assert payload["geometry_issues"] == []

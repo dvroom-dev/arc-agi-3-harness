@@ -116,6 +116,23 @@ def _bbox_from_cells(cells: list[tuple[int, int]]) -> tuple[int, int, int, int]:
     return min(rows), min(cols), max(rows), max(cols)
 
 
+def _cells_from_mask_like(mask_like: Any) -> list[tuple[int, int]] | None:
+    try:
+        mask = np.asarray(mask_like)
+    except Exception:
+        return None
+    if mask.ndim != 2:
+        return None
+    if mask.dtype == np.bool_:
+        bool_mask = mask
+    elif np.issubdtype(mask.dtype, np.integer):
+        bool_mask = mask != 0
+    else:
+        return None
+    rows, cols = np.where(bool_mask)
+    return [(int(row), int(col)) for row, col in zip(rows.tolist(), cols.tolist(), strict=False)]
+
+
 def _normalize_component(candidate: Any, *, fallback_kind: str, index: int) -> dict[str, Any]:
     kind = fallback_kind
     attrs: dict[str, Any] = {}
@@ -136,6 +153,10 @@ def _normalize_component(candidate: Any, *, fallback_kind: str, index: int) -> d
             cells = [(int(row), int(col)) for row, col in raw_cells]
     elif isinstance(candidate, dict) and isinstance(candidate.get("cells"), list) and candidate["cells"]:
         cells = [(int(row), int(col)) for row, col in candidate["cells"]]
+    elif hasattr(candidate, "mask"):
+        cells = _cells_from_mask_like(getattr(candidate, "mask"))
+    elif isinstance(candidate, dict) and candidate.get("mask") is not None:
+        cells = _cells_from_mask_like(candidate["mask"])
     elif isinstance(candidate, list) and candidate and all(
         isinstance(entry, (list, tuple)) and len(entry) == 2 for entry in candidate
     ):
@@ -274,6 +295,9 @@ def _component_coverage_markdown(payload: dict[str, Any]) -> str:
             lines.append(
                 f"- {issue['kind']} / {issue['component_id']}: {issue['message']}"
             )
+    if payload.get("status") != "pass" and not failure:
+        lines.extend(["", "Coverage validation failed before uncovered-pixel analysis."])
+        return "\n".join(lines) + "\n"
     if not failure:
         lines.extend(["", "All seen states for this level are covered by exact component geometry."])
         return "\n".join(lines) + "\n"
@@ -333,7 +357,7 @@ def run_component_coverage(game_dir: Path, *, level: int | None) -> tuple[dict[s
                     {
                         "kind": component["kind"],
                         "component_id": component["id"],
-                        "message": "component output preserved only a bbox; exact geometry must be returned via cells",
+                        "message": "component output preserved only a bbox; exact geometry must be returned via cells or a mask",
                     }
                 )
         if payload["geometry_issues"]:
