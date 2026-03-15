@@ -9,6 +9,7 @@ from pathlib import Path
 
 import numpy as np
 from arcengine import GameAction
+from .model_status_visible import rewrite_model_status_payload_for_visible_level
 
 from .visible_artifacts import (
     ANALYSIS_LEVEL_STATUS_FILE,
@@ -113,8 +114,6 @@ def build_visible_level_status(
         pin_phase=pin_phase,
         boundary_redacted=int(visible_level) < int(frontier_level),
     )
-
-
 def effective_analysis_level(game_dir: Path, frontier_level: int | None = None) -> int | None:
     frontier = int(frontier_level) if frontier_level is not None else load_frontier_level_from_arc_state()
     if frontier is None:
@@ -393,6 +392,11 @@ def sync_workspace_level_view(game_dir: Path, *, game_id: str, frontier_level: i
         compat_level.symlink_to(level_current.name, target_is_directory=True)
     except Exception:
         shutil.copytree(level_current, compat_level)
+    rewrite_model_status_payload_for_visible_level(
+        path=model_status_path(game_dir),
+        frontier_level=int(frontier_level),
+        visible_level=int(visible_level),
+    )
     return int(visible_level)
 
 
