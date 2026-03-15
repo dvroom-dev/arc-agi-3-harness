@@ -135,12 +135,13 @@ supervisor:
       - "When choosing continue, resume_mode_head, or fork_new_conversation, always include a concrete handoff message: what was learned, why the mode is changing, and the exact next action or verification target."
       - "Any handoff into explore_and_solve must include exactly one target class: either one concrete feature target to probe, one concrete completion theory to test, or one bounded multi-action route that directly tests a single completion theory or reaches one concrete trigger."
       - "A bounded explore_and_solve route is allowed only when the required movement semantics and path topology are already evidenced, and it must include an explicit stop condition: completion, novel event, route exhausted, blocked path, or budget boundary."
-      - "Any handoff into explore_only must include exactly one unknown feature or mechanic question, one bounded real-game probe or route that answers it, and one explicit stop condition. Explore_only is evidence gathering only; it must not attempt to solve the level."
+      - "Any handoff into explore_only must include exactly one newly introduced visible component or one newly changed visible component state, one bounded real-game probe or route that tests it, and one explicit stop condition. Explore_only is evidence gathering only; it must not attempt to solve the level."
       - "When a target is already clear and the route to it is deterministic from existing evidence, prefer one full bounded route to that target over a short route prefix. Do not force a return to theory after each expected repeated move when no novel evidence has appeared."
       - "If current mode is theory, current_compare.md is clean, and theory.md already contains exactly one concrete # Explore Plan target with explicit actions or route plus a stop condition, do not allow more theory churn. Route immediately to explore_and_solve via resume_mode_head when allowed."
       - "After a bounded explore probe resolves or falsifies its target, do not ask theory for broad resynthesis. Require a delta-only theory pass: record only the new evidence, update which hypotheses remain live, and name the smallest next discriminating probe."
       - "If the newest supervisor-approved handoff already narrows the next probe more tightly than the existing theory.md route, preserve that narrower handoff. Do not let an older route in theory.md override the latest approved one."
-      - "On level 2+, do not route frontier solution attempts through explore_only or theory. Use explore_only only to answer one exact missing real-game evidence question. Use solve_model for every frontier solution attempt."
+      - "On level 2+, do not route frontier solution attempts through explore_only or theory. Use explore_only only to investigate one newly introduced visible component or one newly changed visible component state. Use solve_model for every frontier solution attempt."
+      - "On level 2+, treat earlier proven rules within the same game as the inherited baseline unless current evidence contradicts them. Frontier real-game probes must target the new level-specific delta, not re-prove inherited behavior."
       - "If an agent switch_mode request is accepted or redirected, carry forward only the supervisor-approved handoff needed for the next mode. Do not forward the agent's full latest assistant message verbatim when it contains extra route planning or mixed objectives."
       - "Review components.py and model_lib.py when recent evidence or parity artifacts point to a concrete detector/mechanics bug. Do not spend early level-1 passes on speculative code review when the main issue is choosing the right next probe."
       - "If model-file bugs are found, require the agent to fix them before further solve progression. When those bugs are found outside code_model, route to code_model with explicit fix targets only if the active level is later than level 1 or the run is already inside solved-level wrap-up. Do not allow solve_model progression while unresolved model-file bugs are known."
@@ -237,11 +238,11 @@ supervisor:
                  - Put the compare-clean details into the handoff and explicitly name the single highest-value next question to answer.
                  - On level 1, the supervisor message may point to one minimal next real-game probe or solve attempt.
                  - On level 2+, the supervisor message must choose between:
-                   - one exact missing real-game evidence question for `explore_only`, or
+                  - one exact new-component evidence question for `explore_only`, or
                    - one exact model/play patch target for `code_model`, or
                    - a concrete frontier play branch that is ready for `solve_model`.
                  - If the next step will be `explore_and_solve`, the handoff must name exactly one target class: either explicit feature targets to probe, one concrete solution theory to test, or one bounded route with a stop condition that directly tests a single completion theory.
-                 - If the next step will be `explore_only`, the handoff must name exactly one unresolved feature/mechanic question and one bounded real-game probe that answers it without attempting level completion.
+                - If the next step will be `explore_only`, the handoff must name exactly one newly introduced visible component or newly changed visible component state and one bounded real-game probe that tests it without attempting level completion.
                  - If the evidence already supports a deterministic route to a decisive target, prefer the full bounded route with its stop condition over a short route prefix that would obviously bounce back to theory mid-route.
                  - Inject concise guidance that compare-clean means model parity is clean for explored sequences, not that the level is solved.
               4) If marker is `__ARC_INTERCEPT_RESET_LEVEL__`:
@@ -358,7 +359,7 @@ modes:
       - "Recover reaches the frontier unsolved level."
     stop_when:
       - "On level 1 before the first completion, component coverage passes for the active level, the passing coverage report is fresh in this theory turn, and there is exactly one concrete feature-target probe to run next; switch_mode to explore_and_solve."
-      - "On level 2+, there is exactly one missing real-game observation needed to decide between live hypotheses or unblock frontier mechanics; switch_mode to explore_only."
+      - "On level 2+, there is exactly one missing real-game observation about a newly introduced visible component or newly changed visible component state; switch_mode to explore_only."
       - "On level 2+, new components or changed component semantics are identified, or theory can name an exact model/play patch target from existing evidence; switch_mode to code_model."
       - "On level 2+, if a concrete frontier play branch already exists and only model proof remains, switch_mode to solve_model."
       - "A solved-level regression requires replay; switch_mode to recover."
@@ -464,7 +465,7 @@ modes:
             - keep `components.py` names neutral; if you think a component has a specific function, record that only as a role hypothesis in `theory.md` with evidence;
             - in theory mode, you may add new detectors freely, but only rename or rewrite detector code that theory previously introduced;
             - on level 1, maintain the `# Explore Plan` section in `theory.md`; it is the only handoff surface for `explore_and_solve`;
-            - on level 2+, keep exactly one `# Evidence Gap` section when one bounded real-game observation is still missing, and exactly one `# Model Plan` section when frontier model/play work is ready;
+            - on level 2+, keep exactly one `# Evidence Gap` section when one bounded real-game observation about a newly introduced visible component or newly changed visible component state is still missing, and exactly one `# Model Plan` section when frontier model/play work is ready;
             - run `python3 inspect_components.py --coverage --level <LEVEL>` before leaving theory mode;
             - use `component_coverage.*` as the canonical source for observed grid shapes; do not count rendered `Read` line numbers to infer dimensions;
             - read `current_compare.md` first whenever compare matters; only then open the single referenced `level_current/sequence_compare/*.md` report if needed;
@@ -490,7 +491,11 @@ modes:
             - while a solved-level compare pin is active and compare is clean, either prepare final pinned-level certification or name one exact pinned-level blocker; do not write frontier-level plans;
             - while a solved-level compare pin is active and compare is not clean, stay strictly on pinned-level replay/parity work; do not inspect or summarize frontier start-state artifacts even if the terminal pinned state visually resembles the next frontier state;
             - on level 2+, do not write a frontier real-game solve route in theory mode;
-            - on level 2+, use `# Evidence Gap` only for one bounded real-game observation that explore_only can answer, and use `# Model Plan` for the frontier play/model branch that code_model or solve_model should handle next;
+            - on level 2+, start from prior levels' proven rules as the inherited baseline unless current evidence contradicts them;
+            - on level 2+, run coverage and compare the current visible component set against prior levels before proposing a real-game probe;
+            - on level 2+, define any newly introduced visible component or newly changed visible component state in `components.py` before handing off `explore_only`;
+            - on level 2+, use `# Evidence Gap` only for one bounded real-game observation that explore_only can answer about a newly introduced visible component or newly changed visible component state, and use `# Model Plan` for the frontier play/model branch that code_model or solve_model should handle next;
+            - on level 2+, do not use `# Evidence Gap` to re-prove inherited baseline behavior unless current frontier evidence contradicts it;
             - on later levels, decide whether the next step is `explore_only`, `code_model`, `solve_model`, or `recover`;
             - if switching, include a concrete handoff message with exact files/evidence to inspect or the exact probe to run.
             Read these agent-workspace files as needed instead of relying on inlined contents:
@@ -518,6 +523,9 @@ modes:
         - "In theory mode, do not satisfy component coverage with static-coordinate-only detectors or umbrella playfield/background boxes."
         - "On level 1 before the first completion, if a real-game probe is needed, switch_mode to `explore_and_solve` only after writing a fresh `# Explore Plan` section in `theory.md` with exactly one target class."
         - "Use speculation in theory mode when evidence is incomplete, but label it clearly as a hypothesis. On level 1, keep the active `# Explore Plan` scoped to one target class; on level 2+, keep `# Evidence Gap` or `# Model Plan` scoped to one exact next step."
+        - "On level 2+, treat earlier proven rules in the same game as the inherited baseline unless current evidence contradicts them."
+        - "On level 2+, run coverage and compare the current visible component set against prior levels before requesting a real-game probe."
+        - "On level 2+, if a newly introduced visible component or newly changed visible component state is the blocker, add or update it in `components.py` before handing off `explore_only`."
         - "When evidence is weak or ambiguous, keep at least two plausible alternative theories live in `theory.md` and choose the next probe to discriminate between them."
         - "A changed feature may be a destination, trigger, gate, progress display, or side effect; do not jump from 'it changed' to one assumed function without discriminating evidence."
         - "After the first survey, prioritize action-responsive features, state-display changes, and unresolved non-wall interactables; do not keep expanding static wall/corridor descriptions once those anchors are named."
@@ -531,9 +539,10 @@ modes:
         - "Do not split a deterministic repeated-move route into separate per-step target classes once the repeated move semantics are already confirmed."
         - "Do not hand off an unbounded route plan, a mixed probe-plus-then-route script, or multiple target classes; `explore_and_solve` should receive one target class with either a minimal probe sequence or one bounded route plus a stop condition."
         - "If `current_compare.md` is clean and `theory.md` already contains exactly one concrete `# Explore Plan` target with explicit actions or route and a stop condition, switch immediately to `explore_and_solve` instead of continuing theory analysis."
-        - "On level 2+, if exactly one bounded real-game observation is still missing, write it in `# Evidence Gap` and switch_mode to `explore_only`."
+        - "On level 2+, if exactly one bounded real-game observation is still missing about a newly introduced visible component or newly changed visible component state, write it in `# Evidence Gap` and switch_mode to `explore_only`."
         - "On level 2+, if new components or changed semantics require mechanics work, or if there is an exact frontier play/model patch target, switch_mode to `code_model` with explicit patch targets."
         - "On level 2+, do not hand off a frontier real-game solve route from theory. Once a frontier branch is ready, route to `solve_model` for solution testing."
+        - "On level 2+, do not request a real-game probe whose purpose is to re-prove inherited baseline behavior without contradictory evidence."
         - "While a solved-level wrap-up pin is active, do not include wrap-up certification flags on theory -> code_model or theory -> theory handoffs. Those flags are reserved for the final certified release out of wrap-up."
         - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
       violations:
@@ -548,17 +557,19 @@ modes:
         - "Staying in theory mode after compare is clean and `theory.md` already contains one concrete `# Explore Plan` target with explicit actions or route plus stop condition."
         - "Handing off an unbounded route plan, a mixed staged probe-plus-route script, or multiple target classes from theory mode into `explore_and_solve` or `explore_only`."
         - "Handing off a frontier level-2+ real-game solve route from theory mode."
+        - "Handing off `explore_only` on level 2+ without naming a specific newly introduced visible component or newly changed visible component state."
+        - "Using `# Evidence Gap` on level 2+ to re-prove inherited baseline behavior rather than explore the new level-specific delta."
         - "Writing any file other than `theory.md` or `components.py` in theory mode."
         - "Planning frontier-level work or recording frontier-level observations while a solved-level compare pin is active."
 
   explore_only:
-    description: "Level-2+-only bounded real-game evidence gathering for one unresolved feature or mechanic question."
+    description: "Level-2+-only bounded real-game evidence gathering for one newly introduced visible component or newly changed visible component state."
     agent_model_reasoning_effort: low
     start_when:
-      - "Theory identifies exactly one missing real-game observation on level 2+ that blocks model/play work."
+      - "Theory identifies exactly one missing real-game observation on level 2+ about a newly introduced visible component or newly changed visible component state that blocks model/play work."
       - "A supervisor intercept on level 2+ requires one bounded real-game evidence check."
     stop_when:
-      - "The handed-off evidence question is answered or falsified and recorded; switch_mode to theory."
+      - "The handed-off new-component evidence question is answered or falsified and recorded; switch_mode to theory."
       - "A solved-level regression requires replay; switch_mode to recover."
     tools:
       allow_builtin:
@@ -616,7 +627,7 @@ modes:
       parts:
         - literal: |
             Mode: explore_only.
-            Goal: on level 2+, answer one bounded real-game evidence question that theory already named.
+            Goal: on level 2+, answer one bounded real-game evidence question about a newly introduced visible component or newly changed visible component state that theory already named.
             This mode must not attempt to solve the level.
             Read `theory.md` first and treat the current `# Evidence Gap` section as the full contract for the turn.
             Run only the bounded probe or route needed to answer that one question, then update `theory.md` and return to theory.
@@ -630,11 +641,12 @@ modes:
             Active game: `${vars.game_id}`.
             Explore-only is level-2+ evidence gathering only:
             - read the current `# Evidence Gap` section in `theory.md` first and treat it as the full contract for this turn;
-            - perform only the handed-off bounded probe or route needed to answer that one evidence question;
+            - confirm that the handoff names one newly introduced visible component or one newly changed visible component state;
+            - perform only the handed-off bounded probe or route needed to answer that one evidence question about that component;
             - stop as soon as that question is answered, falsified, blocked, or the explicit bounded-route stop condition is reached;
             - write the observed outcome and its implication into `theory.md`;
             - then switch_mode back to theory.
-            Do not attempt level completion, broad route search, or multi-hypothesis wandering in this mode.
+            Do not attempt level completion, broad route search, generic layout mapping, or multi-hypothesis wandering in this mode.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
             For actionful probes, inspect the returned `artifacts.after_state_hex` first before reopening on-disk turn artifacts.
             Only write `theory.md` in this mode.
@@ -645,17 +657,19 @@ modes:
       operation: append
       requirements:
         - "Use explore_only only on level 2+."
-        - "In explore_only, read the current `# Evidence Gap` section in `theory.md` first and stay inside that one evidence question."
+        - "In explore_only, read the current `# Evidence Gap` section in `theory.md` first and stay inside that one evidence question about the named new or changed component."
         - "Do not exit explore_only until the handed-off evidence question has been answered, falsified, blocked, or its explicit stop condition has been reached."
         - "Do not switch back to theory from explore_only without new real-game evidence from this turn, unless a supervisor or policy blocker prevented action execution."
         - "After each real-game probe, update `theory.md` before switching modes."
         - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
+        - "In explore_only on level 2+, the handoff target must be one newly introduced visible component or one newly changed visible component state; if it does not, do not improvise a different target."
       violations:
         - "Using explore_only on level 1."
         - "Attempting a full level solve or broad solution search in explore_only."
         - "Broadening explore_only to new unhanded-off targets or free-form wandering without first switching back for a new `# Evidence Gap`."
         - "Creating new files or scripts in explore_only."
         - "Using explore_only to write or refine a frontier solution route instead of answering one bounded evidence question."
+        - "Using explore_only to re-prove inherited baseline behavior instead of probing the handed-off new or changed component."
 
   explore_and_solve:
     description: "Level-1-only real-game feature probing and minimal solution attempts driven by theory handoffs."
