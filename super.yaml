@@ -478,6 +478,9 @@ modes:
             - when movement semantics and route topology are already confirmed, `# Explore Plan` should hand off one bounded multi-action route to the decisive target instead of splitting each repeated move into its own target;
             - if the next objective is to reach one visible target or test one completion condition and the full route is already known, write that full bounded route now rather than only the first few moves;
             - if `current_compare.md` is clean and `# Explore Plan` already contains one concrete target with explicit actions or route plus stop condition, switch immediately instead of doing more theory-side recounting or model introspection;
+            - once component coverage passes and the active question is already clear, stop re-deriving full-state geometry from `current_state.hex`; use existing notes/artifacts and choose the smallest decisive next step;
+            - do not spend theory turns recounting coordinates or maze/topology details that are already written in `theory.md` unless a specific contradiction requires rechecking them;
+            - prefer the shortest discriminating probe that can change the theory over authoring a long route plan while core movement or interaction mechanics are still uncertain;
             - while a solved-level compare pin is active and compare is clean, either prepare final pinned-level certification or name one exact pinned-level blocker; do not write frontier-level plans;
             - while a solved-level compare pin is active and compare is not clean, stay strictly on pinned-level replay/parity work; do not inspect or summarize frontier start-state artifacts even if the terminal pinned state visually resembles the next frontier state;
             - on level 2+, do not write a frontier real-game solve route in theory mode;
@@ -513,6 +516,9 @@ modes:
         - "A changed feature may be a destination, trigger, gate, progress display, or side effect; do not jump from 'it changed' to one assumed function without discriminating evidence."
         - "After the first survey, prioritize action-responsive features, state-display changes, and unresolved non-wall interactables; do not keep expanding static wall/corridor descriptions once those anchors are named."
         - "Do not revisit a falsified completion hypothesis or trigger path unless new action-linked evidence changes it."
+        - "Once component coverage passes and the active question is already clear, do not reread `current_state.hex` just to restate stable geometry or recount coordinates."
+        - "In theory mode, when the next step is already identifiable from current evidence, choose the smallest decisive next step instead of spending another turn re-deriving the full state."
+        - "Do not hand off a long bounded route from theory while core movement or interaction mechanics remain uncertain; prefer the shortest probe that discriminates between the remaining alternatives."
         - "When movement semantics and route topology are already evidenced, a level-1 `# Explore Plan` may hand off one bounded multi-action route to test a single completion theory or reach one concrete trigger."
         - "Do not split a deterministic repeated-move route into separate per-step target classes once the repeated move semantics are already confirmed."
         - "Do not hand off an unbounded route plan, a mixed probe-plus-then-route script, or multiple target classes; `explore_and_solve` should receive one target class with either a minimal probe sequence or one bounded route plus a stop condition."
