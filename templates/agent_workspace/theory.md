@@ -14,7 +14,7 @@ Game <id> Theory
         - Level X Turn Y: action -> observed state change
 
 Coverage guardrail:
-- Every visible pixel in every seen state for the active level should lie inside at least one component bounding box.
+- Every visible pixel in every seen state for the active level should lie inside at least one exact component geometry.
 - Keep `components.py` detectors broad enough that `python3 inspect_components.py --coverage --level <n>` passes before leaving theory mode.
 - Coverage only counts when detectors inspect visual content. Static-coordinate or shape-only boxes do not count as valid component detectors.
 - Use neutral feature names until a semantic role is proven by evidence.

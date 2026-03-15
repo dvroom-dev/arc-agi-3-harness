@@ -35,8 +35,8 @@ prompt_parts:
   component_model_runtime:
     - literal: |
         Component workflow:
-        - `components.py` should define `COMPONENT_REGISTRY` (or `iter_components`) detectors that inspect visual content (pattern/color/connectivity) and whose bounding boxes cover every visible pixel in every seen state for the active level.
-        - `python3 inspect_components.py --coverage --level LEVEL` checks that coverage across every seen state and writes `component_coverage.json` / `component_coverage.md`.
+        - `components.py` should define `COMPONENT_REGISTRY` (or `iter_components`) detectors that inspect visual content (pattern/color/connectivity) and preserve exact component geometry as cells or masks; any `bbox` is derived convenience data, not the canonical geometry.
+        - `python3 inspect_components.py --coverage --level LEVEL` checks that exact component geometry covers every visible pixel in every seen state and writes `component_coverage.json` / `component_coverage.md`.
         - `model.py` is harness-owned runtime glue. Do not edit it.
         - Outside theory mode, prefer compare reports and coverage summaries over direct raw hex-grid inspection.
         - Detector rule of thumb: if a region can move independently, recolor independently, or be consumed independently, it should usually be its own detected component rather than part of one giant bounding box.
@@ -81,7 +81,7 @@ prompt_parts:
         - `python3 model.py print(1+1)`
         - `python3 model.py status grid=env.grid`
         - `python3 model.py compare_sequences ... ; print(...)`
-        Use `python3 inspect_components.py --coverage --level LEVEL` to verify that component bounding boxes cover every seen state for the current level.
+        Use `python3 inspect_components.py --coverage --level LEVEL` to verify that exact component geometry covers every seen state for the current level.
         When using provider file-edit tools, read the file first, then edit/write it.
         Do not use private/underscored internals.
     - prompt_part: component_model_runtime
@@ -450,7 +450,7 @@ modes:
             Active game: `${vars.game_id}`.
             Deliverables for this mode:
             - update `theory.md` with components, action effects, completion candidates, and unknowns;
-            - keep `components.py` detectors broad enough that every visible pixel in every seen state for the active level lies inside at least one component bounding box, but only through detectors that inspect visual content rather than static coordinates alone;
+            - keep `components.py` detectors broad enough that every visible pixel in every seen state for the active level lies inside at least one exact component geometry, but only through detectors that inspect visual content rather than static coordinates alone;
             - keep `components.py` names neutral; if you think a component has a specific function, record that only as a role hypothesis in `theory.md` with evidence;
             - in theory mode, you may add new detectors freely, but only rename or rewrite detector code that theory previously introduced;
             - on level 1, maintain the `# Explore Plan` section in `theory.md`; it is the only handoff surface for `explore_and_solve`;
@@ -497,7 +497,7 @@ modes:
         - "In theory mode, do not probe `level_current/sequences/**` unless `current_compare.*`, `level_current/sequence_compare/*.md`, or `turn_index.jsonl` indicate that a real sequence artifact already exists for the question you are answering."
         - "In theory mode, do not inspect `.ai-supervisor/**`, blob files, provider/runtime source, or other control-plane internals. If an error references those paths, summarize the workspace-visible contradiction and stop."
         - "In theory mode, do not read `model.py` or `model_lib.py`; model/runtime debugging belongs in `code_model`."
-        - "In theory mode, use raw `.hex` evidence together with compare/component artifacts to define named components and keep every visible pixel accounted for by component bounding boxes built from visual-content detectors."
+        - "In theory mode, use raw `.hex` evidence together with compare/component artifacts to define named components and keep every visible pixel accounted for by exact component geometry built from visual-content detectors."
         - "In theory mode, do not satisfy component coverage with static-coordinate-only detectors or umbrella playfield/background boxes."
         - "On level 1 before the first completion, if a real-game probe is needed, switch_mode to `explore_and_solve` only after writing a fresh `# Explore Plan` section in `theory.md` with exactly one target class."
         - "Use speculation in theory mode when evidence is incomplete, but label it clearly as a hypothesis. On level 1, keep the active `# Explore Plan` scoped to one target class; on level 2+, keep `# Evidence Gap` or `# Model Plan` scoped to one exact next step."

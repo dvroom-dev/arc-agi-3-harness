@@ -120,6 +120,8 @@ def _normalize_component(candidate: Any, *, fallback_kind: str, index: int) -> d
     kind = fallback_kind
     attrs: dict[str, Any] = {}
     bbox: tuple[int, int, int, int] | None = None
+    cells: list[tuple[int, int]] | None = None
+    geometry_source = "cells"
 
     if hasattr(candidate, "kind") and isinstance(candidate.kind, str):
         kind = candidate.kind
@@ -128,6 +130,17 @@ def _normalize_component(candidate: Any, *, fallback_kind: str, index: int) -> d
     elif isinstance(candidate, dict) and isinstance(candidate.get("attrs"), dict):
         attrs = dict(candidate["attrs"])
 
+    if hasattr(candidate, "cells"):
+        raw_cells = list(getattr(candidate, "cells"))
+        if raw_cells:
+            cells = [(int(row), int(col)) for row, col in raw_cells]
+    elif isinstance(candidate, dict) and isinstance(candidate.get("cells"), list) and candidate["cells"]:
+        cells = [(int(row), int(col)) for row, col in candidate["cells"]]
+    elif isinstance(candidate, list) and candidate and all(
+        isinstance(entry, (list, tuple)) and len(entry) == 2 for entry in candidate
+    ):
+        cells = [(int(row), int(col)) for row, col in candidate]
+
     if hasattr(candidate, "bbox"):
         raw_bbox = getattr(candidate, "bbox")
     elif isinstance(candidate, dict):
@@ -135,22 +148,18 @@ def _normalize_component(candidate: Any, *, fallback_kind: str, index: int) -> d
     else:
         raw_bbox = candidate
 
-    if (
+    if cells:
+        cells = sorted(set(cells))
+        bbox = _bbox_from_cells(cells)
+    elif (
         isinstance(raw_bbox, (list, tuple))
         and len(raw_bbox) == 4
         and all(isinstance(value, (int, np.integer)) for value in raw_bbox)
     ):
         bbox = tuple(int(value) for value in raw_bbox)  # type: ignore[assignment]
-    elif hasattr(candidate, "cells"):
-        cells = list(getattr(candidate, "cells"))
-        if cells:
-            bbox = _bbox_from_cells([(int(row), int(col)) for row, col in cells])
-    elif isinstance(candidate, dict) and isinstance(candidate.get("cells"), list) and candidate["cells"]:
-        bbox = _bbox_from_cells([(int(row), int(col)) for row, col in candidate["cells"]])
-    elif isinstance(candidate, list) and candidate and all(
-        isinstance(entry, (list, tuple)) and len(entry) == 2 for entry in candidate
-    ):
-        bbox = _bbox_from_cells([(int(row), int(col)) for row, col in candidate])
+        top, left, bottom, right = bbox
+        cells = [(row, col) for row in range(top, bottom + 1) for col in range(left, right + 1)]
+        geometry_source = "bbox"
 
     if bbox is None:
         raise RuntimeError(f"component detector '{kind}' returned an unsupported component at index {index}")
@@ -160,6 +169,9 @@ def _normalize_component(candidate: Any, *, fallback_kind: str, index: int) -> d
         "id": f"{kind}#{index}",
         "kind": kind,
         "bbox": [top, left, bottom, right],
+        "cells": cells,
+        "pixel_count": len(cells or []),
+        "geometry_source": geometry_source,
         "attrs": attrs,
     }
 
@@ -190,8 +202,8 @@ def _collect_components(components_module: Any, grid: np.ndarray) -> list[dict[s
 def _coverage_mask(shape: tuple[int, int], components: list[dict[str, Any]]) -> np.ndarray:
     mask = np.zeros(shape, dtype=bool)
     for component in components:
-        top, left, bottom, right = component["bbox"]
-        mask[top : bottom + 1, left : right + 1] = True
+        for row, col in component.get("cells") or []:
+            mask[row, col] = True
     return mask
 
 
@@ -255,8 +267,15 @@ def _component_coverage_markdown(payload: dict[str, Any]) -> str:
             lines.append(
                 f"- {issue['kind']} / {issue['detector']} (line {issue['line']}): {issue['message']}"
             )
+    geometry_issues = payload.get("geometry_issues") or []
+    if geometry_issues:
+        lines.extend(["", "geometry_issues:"])
+        for issue in geometry_issues:
+            lines.append(
+                f"- {issue['kind']} / {issue['component_id']}: {issue['message']}"
+            )
     if not failure:
-        lines.extend(["", "All seen states for this level are covered by component bounding boxes."])
+        lines.extend(["", "All seen states for this level are covered by exact component geometry."])
         return "\n".join(lines) + "\n"
     lines.extend(
         [
@@ -273,7 +292,9 @@ def _component_coverage_markdown(payload: dict[str, Any]) -> str:
         lines.append(f"- bbox={box['bbox']} pixels={box['pixel_count']}")
     lines.extend(["", "components:"])
     for component in failure.get("components", []):
-        lines.append(f"- {component['id']}: bbox={component['bbox']}")
+        lines.append(
+            f"- {component['id']}: bbox={component['bbox']} pixels={component.get('pixel_count', '?')}"
+        )
     return "\n".join(lines) + "\n"
 
 
@@ -291,6 +312,7 @@ def run_component_coverage(game_dir: Path, *, level: int | None) -> tuple[dict[s
         "observed_shapes": [],
         "first_failure": None,
         "detector_issues": _detector_source_issues(game_dir, components_module),
+        "geometry_issues": [],
     }
     observed_shapes: list[str] = []
 
@@ -305,6 +327,19 @@ def run_component_coverage(game_dir: Path, *, level: int | None) -> tuple[dict[s
         if payload["status"] == "fail" and payload["detector_issues"]:
             continue
         components = _collect_components(components_module, grid)
+        for component in components:
+            if component.get("geometry_source") != "cells":
+                payload["geometry_issues"].append(
+                    {
+                        "kind": component["kind"],
+                        "component_id": component["id"],
+                        "message": "component output preserved only a bbox; exact geometry must be returned via cells",
+                    }
+                )
+        if payload["geometry_issues"]:
+            payload["status"] = "fail"
+            payload["observed_shapes"] = observed_shapes
+            continue
         covered = _coverage_mask(grid.shape, components)
         uncovered = ~covered
         if uncovered.any():

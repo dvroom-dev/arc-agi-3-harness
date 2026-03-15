@@ -71,23 +71,24 @@ def test_component_coverage_does_not_advance_analysis_level_pin_phase(tmp_path: 
         "from dataclasses import dataclass, field\n"
         "from typing import Callable\n"
         "import numpy as np\n"
+        "GridCell = tuple[int, int]\n"
         "@dataclass(frozen=True)\n"
-        "class ComponentBox:\n"
+        "class ComponentShape:\n"
         "    kind: str\n"
-        "    bbox: tuple[int, int, int, int]\n"
+        "    cells: tuple[GridCell, ...]\n"
         "    attrs: dict[str, object] = field(default_factory=dict)\n"
-        "ComponentDetector = Callable[[np.ndarray], list[ComponentBox]]\n"
+        "ComponentDetector = Callable[[np.ndarray], list[ComponentShape]]\n"
         "COMPONENT_REGISTRY = {}\n"
-        "def make_component(kind, *, top, left, bottom, right, **attrs):\n"
-        "    return ComponentBox(kind=kind, bbox=(top, left, bottom, right), attrs=dict(attrs))\n"
+        "def make_component(kind, *, cells, **attrs):\n"
+        "    return ComponentShape(kind=kind, cells=tuple(cells), attrs=dict(attrs))\n"
         "def iter_components(grid):\n"
         "    out = []\n"
         "    for kind, detector in COMPONENT_REGISTRY.items():\n"
         "        out.extend(detector(grid))\n"
         "    return out\n"
         "def find_all_bg(grid):\n"
-        "    rows, cols = np.where(grid == 0)\n"
-        "    return [make_component('bg', top=int(rows.min()), left=int(cols.min()), bottom=int(rows.max()), right=int(cols.max()))]\n"
+        "    cells = [(int(r), int(c)) for r, c in np.argwhere(grid == 0)]\n"
+        "    return [make_component('bg', cells=cells)] if cells else []\n"
         "COMPONENT_REGISTRY['bg'] = find_all_bg\n"
     )
     (game_dir / ".analysis_level_pin.json").write_text(
@@ -111,17 +112,19 @@ def test_component_coverage_rejects_static_coordinate_detectors(tmp_path: Path) 
         "from dataclasses import dataclass, field\n"
         "from typing import Callable\n"
         "import numpy as np\n"
+        "GridCell = tuple[int, int]\n"
         "@dataclass(frozen=True)\n"
-        "class ComponentBox:\n"
+        "class ComponentShape:\n"
         "    kind: str\n"
-        "    bbox: tuple[int, int, int, int]\n"
+        "    cells: tuple[GridCell, ...]\n"
         "    attrs: dict[str, object] = field(default_factory=dict)\n"
-        "ComponentDetector = Callable[[np.ndarray], list[ComponentBox]]\n"
+        "ComponentDetector = Callable[[np.ndarray], list[ComponentShape]]\n"
         "COMPONENT_REGISTRY = {}\n"
-        "def make_component(kind, *, top, left, bottom, right, **attrs):\n"
-        "    return ComponentBox(kind=kind, bbox=(top, left, bottom, right), attrs=dict(attrs))\n"
+        "def make_component(kind, *, cells, **attrs):\n"
+        "    return ComponentShape(kind=kind, cells=tuple(cells), attrs=dict(attrs))\n"
         "def find_all_box(grid):\n"
-        "    return [make_component('box', top=0, left=0, bottom=3, right=3)]\n"
+        "    cells = [(r, c) for r in range(4) for c in range(4)]\n"
+        "    return [make_component('box', cells=cells)]\n"
         "COMPONENT_REGISTRY['box'] = find_all_box\n"
     )
 
@@ -141,18 +144,20 @@ def test_component_coverage_rejects_shape_only_umbrella_detectors(tmp_path: Path
         "from dataclasses import dataclass, field\n"
         "from typing import Callable\n"
         "import numpy as np\n"
+        "GridCell = tuple[int, int]\n"
         "@dataclass(frozen=True)\n"
-        "class ComponentBox:\n"
+        "class ComponentShape:\n"
         "    kind: str\n"
-        "    bbox: tuple[int, int, int, int]\n"
+        "    cells: tuple[GridCell, ...]\n"
         "    attrs: dict[str, object] = field(default_factory=dict)\n"
-        "ComponentDetector = Callable[[np.ndarray], list[ComponentBox]]\n"
+        "ComponentDetector = Callable[[np.ndarray], list[ComponentShape]]\n"
         "COMPONENT_REGISTRY = {}\n"
-        "def make_component(kind, *, top, left, bottom, right, **attrs):\n"
-        "    return ComponentBox(kind=kind, bbox=(top, left, bottom, right), attrs=dict(attrs))\n"
+        "def make_component(kind, *, cells, **attrs):\n"
+        "    return ComponentShape(kind=kind, cells=tuple(cells), attrs=dict(attrs))\n"
         "def find_all_box(grid):\n"
         "    rows, cols = grid.shape\n"
-        "    return [make_component('box', top=0, left=0, bottom=rows - 1, right=cols - 1)]\n"
+        "    cells = [(r, c) for r in range(rows) for c in range(cols)]\n"
+        "    return [make_component('box', cells=cells)]\n"
         "COMPONENT_REGISTRY['box'] = find_all_box\n"
     )
 
@@ -163,3 +168,31 @@ def test_component_coverage_rejects_shape_only_umbrella_detectors(tmp_path: Path
     assert payload["detector_issues"]
     assert "shape-only" in payload["detector_issues"][0]["message"] or "static-coordinate" in payload["detector_issues"][0]["message"]
 
+
+def test_component_coverage_rejects_bbox_only_component_output(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["0000", "0110", "0110", "0000"])
+    (game_dir / "components.py").write_text(
+        "from dataclasses import dataclass, field\n"
+        "from typing import Callable\n"
+        "import numpy as np\n"
+        "@dataclass(frozen=True)\n"
+        "class ComponentBox:\n"
+        "    kind: str\n"
+        "    bbox: tuple[int, int, int, int]\n"
+        "    attrs: dict[str, object] = field(default_factory=dict)\n"
+        "ComponentDetector = Callable[[np.ndarray], list[ComponentBox]]\n"
+        "COMPONENT_REGISTRY = {}\n"
+        "def find_all_zero_region(grid):\n"
+        "    rows, cols = np.where(grid == 0)\n"
+        "    return [ComponentBox(kind='zero_region', bbox=(int(rows.min()), int(cols.min()), int(rows.max()), int(cols.max())))]\n"
+        "COMPONENT_REGISTRY['zero_region'] = find_all_zero_region\n"
+    )
+
+    proc = _run_helper(game_dir, ["--coverage", "--level", "1"])
+    assert proc.returncode == 1
+    payload = json.loads(proc.stdout)
+    assert payload["status"] == "fail"
+    assert payload["geometry_issues"]
+    assert "exact geometry" in payload["geometry_issues"][0]["message"]
