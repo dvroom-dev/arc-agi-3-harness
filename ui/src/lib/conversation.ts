@@ -15,6 +15,8 @@ export interface ConversationBlock {
   raw: string;
 }
 
+const COMPACT_TOOL_DETAILS_OMITTED = "(details omitted in compact view)";
+
 function parseFenceHeader(
   line: string
 ): { fence: string; kind: string; meta: Record<string, string> } | null {
@@ -205,13 +207,13 @@ function parseLegacyToolCall(block: ConversationBlock) {
     return {
       type: typeof payload.type === "string" ? payload.type : null,
       name: headerName || nameMatch?.[1] || summary || "tool",
-      call: block.content || "(call details unavailable)",
+      call: COMPACT_TOOL_DETAILS_OMITTED,
     };
   } catch {
     return {
       type: null,
       name: headerName || block.raw || "tool",
-      call: block.content || "(call details unavailable)",
+      call: COMPACT_TOOL_DETAILS_OMITTED,
     };
   }
 }
@@ -219,9 +221,6 @@ function parseLegacyToolCall(block: ConversationBlock) {
 function parseLegacyToolResult(block: ConversationBlock) {
   const lines = block.content.split("\n");
   const statusLine = lines.find((line) => line.startsWith("status: "));
-  const bodyStart = lines.findIndex((line) => line.trim() === "");
-  const prefixedBody = bodyStart >= 0 ? lines.slice(bodyStart + 1).join("\n").trim() : block.content.trim();
-  const compactBody = prefixedBody.replace(/^\(ok=(true|false)\)\s*\n?/, "").trim();
   const rawStatus = statusLine?.replace(/^status:\s*/, "").trim().toLowerCase() || "ok";
   const status =
     rawStatus === "completed" || rawStatus === "ok"
@@ -231,7 +230,7 @@ function parseLegacyToolResult(block: ConversationBlock) {
         : "pending";
   return {
     status,
-    body: compactBody || prefixedBody || "(empty)",
+    body: status === "pending" ? "(result pending)" : COMPACT_TOOL_DETAILS_OMITTED,
   };
 }
 
