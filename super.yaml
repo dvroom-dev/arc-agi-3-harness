@@ -26,8 +26,11 @@ prompt_parts:
   artifact_read_path:
     - literal: |
         Use filesystem artifacts as the canonical read path when the current mode allows them: `level_current/**`, `level_current/sequence_compare/**`, `current_compare.md`, and `theory.md`.
+        Treat `.` as the current game workspace root. Use relative workspace paths only (`./...`, `level_current/...`, `current_compare.md`, `theory.md`, `components.py`, `play.py`).
+        Do not derive file paths from the game id, run id, absolute repo paths, or guessed `game_<id>` directories.
         Do not probe `level_current/sequences/**` just to see whether sequence files exist. First use `current_compare.*`, `level_current/sequence_compare/*.md`, and `turn_index.jsonl`/workspace metadata to determine whether a real action sequence has been recorded.
         `current_compare.md` and `current_compare.json` are generated artifacts. Read them; do not hand-edit them.
+        When compare matters, read `current_compare.md` first. Only open a specific `level_current/sequence_compare/*.md` report after `current_compare.md` or `level_current/sequence_compare/current_compare.md` references it.
   current_theory_file:
     - literal: |
         Current `theory.md`:
@@ -73,6 +76,7 @@ prompt_parts:
         `model.py` acts on your model/simulator.
         Valid `model.py` commands are: `status`, `reset_level`, `exec`, `set_level`, `compare_sequences`, `exec_file`, `shutdown`.
         `model.py` is a CLI, not a Python scratchpad. Do not append ad hoc Python expressions or treat subcommands like an inline REPL.
+        Use relative workspace paths only. Do not synthesize absolute run/repo paths or derive paths from `${vars.game_id}`.
         Good examples:
         - `python3 model.py status --game-id "${vars.game_id}"`
         - `python3 model.py compare_sequences --game-id "${vars.game_id}"`
@@ -81,6 +85,7 @@ prompt_parts:
         - `python3 model.py print(1+1)`
         - `python3 model.py status grid=env.grid`
         - `python3 model.py compare_sequences ... ; print(...)`
+        If you parse JSON from a CLI, parse stdout only. Never pipe `2>&1` into `json.load`, `jq`, or another JSON parser.
         Use `python3 inspect_components.py --coverage --level LEVEL` to verify that exact component geometry covers every seen state for the current level.
         When using provider file-edit tools, read the file first, then edit/write it.
         Do not use private/underscored internals.
@@ -424,6 +429,7 @@ modes:
             Do not use theory mode to debug `model.py`, `model_lib.py`, compare internals, or coordinate-counting contradictions after compare is already clean; that belongs in `code_model`. On level 1, a ready next probe belongs in `explore_and_solve`; on level 2+, a ready evidence probe belongs in `explore_only` and a ready solution attempt belongs in `solve_model`.
             Runtime/harness investigation is out of scope here. If artifacts appear inconsistent, cite the exact conflicting workspace files and switch modes or report the blocker; do not inspect tooling internals.
             Do not inspect `.ai-supervisor/**`, blob files, run-control internals, or provider/runtime source while solving. Those are control-plane artifacts, not game evidence.
+            Use relative workspace paths only. Do not synthesize absolute paths or derive `game_<id>` directories from `${vars.game_id}`.
             When reading a full-grid artifact like `current_state.hex`, read the whole file in one `Read` call first. These files are small enough to inspect whole.
             Do not page through different offsets of the same full-grid file unless a specific unresolved question requires a targeted reread after that first full read.
              Detector rule of thumb: if a region can move independently, recolor independently, or be consumed independently, it should usually be its own detected component rather than part of one giant bounding box.
@@ -457,7 +463,8 @@ modes:
             - on level 2+, keep exactly one `# Evidence Gap` section when one bounded real-game observation is still missing, and exactly one `# Model Plan` section when frontier model/play work is ready;
             - run `python3 inspect_components.py --coverage --level <LEVEL>` before leaving theory mode;
             - use `component_coverage.*` as the canonical source for observed grid shapes; do not count rendered `Read` line numbers to infer dimensions;
-            - use `current_compare.*`, `level_current/sequence_compare/*.md`, and `turn_index.jsonl` to decide whether sequence artifacts exist before looking for `level_current/sequences/**`;
+            - read `current_compare.md` first whenever compare matters; only then open the single referenced `level_current/sequence_compare/*.md` report if needed;
+            - use `current_compare.*`, the referenced compare report, and `turn_index.jsonl` to decide whether sequence artifacts exist before looking for `level_current/sequences/**`;
             - record the available non-RESET actions from the prompt or existing artifacts; do not propose read-only action-discovery probes;
             - if a solved-level compare pin is active, keep `theory.md` and `components.py` scoped to the pinned solved level only;
             - while a solved-level compare pin is active, do not use or request `arc_repl`; theory remains read-only and mutations belong only in real-game modes after the pin clears;
@@ -495,6 +502,7 @@ modes:
         - "In theory mode, after an initial survey, reread only the files needed for one specific unresolved question or handoff."
         - "In theory mode, when reading a full-grid file such as `current_state.hex`, read it whole once before any targeted reread; use offset/limit reads only for a specific unresolved question."
         - "In theory mode, do not probe `level_current/sequences/**` unless `current_compare.*`, `level_current/sequence_compare/*.md`, or `turn_index.jsonl` indicate that a real sequence artifact already exists for the question you are answering."
+        - "In theory mode, when compare matters, read `current_compare.md` first and only open the single compare report it references."
         - "In theory mode, do not inspect `.ai-supervisor/**`, blob files, provider/runtime source, or other control-plane internals. If an error references those paths, summarize the workspace-visible contradiction and stop."
         - "In theory mode, do not read `model.py` or `model_lib.py`; model/runtime debugging belongs in `code_model`."
         - "In theory mode, use raw `.hex` evidence together with compare/component artifacts to define named components and keep every visible pixel accounted for by exact component geometry built from visual-content detectors."
@@ -521,6 +529,7 @@ modes:
         - "Inspecting `.ai-supervisor/**`, blob files, or runtime/tooling internals instead of workspace-visible game artifacts."
         - "Using Bash for anything other than `switch_mode ...` or `python3 inspect_components.py ...` in theory mode."
         - "Using `arc_repl` or any Python execution other than `python3 inspect_components.py ...` in theory mode."
+        - "Using absolute repo/run paths or deriving workspace paths from `${vars.game_id}` in theory mode."
         - "Leaving theory mode without a fresh passing `component_coverage.json` for the active level."
         - "Staying in theory mode after compare is clean and `theory.md` already contains one concrete `# Explore Plan` target with explicit actions or route plus stop condition."
         - "Handing off an unbounded route plan, a mixed staged probe-plus-route script, or multiple target classes from theory mode into `explore_and_solve` or `explore_only`."
@@ -898,6 +907,11 @@ modes:
             Treat `current_compare.json`, `current_compare.md`, and `level_current/sequence_compare/*.md` as the authoritative parity artifacts in this mode.
             If they disagree or look broken, report the exact contradiction from workspace artifacts and stay in `code_model`; do not inspect runtime/tooling source.
             If compare is red and you have one exact blocker, stay in `code_model` and report that blocker precisely; do not bounce back to `theory` while parity remains red.
+            Use relative workspace paths only. Do not synthesize absolute run/repo paths or derive `game_<id>` directories from `${vars.game_id}`.
+            Read `current_compare.md` first, then open only the referenced `level_current/sequence_compare/*.md` report if deeper detail is needed.
+            Edit the existing workspace files in place. Do not create scratch scripts, temporary debug programs, or alternate copies of model/play files.
+            Do not write outside the workspace or under `/tmp`. If a temporary diagnostics file is absolutely necessary, keep it relative to `.` and remove it before leaving the turn.
+            Never pipe `2>&1` into a JSON parser. If `model.py compare_sequences` output needs parsing, consume stdout JSON only and keep stderr separate.
         - prompt_part: model_runtime
     user_message:
       operation: append
@@ -918,7 +932,6 @@ modes:
             7) if there is one exact blocker preventing parity repair, ask the supervisor to escalate or resolve that blocker from `code_model`; do not switch back to `theory` until compare is clean.
             Read these agent-workspace files as needed; prefer component summaries over raw grid artifacts:
             - `theory.md`
-            - `model.py`
             - `components.py`
             - `model_lib.py`
             - `play.py`
@@ -938,12 +951,20 @@ modes:
         - "End each code_model turn with model-file edits, theory updates, or a `switch_mode` CLI call."
         - "If compare is red and a single exact blocker remains, stay in code_model and report the blocker instead of switching back to theory."
         - "On level 2+, do not leave code_model with only 'completion unknown'. Either patch the frontier branch/play logic, or hand back exactly one missing real-game observation."
+        - "In code_model, read `current_compare.md` first and only then open the single referenced per-sequence compare report if deeper detail is needed."
+        - "In code_model, edit existing workspace files in place; do not create scratch scripts, debug-only helper files, or alternate file copies."
+        - "In code_model, never write outside the workspace or under `/tmp`."
+        - "In code_model, if a CLI emits JSON, parse stdout only and keep stderr separate."
       violations:
         - "Using any `arc_repl` command in code_model."
         - "Reading raw `.hex` state files or sequence metadata directly in code_model."
         - "Reading or editing runtime/harness internals (any path containing `/config/tools/`) in code_model."
         - "Investigating harness/runtime/provider source or control-plane internals instead of reporting a workspace-artifact blocker in code_model."
         - "Editing `model.py` in code_model."
+        - "Using absolute repo/run paths or deriving workspace paths from `${vars.game_id}` in code_model."
+        - "Creating scratch scripts, temp debug files, or alternate copies of model/play files in code_model."
+        - "Writing to `/tmp` or any path outside the workspace in code_model."
+        - "Piping `2>&1` into `json.load`, `jq`, or another JSON parser in code_model."
 
   solve_model:
     description: "For level 2+, test frontier solution branches in the model, then replay the same solution once in the real game."
