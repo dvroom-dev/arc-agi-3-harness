@@ -142,7 +142,7 @@ class HarnessRuntime:
         self.history_json = self.arc_state_dir / "tool-engine-history.json"
         self.completions_md = self.arc_state_dir / "level_completions.md"
         self.auto_explore_once_marker = self.arc_state_dir / "auto_explore_once.done"
-        self.cycle_limit: int | None = None
+        self.cycle_limit: int | None = 1
         self.scorecard_meta_path = self.session_dir / "scorecard.json"
         self.arc_api_key = resolve_arc_api_key()
         self.arc_api_key_prefix = self.arc_api_key[:8] if self.arc_api_key else None
