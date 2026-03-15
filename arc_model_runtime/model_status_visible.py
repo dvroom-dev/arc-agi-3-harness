@@ -36,6 +36,14 @@ def rewrite_model_status_payload_for_visible_level(
     elif visible_level < int(frontier_level):
         state["available_model_levels"] = list(range(1, visible_level + 1))
     payload["state"] = state
+    compare = payload.get("compare")
+    if isinstance(compare, dict):
+        try:
+            compare_level = int(compare.get("level"))
+        except Exception:
+            compare_level = None
+        if compare_level != visible_level:
+            payload.pop("compare", None)
     payload["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2) + "\n")
