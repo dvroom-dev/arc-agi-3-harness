@@ -10,6 +10,18 @@ def noop_super_cycle_error(
 ) -> str | None:
     if stdout.strip() or new_events or head_after_resume is None:
         return None
+    if (
+        head_before_resume is not None
+        and str(head_before_resume.get("action_summary") or "").startswith("stop")
+        and head_after_resume.get("action_summary") == "supervise:start"
+        and head_before_resume.get("provider_thread_id")
+        and head_before_resume.get("provider_thread_id") == head_after_resume.get("provider_thread_id")
+    ):
+        return (
+            "super completed an empty recovery cycle after a stop decision: "
+            "fresh supervise:start head reused the same provider thread id "
+            "without producing assistant output or history events"
+        )
     if head_after_resume.get("provider_thread_id"):
         return None
 

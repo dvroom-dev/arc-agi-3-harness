@@ -66,3 +66,25 @@ def test_noop_super_cycle_errors_on_same_doc_head_advance_without_real_transitio
     )
     assert err is not None
     assert "no-op provider cycle" in err
+
+
+def test_noop_super_cycle_errors_when_stop_recovery_reuses_same_provider_thread() -> None:
+    err = noop_super_cycle_error(
+        stdout="",
+        new_events=[],
+        head_before_resume={
+            "head_id": "fork_stop",
+            "action_summary": "stop (hard)",
+            "doc_hash": "abc",
+            "provider_thread_id": "thread_stale",
+        },
+        head_after_resume={
+            "head_id": "fork_restart",
+            "parent_id": "fork_stop",
+            "action_summary": "supervise:start",
+            "doc_hash": "def",
+            "provider_thread_id": "thread_stale",
+        },
+    )
+    assert err is not None
+    assert "empty recovery cycle after a stop decision" in err
