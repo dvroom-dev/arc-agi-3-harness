@@ -218,6 +218,109 @@ def test_compare_sequences_uses_pinned_solved_level_until_theory_and_code_model_
     assert pin["last_compare_level"] == 1
 
 
+def test_compare_sequences_stops_before_level_change_boundary_action(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["00", "00"])
+    (game_dir / "model_lib.py").write_text(
+        (game_dir / "model_lib.py").read_text()
+        + "\n\ndef init_level(env, level: int, *, cfg=None):\n"
+        + "    import numpy as np\n"
+        + "    env.current_level = int(level)\n"
+        + "    env.grid = np.array([[0, 0], [0, 0]], dtype=np.int8)\n"
+        + "    env._step_n = 0\n"
+        + "\n\ndef apply_level_1(env, action, *, data=None, reasoning=None):\n"
+        + "    _ = action, data, reasoning\n"
+        + "    env._step_n += 1\n"
+        + "    if env._step_n == 1:\n"
+        + "        env.grid[0, 0] = 1\n"
+        + "    else:\n"
+        + "        env.grid[:, :] = 15\n"
+    )
+
+    step1_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
+    _write_hex(step1_dir / "before_state.hex", ["00", "00"])
+    _write_hex(step1_dir / "after_state.hex", ["10", "00"])
+    (step1_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
+
+    step2_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0002_action_000002_action1"
+    _write_hex(step2_dir / "before_state.hex", ["10", "00"])
+    _write_hex(step2_dir / "after_state.hex", ["22", "22"])
+    (step2_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
+
+    seq_payload = {
+        "schema_version": "arc_repl.level_sequence.v1",
+        "game_id": "ls20",
+        "level": 1,
+        "sequence_id": "seq_0001",
+        "sequence_number": 1,
+        "start_action_index": 1,
+        "end_action_index": 2,
+        "start_recorded_at_utc": "",
+        "end_recorded_at_utc": "",
+        "end_reason": "level_change",
+        "action_count": 2,
+        "actions": [
+            {
+                "local_step": 1,
+                "action_index": 1,
+                "tool_turn": 1,
+                "step_in_call": 1,
+                "call_action": "exec",
+                "action_name": "ACTION1",
+                "action_data": {},
+                "state_before": "NOT_FINISHED",
+                "state_after": "NOT_FINISHED",
+                "level_before": 1,
+                "level_after": 1,
+                "levels_completed_before": 0,
+                "levels_completed_after": 0,
+                "recorded_at_utc": "",
+                "files": {
+                    "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
+                    "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
+                    "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
+                },
+            },
+            {
+                "local_step": 2,
+                "action_index": 2,
+                "tool_turn": 2,
+                "step_in_call": 1,
+                "call_action": "exec",
+                "action_name": "ACTION1",
+                "action_data": {},
+                "state_before": "NOT_FINISHED",
+                "state_after": "NOT_FINISHED",
+                "level_before": 1,
+                "level_after": 2,
+                "levels_completed_before": 0,
+                "levels_completed_after": 1,
+                "recorded_at_utc": "",
+                "files": {
+                    "before_state_hex": "sequences/seq_0001/actions/step_0002_action_000002_action1/before_state.hex",
+                    "after_state_hex": "sequences/seq_0001/actions/step_0002_action_000002_action1/after_state.hex",
+                    "meta_json": "sequences/seq_0001/actions/step_0002_action_000002_action1/meta.json",
+                },
+            },
+        ],
+    }
+    seq_root = game_dir / "level_1" / "sequences"
+    seq_root.mkdir(parents=True, exist_ok=True)
+    (seq_root / "seq_0001.json").write_text(json.dumps(seq_payload, indent=2))
+
+    proc = _run_model_with_env(game_dir, ["compare_sequences", "--game-id", "ls20"], extra_env={})
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["all_match"] is True
+    report = payload["reports"][0]
+    assert report["matched"] is True
+    assert report["actions_total"] == 2
+    assert report["actions_compared"] == 1
+    assert report["comparison_stop_reason"] == "pre_level_change_boundary"
+    assert report["divergence_step"] is None
+
+
 def test_sync_workspace_level_view_uses_pinned_level(tmp_path: Path) -> None:
     from arc_model_runtime.utils import sync_workspace_level_view
 

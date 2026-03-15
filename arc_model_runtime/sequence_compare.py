@@ -73,10 +73,19 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
     compare_env._init_level(level)
     seq_id = str(payload.get("sequence_id", "seq_unknown"))
     actions = list(payload.get("actions", []) or [])
+    end_reason = str(payload.get("end_reason", "") or "").strip().lower()
+    boundary_action_excluded = False
+    if end_reason == "level_change" and actions:
+        # Stop comparison before the boundary-crossing action. The final
+        # action in a level_change-ended sequence may be followed immediately by
+        # next-level state materialization or redaction, which is not a
+        # meaningful parity target for solved-level wrap-up.
+        actions = actions[:-1]
+        boundary_action_excluded = True
     report: dict[str, Any] = {
         "level": int(level),
         "sequence_id": seq_id,
-        "actions_total": int(len(actions)),
+        "actions_total": int(len(list(payload.get("actions", []) or []))),
         "actions_compared": 0,
         "matched": True,
         "divergence_step": None,
@@ -86,6 +95,8 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
         "state_diff": None,
         "transition_mismatch": None,
     }
+    if boundary_action_excluded:
+        report["comparison_stop_reason"] = "pre_level_change_boundary"
     for action in actions:
         local_step = int(action.get("local_step", 0) or 0)
         files = action.get("files", {}) if isinstance(action.get("files"), dict) else {}
