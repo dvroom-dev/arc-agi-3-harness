@@ -127,21 +127,37 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
             break
         action_name = str(action.get("action_name", "")).strip()
         action_data = action.get("action_data", {}) if isinstance(action.get("action_data"), dict) else {}
-        compare_env.step(action_from_name(action_name), data=action_data, reasoning=None)
+        compare_env.level_complete = False
+        compare_env.last_step_level_complete = False
+        compare_env.hooks.apply_action(
+            compare_env,
+            action_from_name(action_name),
+            data=action_data,
+            reasoning=None,
+        )
         model_after = np.array(compare_env.grid, dtype=np.int8, copy=True)
-        model_state_after = str(compare_env.state)
-        model_levels_after = int(compare_env.levels_completed)
-        model_level_complete_after = bool(
-            getattr(compare_env, "last_step_level_complete", False) or str(compare_env.state) == "WIN"
+        model_level_complete_after = bool(compare_env.hooks.is_level_complete(compare_env))
+        compare_env.level_complete = model_level_complete_after
+        compare_env.last_step_level_complete = model_level_complete_after
+        model_levels_after = int(compare_env.levels_completed) + (1 if model_level_complete_after else 0)
+        model_state_after = "WIN" if model_levels_after >= int(compare_env.win_levels) else str(compare_env.state)
+        completion_boundary = (
+            game_level_complete_after
+            or model_level_complete_after
+            or int(action.get("level_after", game_levels_after + 1) or (game_levels_after + 1))
+            > int(action.get("level_before", game_levels_before + 1) or (game_levels_before + 1))
         )
         report["actions_compared"] = int(local_step)
         if (
             model_state_before != game_state_before
             or model_state_after != game_state_after
             or model_levels_before != game_levels_before
-            or model_levels_after != game_levels_after
             or model_level_complete_before != game_level_complete_before
             or model_level_complete_after != game_level_complete_after
+            or (
+                not completion_boundary
+                and model_levels_after != game_levels_after
+            )
         ):
             report["matched"] = False
             report["divergence_step"] = local_step
@@ -164,12 +180,6 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
                     "level_complete_after": model_level_complete_after,
                 },
             }
-            completion_boundary = (
-                game_level_complete_after
-                or model_level_complete_after
-                or int(action.get("level_after", game_levels_after + 1) or (game_levels_after + 1))
-                > int(action.get("level_before", game_levels_before + 1) or (game_levels_before + 1))
-            )
             if not completion_boundary:
                 report["game_step_diff"] = diff_payload(game_before, game_after)
                 report["model_step_diff"] = diff_payload(model_before, model_after)
@@ -178,7 +188,7 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
         if game_level_complete_after or model_level_complete_after:
             boundary_transition_compared = True
             report["comparison_stop_reason"] = "post_level_complete_state_diff_excluded"
-            continue
+            break
         if model_after.shape != game_after.shape or not np.array_equal(model_after, game_after):
             report["matched"] = False
             report["divergence_step"] = local_step
@@ -187,6 +197,8 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
             report["model_step_diff"] = diff_payload(model_before, model_after)
             report["state_diff"] = diff_payload(game_after, model_after)
             break
+        compare_env.levels_completed = model_levels_after
+        compare_env.state = model_state_after
     if boundary_transition_compared and report.get("comparison_stop_reason") is None:
         report["comparison_stop_reason"] = "post_level_complete_state_diff_excluded"
     return report

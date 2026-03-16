@@ -22,6 +22,7 @@ from .utils import (
     grid_hex_rows,
     load_frontier_level_from_arc_state,
     model_status_path,
+    load_analysis_level_pin,
     read_hex_grid,
     resolve_level_dir,
     session_state_path,
@@ -76,6 +77,8 @@ class ModelEnv:
         self.turn_budget = 100
         self.level_complete = False
         self.last_step_level_complete = False
+        self.last_completed_level: int | None = None
+        self.allow_missing_next_level_on_completion = False
         self.grid = np.zeros((0, 0), dtype=np.int8)
         self.refresh_level_initial_states()
         self._init_level(1)
@@ -117,14 +120,19 @@ class ModelEnv:
         self.level_complete = completed
         self.last_step_level_complete = completed
         if completed:
+            self.last_completed_level = int(self.current_level)
             self.levels_completed += 1
             if self.levels_completed >= self.win_levels:
                 self.state = "WIN"
             else:
-                self._init_level(
-                    self.levels_completed + 1,
-                    clear_last_step_level_complete=False,
-                )
+                try:
+                    self._init_level(
+                        self.levels_completed + 1,
+                        clear_last_step_level_complete=False,
+                    )
+                except RuntimeError:
+                    if not bool(getattr(self, "allow_missing_next_level_on_completion", False)):
+                        raise
         return self
 
     def reset(self):
@@ -140,6 +148,10 @@ class ModelSession:
         self.env = ModelEnv(self.game_id, self.game_dir, self.hooks)
         self.state_path = session_state_path(self.game_dir, self.env.game_id)
         self.model_status_path = model_status_path(self.game_dir)
+        self.env.allow_missing_next_level_on_completion = isinstance(
+            load_analysis_level_pin(self.game_dir),
+            dict,
+        )
         self.globals = {
             "np": np,
             "json": json,
@@ -293,11 +305,18 @@ class ModelSession:
 
     def get_state(self) -> dict:
         self.env.refresh_level_initial_states()
+        current_level_complete = bool(self.env.level_complete or str(self.env.state) == "WIN")
+        last_step_level_complete = bool(self.env.last_step_level_complete or str(self.env.state) == "WIN")
         return {
             "state": str(self.env.state),
             "current_level": int(self.env.current_level),
             "levels_completed": int(self.env.levels_completed),
-            "level_complete": bool(self.env.last_step_level_complete or str(self.env.state) == "WIN"),
+            "level_complete": last_step_level_complete,
+            "current_level_complete": current_level_complete,
+            "last_step_level_complete": last_step_level_complete,
+            "last_completed_level": (
+                int(self.env.last_completed_level) if self.env.last_completed_level is not None else None
+            ),
             "win_levels": int(self.env.win_levels),
             "guid": getattr(self.env, "guid", None),
             "available_actions": [int(a) for a in getattr(self.env, "available_actions", [])],
@@ -322,11 +341,18 @@ class ModelSession:
         available_model_levels = [int(v) for v in self.env.available_model_levels]
         if visible_level is not None:
             available_model_levels = [lvl for lvl in available_model_levels if int(lvl) <= int(visible_level)]
+        current_level_complete = bool(self.env.level_complete or str(self.env.state) == "WIN")
+        last_step_level_complete = bool(self.env.last_step_level_complete or str(self.env.state) == "WIN")
         return {
             "state": str(self.env.state),
             "current_level": current_level,
             "levels_completed": levels_completed,
-            "level_complete": bool(self.env.last_step_level_complete or str(self.env.state) == "WIN"),
+            "level_complete": last_step_level_complete,
+            "current_level_complete": current_level_complete,
+            "last_step_level_complete": last_step_level_complete,
+            "last_completed_level": (
+                int(self.env.last_completed_level) if self.env.last_completed_level is not None else None
+            ),
             "win_levels": int(self.env.win_levels),
             "guid": getattr(self.env, "guid", None),
             "available_model_levels": available_model_levels,
