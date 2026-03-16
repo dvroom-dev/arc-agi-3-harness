@@ -382,6 +382,15 @@ modes:
           - match_type: regex
             pattern: '(^|[^<])(?:\d+)?>>?'
             case_sensitive: true
+          - match_type: contains
+            pattern: ARC_CONFIG_DIR
+            case_sensitive: true
+          - match_type: contains
+            pattern: arc_model_runtime
+            case_sensitive: true
+          - match_type: contains
+            pattern: /config/tools/
+            case_sensitive: true
         allow:
           - match_type: exact_match
             pattern: pwd
@@ -872,16 +881,6 @@ modes:
             case_sensitive: true
           - match_type: regex
             pattern: '^python3 (\./)?inspect_sequence\.py(\s|$)'
-            case_sensitive: true
-        disallow:
-          - match_type: contains
-            pattern: ARC_CONFIG_DIR
-            case_sensitive: true
-          - match_type: contains
-            pattern: arc_model_runtime
-            case_sensitive: true
-          - match_type: contains
-            pattern: /config/tools/
             case_sensitive: true
       provider_builtin_tools:
         claude:
