@@ -2,6 +2,18 @@
 
 Goal: keep model.py thin. Put reusable mechanics and completion logic here.
 Component definitions live in `components.py`.
+
+Inheritance contract:
+- `model.py` is harness-owned and applies level hooks cumulatively.
+- `init_level_1`, `init_level_2`, ... run in ascending order up to the current level.
+- `apply_level_1`, `apply_level_2`, ... run in ascending order on every action.
+- Later level hooks may override earlier effects by mutating state afterward.
+- Completion inherits by default from the latest defined `is_level_complete_level_<N>` hook at or below the current level.
+
+Write new levels as diffs:
+- add or override the current level's hook(s)
+- do not copy prior mechanics into later hooks unless you are intentionally changing them
+- if a feature appears in level 3 and disappears in level 4, level 5 will still inherit the level-3 hook unless you override it
 """
 
 from __future__ import annotations
@@ -26,16 +38,13 @@ LEVEL_REGISTRY = {
 
 
 def get_level_config(level: int) -> LevelConfig | None:
-    return LEVEL_REGISTRY.get(int(level))
-
-
-def init_level(env, level: int, *, cfg: LevelConfig | None = None) -> None:
-    """Optional level init hook called by the harness-owned model entrypoint.
-
-    Use this to initialize per-level derived state. `model.py` already loads the
-    canonical initial grid from disk and passes control here.
-    """
-    _ = env, level, cfg
+    level_num = int(level)
+    if level_num in LEVEL_REGISTRY:
+        return LEVEL_REGISTRY[level_num]
+    prior_levels = [lvl for lvl in LEVEL_REGISTRY if int(lvl) <= level_num]
+    if not prior_levels:
+        return None
+    return LEVEL_REGISTRY[max(prior_levels)]
 
 
 def action_name(action) -> str:
@@ -54,19 +63,6 @@ def action_name(action) -> str:
     if "." in text:
         text = text.rsplit(".", 1)[-1]
     return text.upper()
-
-
-def apply_action(env, action, *, data: dict | None = None, reasoning: str | None = None) -> None:
-    """Generic mechanics entrypoint called by the harness-owned model entrypoint.
-
-    Implement this function for most games. If you prefer, you can instead
-    define `apply_level_<n>(...)` helpers below and dispatch from here.
-    """
-    level_handler = globals().get(f"apply_level_{int(env.current_level)}")
-    if callable(level_handler):
-        level_handler(env, action, data=data, reasoning=reasoning)
-        return
-    _ = env, action, data, reasoning
 
 
 # ---------------------------------------------------------------------------
@@ -117,19 +113,24 @@ def load_initial_grid(game_dir: str | Path, level: int) -> np.ndarray | None:
 # ---------------------------------------------------------------------------
 # Example helpers/mechanics (commented out by default):
 #
-# def init_level(env, level, *, cfg=None):
-#     _ = cfg
-#     if level == 1:
-#         env.some_cached_cells = []
+# def init_level_shared(env, level, *, cfg=None):
+#     _ = level, cfg
+#     env.shared_cache = {}
 #
-# def apply_action(env, action, *, data=None, reasoning=None):
-#     if env.current_level == 1:
-#         apply_level_1(env, action, data=data, reasoning=reasoning)
+# def init_level_1(env, *, cfg=None):
+#     _ = cfg
+#     env.some_cached_cells = []
 #
 # def apply_level_1(env, action, *, data=None, reasoning=None):
 #     _ = data, reasoning
 #     feature_positions = get_feature_positions(env.grid)
 #     apply_example_mechanic(env, feature_positions, action)
+#
+# def apply_level_2(env, action, *, data=None, reasoning=None):
+#     _ = data, reasoning
+#     # Add or override only the level-2 delta here.
+#     if action_name(action) == "ACTION2":
+#         env.shared_cache["feature_x_enabled"] = True
 #
 # def find_all_feature_x(grid):
 #     \"\"\"Return every observed copy of feature_x, not just the first one.\"\"\"
@@ -148,12 +149,12 @@ def load_initial_grid(game_dir: str | Path, level: int) -> np.ndarray | None:
 #         for row, col in feature_x_positions:
 #             trigger_feature_x_at(env, row, col)
 # ---------------------------------------------------------------------------
-
-
 def is_level_complete(env) -> bool:
-    """Stub completion check.
+    """Fallback completion check.
 
-    Replace with level-aware completion criteria derived from evidence.
+    Prefer `is_level_complete_level_<N>` hooks for inherited level-specific
+    completion rules. This fallback is only used when no per-level completion
+    hook is defined.
     """
     _ = env
     return False

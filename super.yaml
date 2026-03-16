@@ -86,6 +86,8 @@ prompt_parts:
         - `python3 inspect_grid_values.py --file level_current/current_state.hex --value C --value 9`
         - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`
         `play.py` is a static harness-owned `exec_file` entrypoint. Put level-specific replay logic in `play_lib.py`, not in `play.py`.
+        `model.py` is also a static harness-owned level dispatcher: it cumulatively applies `init_level_<N>` and `apply_level_<N>` hooks from level 1 through the current level, and it inherits completion from the latest defined `is_level_complete_level_<N>` hook at or below the current level.
+        This means later levels inherit earlier mechanics by default. Add or override the current level's hook; do not duplicate earlier mechanics into every later level.
         Bad examples:
         - `python3 model.py print(1+1)`
         - `python3 model.py status grid=env.grid`
@@ -986,6 +988,11 @@ modes:
             `model.py` is harness-owned runtime glue. Do not edit it or use it as a Python scratchpad.
             `play.py` is a harness-owned static `exec_file` entrypoint. Do not edit it.
             Keep component definitions in `components.py`, model mechanics/completion logic in `model_lib.py`, and level-specific solve branches/helpers in `play_lib.py`.
+            The static `model.py` dispatcher already makes later levels inherit earlier mechanics by default:
+            - `init_level_1..init_level_N` run in ascending order
+            - `apply_level_1..apply_level_N` run in ascending order
+            - completion inherits from the latest defined `is_level_complete_level_<N>` hook unless you override it at a later level
+            So in `code_model`, treat later-level edits as diffs: add or override the current level's hook(s) instead of copying earlier mechanics into new levels.
             `theory` and `code_model` co-own `components.py`. In `code_model`, you may reshape detector implementations and names whenever that gives the model a cleaner, more faithful component basis, provided the resulting detectors still match observed evidence and pass coverage.
             Valid `model.py` usage here is limited to CLI subcommands such as:
             - `python3 model.py status --game-id "${vars.game_id}"`
@@ -1022,6 +1029,7 @@ modes:
             2) if needed, run `python3 inspect_sequence.py --current-mismatch` to print the first mismatching compare report target and step;
                for sanctioned grid inspection, use `python3 inspect_grid_slice.py ...` or `python3 inspect_grid_values.py ...` instead of `awk` or `python3 -c`;
             3) name the exact mismatching sampled diff cells, match them to `theory.md`, and patch the missing mechanics, completion transitions, frontier branch logic, or component detectors/names needed in `model_lib.py`/`play_lib.py`/`components.py`;
+               on later levels, patch by adding or overriding the current level's hook(s) rather than re-copying earlier mechanics;
             4) run `python3 model.py compare_sequences` with no explicit level so the runtime can honor any solved-level compare pin and keep work focused on the pinned solved level while wrap-up is active;
             5) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes;
             5) if compare is clean across all explored current-level sequences:
@@ -1060,6 +1068,7 @@ modes:
         - "In code_model, if a CLI emits JSON, parse stdout only and keep stderr separate."
         - "In code_model, treat `play.py` as a static harness-owned entrypoint and put level-specific solve edits in `play_lib.py`."
         - "In code_model, when compare is clean and the remaining blocker is deterministic frontier visible-state structure, use the sanctioned grid helpers yourself and keep branch construction in code_model instead of handing that structure question back to theory."
+        - "In code_model, treat later-level model hooks as additive diffs on top of inherited earlier hooks; add or override the current level's hook(s) instead of duplicating earlier mechanics into each new level."
       violations:
         - "Using any `arc_repl` command in code_model."
         - "Reading raw `.hex` state files or sequence metadata directly in code_model."
