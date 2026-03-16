@@ -131,6 +131,7 @@ def run_daemon(
             script = str(request.get("script", "") or "")
             source = str(request.get("source", "") or "").strip() or None
             script_path = str(request.get("script_path", "") or "").strip() or None
+            reset_level_first = bool(request.get("reset_level_first", False))
             return (
                 session.do_exec(
                     req_game_id,
@@ -138,6 +139,7 @@ def run_daemon(
                     session_created=False,
                     source=source,
                     script_path=script_path,
+                    reset_level_first=reset_level_first,
                 ),
                 False,
             )

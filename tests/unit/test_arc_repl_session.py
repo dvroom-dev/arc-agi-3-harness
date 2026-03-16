@@ -258,6 +258,33 @@ def test_repl_reset_level_executes_after_step_in_level(monkeypatch, tmp_path: Pa
     assert any(str(e.get("kind", "")).strip() == "reset" for e in session.events)
 
 
+def test_repl_exec_reset_level_first_resets_before_script(monkeypatch, tmp_path: Path) -> None:
+    _patch_session_dependencies(monkeypatch, tmp_path)
+    session = arc_repl.ReplSession(
+        cwd=tmp_path,
+        conversation_id="conv-1",
+        requested_game_id="ls20",
+    )
+    initial_resets = session.env.resets
+    _ = session.do_exec(
+        "ls20",
+        "env.step(GameAction.ACTION1)\n",
+        session_created=False,
+    )
+
+    result = session.do_exec(
+        "ls20",
+        "print('after reset')\n",
+        session_created=False,
+        reset_level_first=True,
+    )
+    assert result["ok"] is True
+    assert result["action"] == "exec"
+    assert result["reset_level_first"] is True
+    assert result["reset_before_exec"]["performed"] is True
+    assert session.env.resets == initial_resets + 1
+
+
 def test_repl_reset_level_consecutive_guard_with_stale_events(monkeypatch, tmp_path: Path) -> None:
     _patch_session_dependencies(monkeypatch, tmp_path)
     session = arc_repl.ReplSession(

@@ -425,14 +425,25 @@ class ModelSession:
             else:
                 self.globals.pop("__name__", None)
 
-    def do_exec_file(self, script_path: Path) -> tuple[dict, int]:
+    def do_exec_file(self, script_path: Path, *, reset_level_first: bool = False) -> tuple[dict, int]:
         if not script_path.exists():
             return self._error("exec_file", "missing_script_file", f"script file not found: {script_path}"), 1
         script = script_path.read_text()
         if not script.strip():
             return self._error("exec_file", "invalid_exec_file_args", "script file is empty"), 1
+        reset_payload = None
+        if reset_level_first:
+            reset_payload = self.do_reset_level()
+            if not reset_payload.get("ok"):
+                return reset_payload, 1
         payload, code = self.do_exec(script, script_path=script_path)
         payload["action"] = "exec_file"
+        if reset_level_first:
+            payload["reset_level_first"] = True
+            payload["reset_before_exec"] = {
+                "performed": not bool(reset_payload.get("reset_noop")),
+                "noop_reason": reset_payload.get("noop_reason"),
+            }
         return payload, code
 
     def do_compare_sequences(

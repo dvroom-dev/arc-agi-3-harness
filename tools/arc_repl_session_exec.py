@@ -41,6 +41,7 @@ def execute_exec_turn(
     session_created: bool,
     source: str | None = None,
     script_path: str | None = None,
+    reset_level_first: bool = False,
 ) -> dict:
     if requested_game_id and not session._same_game_lineage(requested_game_id):
         raise RuntimeError(
@@ -50,6 +51,22 @@ def execute_exec_turn(
         raise RuntimeError("exec requires non-empty inline script")
 
     session._refresh_play_lib()
+
+    reset_before_exec = {
+        "performed": False,
+        "noop_reason": None,
+    }
+    if reset_level_first:
+        noop_reason = session._reset_noop_reason()
+        if noop_reason is None:
+            session.frame = session.env.reset()
+            if session.frame is None:
+                raise RuntimeError("env.reset() returned None")
+            session.pixels = session.deps._get_pixels(session.env, session.frame)
+            session.events.append({"kind": "reset"})
+            reset_before_exec["performed"] = True
+        else:
+            reset_before_exec["noop_reason"] = noop_reason
 
     session.script_counter += 1
     script_label = f"<arc_repl_exec_{session.script_counter:04d}>"
@@ -306,7 +323,7 @@ def execute_exec_turn(
         step_results=step_results,
     )
 
-    return session._finalize_result(
+    result = session._finalize_result(
         action="exec",
         requested_game_id=requested_game_id,
         state_before_action=state_before,
@@ -320,3 +337,7 @@ def execute_exec_turn(
         trace_path=trace_path,
         session_created=session_created,
     )
+    if reset_level_first:
+        result["reset_level_first"] = True
+        result["reset_before_exec"] = reset_before_exec
+    return result

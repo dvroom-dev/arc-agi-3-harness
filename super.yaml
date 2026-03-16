@@ -496,6 +496,7 @@ modes:
             - on level 2+, define any newly introduced visible component or newly changed visible component state in `components.py` before handing off `explore_only`;
             - on level 2+, use `# Evidence Gap` only for one bounded real-game observation that explore_only can answer about a newly introduced visible component or newly changed visible component state, and use `# Model Plan` for the frontier play/model branch that code_model or solve_model should handle next;
             - on level 2+, do not use `# Evidence Gap` to re-prove inherited baseline behavior unless current frontier evidence contradicts it;
+            - on level 2+, do not defer a newly introduced visible component or newly changed visible component state just because a speculative route appears to avoid it; if it could plausibly gate completion and has no action-linked evidence yet, keep it as the blocker and hand off `explore_only` unless existing evidence explicitly rules it out;
             - on later levels, decide whether the next step is `explore_only`, `code_model`, `solve_model`, or `recover`;
             - if switching, include a concrete handoff message with exact files/evidence to inspect or the exact probe to run.
             Read these agent-workspace files as needed instead of relying on inlined contents:
@@ -526,6 +527,7 @@ modes:
         - "On level 2+, treat earlier proven rules in the same game as the inherited baseline unless current evidence contradicts them."
         - "On level 2+, run coverage and compare the current visible component set against prior levels before requesting a real-game probe."
         - "On level 2+, if a newly introduced visible component or newly changed visible component state is the blocker, add or update it in `components.py` before handing off `explore_only`."
+        - "On level 2+, do not treat a newly introduced visible component or newly changed visible component state as safely ignorable just because a speculative route avoids it; if it could plausibly gate completion and has no action-linked evidence yet, resolve it first or explicitly rule it out from existing evidence."
         - "When evidence is weak or ambiguous, keep at least two plausible alternative theories live in `theory.md` and choose the next probe to discriminate between them."
         - "A changed feature may be a destination, trigger, gate, progress display, or side effect; do not jump from 'it changed' to one assumed function without discriminating evidence."
         - "After the first survey, prioritize action-responsive features, state-display changes, and unresolved non-wall interactables; do not keep expanding static wall/corridor descriptions once those anchors are named."
@@ -543,6 +545,7 @@ modes:
         - "On level 2+, if new components or changed semantics require mechanics work, or if there is an exact frontier play/model patch target, switch_mode to `code_model` with explicit patch targets."
         - "On level 2+, do not hand off a frontier real-game solve route from theory. Once a frontier branch is ready, route to `solve_model` for solution testing."
         - "On level 2+, do not request a real-game probe whose purpose is to re-prove inherited baseline behavior without contradictory evidence."
+        - "On level 2+, do not route to `solve_model` while a newly introduced visible component or newly changed visible component state still has zero action-linked evidence and could plausibly affect completion, unless current evidence explicitly rules that component out as non-gating."
         - "While a solved-level wrap-up pin is active, do not include wrap-up certification flags on theory -> code_model or theory -> theory handoffs. Those flags are reserved for the final certified release out of wrap-up."
         - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
       violations:
@@ -1125,10 +1128,9 @@ modes:
             Required sequence in this mode:
             - determine `LEVEL` with `arc_level`;
             - `python3 model.py set_level --game-id "${vars.game_id}" "$LEVEL"`;
-            - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`;
+            - `python3 model.py exec_file --reset-level-first --game-id "${vars.game_id}" ./play.py`;
             - `python3 model.py status --game-id "${vars.game_id}"`;
-            - if the model proof succeeds, run `arc_repl reset_level` before any real replay so the real game starts from the same level-initial state as the model proof;
-            - then run the same `play.py` once in the real game with `arc_repl exec_file ./play.py`;
+            - if the model proof succeeds, run the same `play.py` once in the real game with `arc_repl exec_file --reset-level-first ./play.py`;
             - then switch out promptly with completion or mismatch evidence.
             Stay in solve_model until the model-side proof plus one real replay succeeds, exposes a model bug, or clearly proves that one exact missing real-game observation must go back to `theory`.
             Read these agent-workspace files as needed:
@@ -1148,9 +1150,9 @@ modes:
       requirements:
         - "When model proof succeeds, mark the level SOLVED in `theory.md` with concise evidence."
         - "Do not enter or remain in solve_model while a solved-level compare pin is active."
-        - "Before the one allowed real-game replay in solve_model, run `arc_repl reset_level` so replay starts from level-initial state."
+        - "Run both model and real `exec_file` replays with `--reset-level-first`; do not put reset logic inside `play.py`."
       violations:
-        - "Using any `arc_repl` command other than one `arc_repl reset_level` immediately followed by one deterministic `arc_repl exec_file ./play.py` replay after model proof succeeds."
+        - "Running `play.py` without `--reset-level-first`, or putting reset logic inside `play.py` instead of the runtime command."
         - "Reading raw `.hex` state files or sequence metadata directly in solve_model."
 
   recover:

@@ -487,6 +487,7 @@ class BaseReplSession:
         session_created: bool,
         source: str | None = None,
         script_path: str | None = None,
+        reset_level_first: bool = False,
     ) -> dict:
         return execute_exec_turn(
             self,
@@ -495,4 +496,5 @@ class BaseReplSession:
             session_created=session_created,
             source=source,
             script_path=script_path,
+            reset_level_first=reset_level_first,
         )

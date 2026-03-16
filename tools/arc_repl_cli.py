@@ -5,7 +5,7 @@ Usage:
   arc_repl [--enable-history-functions] status [--game-id GAME]
   arc_repl [--enable-history-functions] reset_level [--game-id GAME]
   arc_repl [--enable-history-functions] exec [--game-id GAME] < script.py
-  arc_repl [--enable-history-functions] exec_file [--game-id GAME] SCRIPT_PATH
+  arc_repl [--enable-history-functions] exec_file [--game-id GAME] [--reset-level-first] SCRIPT_PATH
   arc_repl shutdown
 
 Output contract:
@@ -91,6 +91,11 @@ def main() -> int:
 
     p_exec_file = sub.add_parser("exec_file")
     p_exec_file.add_argument("--game-id", default="")
+    p_exec_file.add_argument(
+        "--reset-level-first",
+        action="store_true",
+        help="reset the live level to its initial state before executing the script",
+    )
     p_exec_file.add_argument("script_path")
 
     sub.add_parser("shutdown")
@@ -184,6 +189,8 @@ def main() -> int:
         payload["action"] = "exec"
         payload["script"] = script
         payload["script_path"] = str(script_path.resolve())
+        if bool(getattr(args, "reset_level_first", False)):
+            payload["reset_level_first"] = True
 
     return _run(payload)
 

@@ -34,6 +34,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     file_cmd = sub.add_parser("exec_file")
     file_cmd.add_argument("--game-id", default="game")
+    file_cmd.add_argument(
+        "--reset-level-first",
+        action="store_true",
+        help="reset the selected model level to its initial state before executing the script",
+    )
     file_cmd.add_argument("script_path")
     shutdown_cmd = sub.add_parser("shutdown")
     shutdown_cmd.add_argument("--game-id", default="game")
@@ -93,7 +98,10 @@ def run_model_cli(hooks: ModelHooks, *, game_dir: Path, argv: list[str] | None =
         payload, code = session.do_exec(sys.stdin.read())
         return _emit(payload, session=session, action_name="exec", code=code)
     if args.action == "exec_file":
-        payload, code = session.do_exec_file(Path(args.script_path))
+        payload, code = session.do_exec_file(
+            Path(args.script_path),
+            reset_level_first=bool(getattr(args, "reset_level_first", False)),
+        )
         return _emit(payload, session=session, action_name="exec_file", code=code)
     if args.action == "shutdown":
         return _emit(

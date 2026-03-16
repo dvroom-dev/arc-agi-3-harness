@@ -84,6 +84,29 @@ def test_arc_repl_cli_exec_file_payload(
     assert "from file" in captured["payload"]["script"]
 
 
+def test_arc_repl_cli_exec_file_reset_level_first_payload(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured = {}
+    script_path = tmp_path / "script.py"
+    script_path.write_text("print('from file')\n")
+
+    def fake_run(payload):
+        captured["payload"] = payload
+        return 0
+
+    monkeypatch.setattr(arc_repl_cli, "_run", fake_run)
+    monkeypatch.setattr(
+        arc_repl_cli.sys,
+        "argv",
+        ["arc_repl", "exec_file", "--game-id", "ls20", "--reset-level-first", str(script_path)],
+    )
+    rc = arc_repl_cli.main()
+    assert rc == 0
+    assert captured["payload"]["reset_level_first"] is True
+
+
 def test_arc_repl_cli_exec_file_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         arc_repl_cli.sys,

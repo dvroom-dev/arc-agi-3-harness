@@ -63,3 +63,30 @@ def plan_level_actions(state: dict, *, level: int | None = None) -> list[int]:
     assert payload["current_level"] == 2
     assert payload["levels_completed"] == 1
     assert payload["level_complete"] is True
+
+
+def test_model_exec_file_reset_level_first_resets_before_running(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["0000", "0000", "0000", "0000"])
+    _write_hex(game_dir / "level_2" / "initial_state.hex", ["1111", "1111", "1111", "1111"])
+
+    (game_dir / "play_lib.py").write_text(
+        """
+def plan_level_actions(state: dict, *, level: int | None = None) -> list[int]:
+    _ = state, level
+    return []
+""".strip()
+        + "\n"
+    )
+
+    proc = _run_model(game_dir, ["set_level", "--game-id", "ls20", "2"])
+    assert proc.returncode == 0, proc.stderr
+
+    proc = _run_model(game_dir, ["exec_file", "--reset-level-first", "--game-id", "ls20", "./play.py"])
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads("\n".join(proc.stdout.splitlines()[2:]))
+    assert payload["action"] == "exec_file"
+    assert payload["reset_level_first"] is True
+    assert payload["reset_before_exec"]["performed"] is True
+    assert payload["current_level"] == 2
