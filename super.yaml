@@ -140,6 +140,9 @@ supervisor:
       - "When a target is already clear and the route to it is deterministic from existing evidence, prefer one full bounded route to that target over a short route prefix. Do not force a return to theory after each expected repeated move when no novel evidence has appeared."
       - "If current mode is theory, current_compare.md is clean, and theory.md already contains exactly one concrete # Explore Plan target with explicit actions or route plus a stop condition, do not allow more theory churn. Route immediately to explore_and_solve via resume_mode_head when allowed."
       - "After a bounded explore probe resolves or falsifies its target, do not ask theory for broad resynthesis. Require a delta-only theory pass: record only the new evidence, update which hypotheses remain live, and name the smallest next discriminating probe."
+      - "If the latest bounded probe revealed a direct action-linked effect for the targeted component, require theory to close that exact question instead of keeping the same broad question open."
+      - "Reject a handoff that reuses the same evidence question after a discriminating probe already answered it, unless new contradictory evidence appeared."
+      - "If the latest probe resolved or falsified all live explanations for the active question, require theory to brainstorm 2-3 fresh explanations for the remaining unexplained evidence before choosing the next step."
       - "If the newest supervisor-approved handoff already narrows the next probe more tightly than the existing theory.md route, preserve that narrower handoff. Do not let an older route in theory.md override the latest approved one."
       - "On level 2+, do not route frontier solution attempts through explore_only or theory. Use explore_only only to investigate one newly introduced visible component or one newly changed visible component state. Use solve_model for every frontier solution attempt."
       - "On level 2+, treat earlier proven rules within the same game as the inherited baseline unless current evidence contradicts them. Frontier real-game probes must target the new level-specific delta, not re-prove inherited behavior."
@@ -449,6 +452,10 @@ modes:
             If a solved-level compare pin is active, stay strictly scoped to that pinned level. Do not record frontier-level observations, components, or hypotheses until the pin is cleared.
             Do not exhaustively restate stable geometry. After one initial survey, only reopen a file if it answers a specific open question or verifies a concrete handoff.
             After a completed bounded probe, theory is delta-only: record what changed, state which prior hypothesis was strengthened or falsified, keep the remaining alternatives live, and select the smallest next discriminating probe.
+            Every completed bounded probe must end with an explicit Probe Verdict in `theory.md` using exactly one of: `resolved`, `partially_resolved`, `falsified`, or `non_discriminating`.
+            A probe that reveals a direct action-linked effect of a component counts as answered for that exact question. Do not keep the old question open in the same form after that.
+            When a probe resolves or falsifies the active question, replace it with the next narrower unknown instead of continuing to treat the whole component as globally mysterious.
+            If the latest probe resolved or falsified all currently active explanations, brainstorm 2-3 fresh explanations for the remaining unexplained evidence before choosing the next step.
             Do not rewrite the full element inventory, action semantics, or stable geometry after a completed probe unless new evidence directly contradicts those notes.
             After the first survey, prioritize the smallest set of action-responsive features, state-display changes, and unresolved non-wall interactables. Static walls and corridor geometry are supporting evidence, not first-class deliverables.
             A changed feature is not automatically the next thing to revisit. It may be a destination, a trigger, a gate, a progress display, or a side effect. Keep multiple live explanations when the evidence does not discriminate.
@@ -491,6 +498,9 @@ modes:
             - once component coverage passes and the active question is already clear, stop re-deriving full-state geometry from `current_state.hex`; use existing notes/artifacts and choose the smallest decisive next step;
             - do not spend theory turns recounting coordinates or maze/topology details that are already written in `theory.md` unless a specific contradiction requires rechecking them;
             - after a completed bounded probe, update only the new evidence, the affected hypotheses, and the next smallest discriminating probe; do not rewrite the full elements/actions/geometry sections unless they are contradicted;
+            - after every bounded probe, add a short `Probe Verdict` entry in `theory.md` with: `question asked`, `observed effect`, `what this rules out`, `what remains unknown`, and one label from `resolved|partially_resolved|falsified|non_discriminating`;
+            - if a bounded probe revealed the direct action-linked effect of a component, close that exact question and replace it with the next narrower unknown instead of keeping the same broad question open;
+            - if the latest probe resolved or falsified all live explanations for the active question, write 2-3 fresh plausible explanations for the remaining unexplained evidence before choosing the next step;
             - prefer the shortest discriminating probe that can change the theory over authoring a long route plan while core movement or interaction mechanics are still uncertain;
             - if the next probe is already one action, hand off exactly that one action; do not expand it back into an older longer route;
             - while a solved-level compare pin is active and compare is clean, either prepare final pinned-level certification or name one exact pinned-level blocker; do not write frontier-level plans;
@@ -537,6 +547,10 @@ modes:
         - "A changed feature may be a destination, trigger, gate, progress display, or side effect; do not jump from 'it changed' to one assumed function without discriminating evidence."
         - "After the first survey, prioritize action-responsive features, state-display changes, and unresolved non-wall interactables; do not keep expanding static wall/corridor descriptions once those anchors are named."
         - "Do not revisit a falsified completion hypothesis or trigger path unless new action-linked evidence changes it."
+        - "After every bounded probe, record a Probe Verdict in `theory.md` using exactly one of `resolved`, `partially_resolved`, `falsified`, or `non_discriminating`."
+        - "If a probe produced a direct action-linked component effect, treat that exact question as answered and replace it with the next narrower unknown."
+        - "Do not keep a broad component-level question open in the same form after a probe already resolved its direct effect."
+        - "If the latest probe resolved or falsified all live explanations for the active question, brainstorm 2-3 fresh plausible explanations for the remaining unexplained evidence before choosing the next step."
         - "Once component coverage passes and the active question is already clear, do not reread `current_state.hex` just to restate stable geometry or recount coordinates."
         - "After a completed bounded probe, keep the next theory pass delta-only: update only the new evidence, affected hypotheses, and the next smallest discriminating probe."
         - "In theory mode, when the next step is already identifiable from current evidence, choose the smallest decisive next step instead of spending another turn re-deriving the full state."
@@ -656,7 +670,8 @@ modes:
             - confirm that the handoff names one newly introduced visible component or one newly changed visible component state;
             - perform only the handed-off bounded probe or route needed to answer that one evidence question about that component;
             - stop as soon as that question is answered, falsified, blocked, or the explicit bounded-route stop condition is reached;
-            - write the observed outcome and its implication into `theory.md`;
+            - write the observed outcome, its implication, and a `Probe Verdict` into `theory.md`;
+            - the `Probe Verdict` must state: `question asked`, `observed effect`, `what this rules out`, `what remains unknown`, and exactly one label from `resolved|partially_resolved|falsified|non_discriminating`;
             - then switch_mode back to theory.
             Do not attempt level completion, broad route search, generic layout mapping, or multi-hypothesis wandering in this mode.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
@@ -672,7 +687,8 @@ modes:
         - "In explore_only, read the current `# Evidence Gap` section in `theory.md` first and stay inside that one evidence question about the named new or changed component."
         - "Do not exit explore_only until the handed-off evidence question has been answered, falsified, blocked, or its explicit stop condition has been reached."
         - "Do not switch back to theory from explore_only without new real-game evidence from this turn, unless a supervisor or policy blocker prevented action execution."
-        - "After each real-game probe, update `theory.md` before switching modes."
+        - "After each real-game probe, update `theory.md` with a Probe Verdict before switching modes."
+        - "If the probe revealed the direct action-linked effect of the handed-off component, mark that exact question as resolved or partially_resolved instead of leaving it open in the same broad form."
         - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
         - "In explore_only on level 2+, the handoff target must be one newly introduced visible component or one newly changed visible component state; if it does not, do not improvise a different target."
       violations:
