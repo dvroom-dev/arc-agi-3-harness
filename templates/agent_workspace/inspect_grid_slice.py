@@ -22,6 +22,18 @@ def _parse_range(value: str, *, label: str) -> tuple[int, int]:
     return start, end
 
 
+def _normalize_range(*, start: int, end: int, size: int, label: str) -> int:
+    """Accept inclusive END, plus END==size as a full-span convenience."""
+    if end == size:
+        return end
+    if end > size - 1:
+        raise SystemExit(
+            f"{label} range {start}:{end} exceeds {label} count {size}; "
+            f"max inclusive index is {size - 1}, or use END={size} for a full-span slice"
+        )
+    return end + 1
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--game-dir", default=".", help="Game workspace root (default: current dir)")
@@ -49,31 +61,31 @@ def main() -> int:
 
     row_start, row_end = args.rows
     col_start, col_end = args.cols
-    if row_end >= len(rows):
-        raise SystemExit(f"row range {row_start}:{row_end} exceeds grid height {len(rows)}")
+    row_stop = _normalize_range(start=row_start, end=row_end, size=len(rows), label="row")
     width = len(rows[0])
     if any(len(row) != width for row in rows):
         raise SystemExit("hex grid rows are not rectangular")
-    if col_end >= width:
-        raise SystemExit(f"col range {col_start}:{col_end} exceeds grid width {width}")
+    col_stop = _normalize_range(start=col_start, end=col_end, size=width, label="col")
+    row_display_end = row_stop - 1
+    col_display_end = col_stop - 1
 
     payload = {
         "file": artifact_helpers.display_path(game_dir, target),
-        "row_range": [row_start, row_end],
-        "col_range": [col_start, col_end],
+        "row_range": [row_start, row_display_end],
+        "col_range": [col_start, col_display_end],
         "rows": [
             {
                 "row": row_index,
-                "slice": rows[row_index][col_start : col_end + 1],
+                "slice": rows[row_index][col_start:col_stop],
             }
-            for row_index in range(row_start, row_end + 1)
+            for row_index in range(row_start, row_stop)
         ],
     }
     if args.json:
         print(json.dumps(payload, indent=2))
     else:
         for item in payload["rows"]:
-            print(f"row {item['row']} cols {col_start}-{col_end}: {item['slice']}")
+            print(f"row {item['row']} cols {col_start}-{col_display_end}: {item['slice']}")
     return 0
 
 

@@ -82,6 +82,7 @@ prompt_parts:
         - `python3 model.py compare_sequences --game-id "${vars.game_id}"`
         - `python3 inspect_sequence.py --current-mismatch`
         - `python3 inspect_grid_slice.py --file level_current/current_state.hex --rows 36:55 --cols 29:38`
+        - `python3 inspect_grid_slice.py --file level_current/initial_state.hex --rows 0:64 --cols 0:65`
         - `python3 inspect_grid_values.py --file level_current/current_state.hex --value C --value 9`
         - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`
         `play.py` is a static harness-owned `exec_file` entrypoint. Put level-specific replay logic in `play_lib.py`, not in `play.py`.
@@ -94,6 +95,7 @@ prompt_parts:
         - `python3 model.py exec_file --game-id "${vars.game_id}" /abs/path/to/play.py`
         Do not use shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null`.
         If you parse JSON from a CLI, parse stdout only. Never pipe `2>&1` into `json.load`, `jq`, or another JSON parser.
+        `inspect_grid_slice.py` accepts START:END ranges with END normally inclusive; for whole-grid spans you may use END equal to the grid size (for example `--rows 0:64 --cols 0:65` on a 64x65 grid).
         Prefer existing helper scripts such as `inspect_sequence.py`, `inspect_components.py`, `inspect_grid_slice.py`, and `inspect_grid_values.py`.
         If `code_model` truly needs custom analysis, add a small read-only helper script in the workspace and run it directly; do not improvise `python3 -c` snippets.
         Use `python3 inspect_components.py --coverage --level LEVEL` to verify that exact component geometry covers every seen state for the current level.
@@ -503,7 +505,7 @@ modes:
             - on level 1, maintain the `# Explore Plan` section in `theory.md`; it is the only handoff surface for `explore_and_solve`;
             - on level 2+, keep exactly one `# Evidence Gap` section when one bounded real-game observation about a newly introduced visible component or newly changed visible component state is still missing, and exactly one `# Model Plan` section when frontier model/play work is ready;
             - run `python3 inspect_components.py --coverage --level <LEVEL>` before leaving theory mode;
-            - use `python3 inspect_grid_slice.py --file ... --rows START:END --cols START:END` for sanctioned row/column extraction instead of `awk`, shell loops, or `python3 -c`;
+            - use `python3 inspect_grid_slice.py --file ... --rows START:END --cols START:END` for sanctioned row/column extraction instead of `awk`, shell loops, or `python3 -c`; END is normally inclusive, but for a whole-grid span you may use END equal to the grid size;
             - use `python3 inspect_grid_values.py --file ... --value X [--value Y ...]` for sanctioned value counts and bounding boxes instead of ad hoc Python snippets;
             - use `component_coverage.*` as the canonical source for observed grid shapes; do not count rendered `Read` line numbers to infer dimensions;
             - read `current_compare.md` first whenever compare matters; only then open the single referenced `level_current/sequence_compare/*.md` report if needed;

@@ -79,3 +79,39 @@ def test_inspect_grid_values_reports_counts_and_bbox(tmp_path: Path) -> None:
     assert by_value["C"]["bbox"] == [0, 2, 0, 3]
     assert by_value["9"]["count"] == 4
     assert by_value["9"]["bbox"] == [1, 2, 2, 3]
+
+
+def test_inspect_grid_slice_accepts_full_span_end_equal_to_size(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(
+        game_dir / "level_current" / "current_state.hex",
+        [
+            "0123",
+            "4567",
+            "89AB",
+        ],
+    )
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(game_dir / "inspect_grid_slice.py"),
+            "--file",
+            "level_current/current_state.hex",
+            "--rows",
+            "0:3",
+            "--cols",
+            "0:4",
+            "--json",
+        ],
+        cwd=game_dir,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["row_range"] == [0, 2]
+    assert payload["col_range"] == [0, 3]
+    assert [row["slice"] for row in payload["rows"]] == ["0123", "4567", "89AB"]
