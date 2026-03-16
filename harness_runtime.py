@@ -106,7 +106,10 @@ class HarnessRuntime:
             )
         with self.phase_scope(category="setup", name="setup_run_config_dir"):
             self.run_bin_dir, self.run_tools_dir = deps.setup_run_config_dir(self.run_config_dir)
-        deps.assert_no_game_files_in_agent_dir(self.agent_dir)
+        if bool(getattr(args, "continue_run", False)):
+            deps.assert_existing_run_agent_dir_is_safe(self.agent_dir)
+        else:
+            deps.assert_no_game_files_in_agent_dir(self.agent_dir)
         self.run_super_config = self.run_dir / "super.yaml"
         with self.phase_scope(category="setup", name="render_super_config"):
             rendered_super_config = (deps.PROJECT_ROOT / "super.yaml").read_text()

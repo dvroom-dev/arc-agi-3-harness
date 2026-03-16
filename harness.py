@@ -44,6 +44,7 @@ from harness_runtime_cleanup import (
     _terminate_process_tree_local,
 )
 from harness_setup_helpers import (
+    assert_existing_run_agent_dir_is_safe_impl,
     assert_no_game_files_in_agent_dir_impl,
     parse_args_impl,
     seed_arc_environment_cache_impl,
@@ -392,6 +393,10 @@ def seed_arc_environment_cache(
 
 def assert_no_game_files_in_agent_dir(agent_dir: Path) -> None:
     assert_no_game_files_in_agent_dir_impl(agent_dir)
+
+
+def assert_existing_run_agent_dir_is_safe(agent_dir: Path) -> None:
+    assert_existing_run_agent_dir_is_safe_impl(agent_dir)
 
 
 def main() -> None:

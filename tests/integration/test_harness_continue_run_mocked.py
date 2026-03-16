@@ -38,6 +38,9 @@ def test_harness_continue_run_resumes_existing_supervisor_session(
     run_dir = root / "runs" / run_id
     conversation_id = "conversation_existing"
     fork_id = "fork_existing"
+    agent_game_dir = run_dir / "agent" / "game_ls20"
+    (agent_game_dir / "level_current").mkdir(parents=True, exist_ok=True)
+    (agent_game_dir / "level_1").symlink_to("level_current", target_is_directory=True)
     conversation_dir = run_dir / ".ai-supervisor" / "conversations" / conversation_id
     forks_dir = conversation_dir / "forks"
     forks_dir.mkdir(parents=True, exist_ok=True)

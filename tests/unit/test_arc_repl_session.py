@@ -96,7 +96,7 @@ class FakeRegressingEnv(FakeEnv):
         )
 
 
-def _patch_session_dependencies(monkeypatch, tmp_path: Path):
+def _patch_session_dependencies(monkeypatch, tmp_path: Path, *, history_payload: dict | None = None):
     arc_dir = tmp_path / "arc"
     arc_dir.mkdir()
     monkeypatch.setenv("ARC_ACTIVE_GAME_ID", "ls20")
@@ -105,7 +105,7 @@ def _patch_session_dependencies(monkeypatch, tmp_path: Path):
     play_lib.write_text("def helper():\n    return 1\n")
     completions = arc_dir / "level_completions.md"
     completions.write_text("# Level Completions\n")
-    history = {"game_id": "ls20-cb3b57cc", "events": [], "turn": 0}
+    history = history_payload or {"game_id": "ls20-cb3b57cc", "events": [], "turn": 0}
 
     monkeypatch.setenv("ARC_STATE_DIR", str(arc_dir))
     monkeypatch.setattr(arc_repl, "_arc_dir", lambda cwd: arc_dir)
@@ -187,6 +187,29 @@ def test_repl_history_helpers_can_be_enabled(monkeypatch, tmp_path: Path) -> Non
     )
     assert "get_action_history" in session.globals
     assert "get_action_record" in session.globals
+
+
+def test_repl_session_replays_persisted_history_when_restoring(monkeypatch, tmp_path: Path) -> None:
+    history_payload = {
+        "game_id": "ls20-cb3b57cc",
+        "events": [
+            {"kind": "step", "action": "ACTION1", "data": None, "levels_completed": 0},
+            {"kind": "reset"},
+            {"kind": "step", "action": "ACTION2", "data": None, "levels_completed": 0},
+        ],
+        "turn": 3,
+    }
+    _patch_session_dependencies(monkeypatch, tmp_path, history_payload=history_payload)
+    session = arc_repl.ReplSession(
+        cwd=tmp_path,
+        conversation_id="conv-1",
+        requested_game_id="ls20",
+    )
+
+    assert session.env.resets == 2
+    assert session.env.steps == 1
+    assert session.turn == 3
+    assert session.events == history_payload["events"]
 
     session.set_history_helpers_enabled(False)
     assert "get_action_history" not in session.globals

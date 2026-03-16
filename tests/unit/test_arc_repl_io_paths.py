@@ -60,7 +60,7 @@ def test_send_request_spawns_when_first_send_fails(monkeypatch, tmp_path: Path) 
     assert created is True
 
 
-def test_send_request_refuses_recovery_after_prior_session(monkeypatch, tmp_path: Path) -> None:
+def test_send_request_recovers_after_prior_session_when_socket_is_missing(monkeypatch, tmp_path: Path) -> None:
     arc_dir = tmp_path / "arc"
     arc_dir.mkdir()
     monkeypatch.setenv("ARC_STATE_DIR", str(arc_dir))
@@ -71,12 +71,26 @@ def test_send_request_refuses_recovery_after_prior_session(monkeypatch, tmp_path
     (session_dir / "daemon.lifecycle.jsonl").write_text('{"event":"spawned"}\n')
     (session_dir / "daemon.log").write_text("trace line\n")
 
-    monkeypatch.setattr(arc_repl, "_socket_path", lambda cwd, cid: tmp_path / "missing.sock")
-    monkeypatch.setattr(arc_repl, "_spawn_daemon", lambda *a, **k: (_ for _ in ()).throw(AssertionError("must not spawn")))
+    socket_path = tmp_path / "missing.sock"
+    spawned = {"n": 0}
+    monkeypatch.setattr(arc_repl, "_socket_path", lambda cwd, cid: socket_path)
+    monkeypatch.setattr(
+        arc_repl,
+        "_spawn_daemon",
+        lambda *a, **k: spawned.__setitem__("n", spawned["n"] + 1),
+    )
+    monkeypatch.setattr(arc_repl, "_wait_for_daemon", lambda *a, **k: socket_path.write_text("ready\n"))
     monkeypatch.setattr(arc_repl, "_default_game_id", lambda cwd: "ls20")
+    monkeypatch.setattr(
+        arc_repl,
+        "_send_ipc_request",
+        lambda *a, **k: {"ok": True, "action": "status"},
+    )
 
-    with pytest.raises(RuntimeError, match=r"automatic replay/recovery is disabled"):
-        arc_repl._send_request(tmp_path, "c1", {"action": "status", "game_id": "ls20"})
+    result, created = arc_repl._send_request(tmp_path, "c1", {"action": "status", "game_id": "ls20"})
+    assert result["ok"] is True
+    assert created is True
+    assert spawned["n"] == 1
 
 
 def test_send_request_bootstraps_for_non_status(monkeypatch, tmp_path: Path) -> None:

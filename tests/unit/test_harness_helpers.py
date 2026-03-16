@@ -143,6 +143,28 @@ def test_assert_no_game_files_in_agent_dir(tmp_path: Path) -> None:
         harness.assert_no_game_files_in_agent_dir(agent)
 
 
+def test_assert_existing_run_agent_dir_is_safe_allows_local_level_symlink(tmp_path: Path) -> None:
+    agent = tmp_path / "agent"
+    game_dir = agent / "game_ft09"
+    level_current = game_dir / "level_current"
+    level_current.mkdir(parents=True)
+    (game_dir / "level_1").symlink_to("level_current", target_is_directory=True)
+
+    harness.assert_existing_run_agent_dir_is_safe(agent)
+
+
+def test_assert_existing_run_agent_dir_is_safe_rejects_escaping_symlink(tmp_path: Path) -> None:
+    agent = tmp_path / "agent"
+    game_dir = agent / "game_ft09"
+    game_dir.mkdir(parents=True)
+    outside = tmp_path / "outside-secret"
+    outside.write_text("nope\n")
+    (game_dir / "level_1").symlink_to(outside)
+
+    with pytest.raises(RuntimeError):
+        harness.assert_existing_run_agent_dir_is_safe(agent)
+
+
 def test_setup_run_dir_seeds_expected_files(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     agent_dir = run_dir / "agent"

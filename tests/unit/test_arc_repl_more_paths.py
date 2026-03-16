@@ -67,6 +67,47 @@ def test_send_request_missing_game_id_errors(monkeypatch, tmp_path: Path) -> Non
         arc_repl._send_request(tmp_path, "c1", {"action": "status"})
 
 
+def test_send_request_respawns_when_prior_session_socket_is_missing(monkeypatch, tmp_path: Path) -> None:
+    session_dir = tmp_path / "session"
+    session_dir.mkdir()
+    pid_file = session_dir / "daemon.pid"
+    pid_file.write_text("123\n")
+    meta_file = session_dir / "meta.json"
+    meta_file.write_text("{}\n")
+    lifecycle_file = session_dir / "daemon.lifecycle.jsonl"
+    lifecycle_file.write_text("{}\n")
+    log_file = session_dir / "daemon.log"
+    log_file.write_text("boot\n")
+    socket_file = session_dir / "daemon.ready"
+    calls: list[str] = []
+
+    monkeypatch.setattr(arc_repl, "_socket_path", lambda cwd, cid: socket_file)
+    monkeypatch.setattr(arc_repl, "_session_dir", lambda cwd, cid: session_dir)
+    monkeypatch.setattr(arc_repl, "_pid_path", lambda cwd, cid: pid_file)
+    monkeypatch.setattr(arc_repl, "_meta_path", lambda cwd, cid: meta_file)
+    monkeypatch.setattr(arc_repl, "_lifecycle_path", lambda cwd, cid: lifecycle_file)
+    monkeypatch.setattr(arc_repl, "_daemon_log_path", lambda cwd, cid: log_file)
+    monkeypatch.setattr(arc_repl, "_default_game_id", lambda cwd: "ls20")
+    monkeypatch.setattr(arc_repl, "_append_lifecycle_event", lambda *a, **k: None)
+    monkeypatch.setattr(arc_repl, "_spawn_daemon", lambda *a, **k: calls.append("spawn"))
+    monkeypatch.setattr(
+        arc_repl,
+        "_wait_for_daemon",
+        lambda *a, **k: socket_file.write_text("ready\n"),
+    )
+    monkeypatch.setattr(
+        arc_repl,
+        "_send_ipc_request",
+        lambda cwd, conversation_id, request, timeout_s: {"ok": True, "action": request["action"]},
+    )
+
+    result, session_created = arc_repl._send_request(tmp_path, "c1", {"action": "status", "game_id": "ls20"})
+
+    assert calls == ["spawn"]
+    assert session_created is True
+    assert result["ok"] is True
+
+
 def test_daemon_main_handles_unknown_and_non_object_request(monkeypatch, tmp_path: Path) -> None:
     class FakeSession:
         def __init__(self, **kwargs):

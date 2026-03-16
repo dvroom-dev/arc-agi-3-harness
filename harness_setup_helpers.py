@@ -434,3 +434,39 @@ def assert_no_game_files_in_agent_dir_impl(agent_dir: Path) -> None:
             "agent filesystem violates the run publication model: "
             f"{preview}"
         )
+
+
+def assert_existing_run_agent_dir_is_safe_impl(agent_dir: Path) -> None:
+    """Allow persisted run artifacts while still blocking leaked internals/escaping links."""
+    forbidden: list[Path] = []
+    allowed_root = re.compile(r"^game_[A-Za-z0-9_.-]+$")
+    resolved_agent_dir = agent_dir.resolve()
+    for path in agent_dir.rglob("*"):
+        rel = path.relative_to(agent_dir)
+        if len(rel.parts) == 1 and not allowed_root.fullmatch(rel.name):
+            forbidden.append(rel)
+            continue
+        if "environment_files" in rel.parts:
+            forbidden.append(rel)
+            continue
+        lower_name = path.name.lower()
+        if lower_name.endswith((".zip", ".tar", ".tgz", ".tar.gz")):
+            forbidden.append(rel)
+            continue
+        if path.is_symlink():
+            try:
+                resolved_target = path.resolve(strict=True)
+            except FileNotFoundError:
+                forbidden.append(rel)
+                continue
+            try:
+                resolved_target.relative_to(resolved_agent_dir)
+            except ValueError:
+                forbidden.append(rel)
+                continue
+    if forbidden:
+        preview = ", ".join(str(p) for p in sorted(set(forbidden))[:8])
+        raise RuntimeError(
+            "agent filesystem violates the run publication model: "
+            f"{preview}"
+        )

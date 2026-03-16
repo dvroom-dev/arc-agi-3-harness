@@ -18,6 +18,7 @@ try:
         _grid_from_hex_rows,  # noqa: F401
         _same_game_lineage,
     )
+    from arc_repl_session_restore import restore_session_from_history
 except Exception:
     from tools.arc_repl_action_history import ActionHistoryStore
     from tools.arc_repl_session_compat import (
@@ -32,6 +33,7 @@ except Exception:
         _grid_from_hex_rows,  # noqa: F401
         _same_game_lineage,
     )
+    from tools.arc_repl_session_restore import restore_session_from_history
 class BaseReplSession:
     def __init__(
         self,
@@ -60,16 +62,13 @@ class BaseReplSession:
         self.events: list[dict] = list(self.history.get("events", []))
 
         self.env = deps._make_env(game_id)
-        if self.events:
-            raise RuntimeError(
-                "cannot restore REPL state: history replay is disabled and prior step/reset "
-                "events exist. Stop this run and inspect daemon diagnostics."
-            )
         self.frame = deps._reset_env_with_retry(
             self.env,
             context="at session start",
         )
         self.pixels = deps._get_pixels(self.env, self.frame)
+        if self.events:
+            self.events = restore_session_from_history(self, self.events)
         self.game_id = str(getattr(self.frame, "game_id", "")).strip() or game_id
         self.history["game_id"] = self.game_id
         self.action_history = ActionHistoryStore(
@@ -97,6 +96,7 @@ class BaseReplSession:
         self.history_functions_enabled = False
         self.set_history_helpers_enabled(bool(enable_history_functions))
         self._refresh_play_lib(force=True)
+
     def _same_game_lineage(self, requested_game_id: str) -> bool:
         return _same_game_lineage(
             self.game_id,
