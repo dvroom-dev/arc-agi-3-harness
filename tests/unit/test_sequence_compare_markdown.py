@@ -27,6 +27,8 @@ def _copy_model_templates(game_dir: Path) -> None:
         "artifact_helpers.py",
         "inspect_sequence.py",
         "inspect_components.py",
+        "inspect_grid_slice.py",
+        "inspect_grid_values.py",
     ):
         shutil.copy2(src_dir / name, game_dir / name)
     runtime_dst = game_dir.parent / "config" / "tools" / "arc_model_runtime"

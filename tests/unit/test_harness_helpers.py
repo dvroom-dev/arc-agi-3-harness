@@ -187,6 +187,8 @@ def test_setup_run_dir_seeds_expected_files(tmp_path: Path) -> None:
     assert (agent_dir / "game_ls20" / "artifact_helpers.py").exists()
     assert (agent_dir / "game_ls20" / "inspect_sequence.py").exists()
     assert (agent_dir / "game_ls20" / "inspect_components.py").exists()
+    assert (agent_dir / "game_ls20" / "inspect_grid_slice.py").exists()
+    assert (agent_dir / "game_ls20" / "inspect_grid_values.py").exists()
     assert (agent_dir / "game_ls20" / "current_compare.md").exists()
     assert (agent_dir / "game_ls20" / "current_compare.json").exists()
     assert "No sequence comparison has been recorded yet" in (

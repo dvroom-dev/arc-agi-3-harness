@@ -142,6 +142,8 @@ def setup_run_dir_impl(
     artifact_helpers_template: str,
     inspect_sequence_template: str,
     inspect_components_template: str,
+    inspect_grid_slice_template: str,
+    inspect_grid_values_template: str,
     game_id: str,
 ) -> None:
     """Set up an isolated run directory with split agent/supervisor dirs."""
@@ -198,6 +200,14 @@ def setup_run_dir_impl(
     inspect_components_file = game_dir / "inspect_components.py"
     if not inspect_components_file.exists():
         inspect_components_file.write_text(inspect_components_template)
+
+    inspect_grid_slice_file = game_dir / "inspect_grid_slice.py"
+    if not inspect_grid_slice_file.exists():
+        inspect_grid_slice_file.write_text(inspect_grid_slice_template)
+
+    inspect_grid_values_file = game_dir / "inspect_grid_values.py"
+    if not inspect_grid_values_file.exists():
+        inspect_grid_values_file.write_text(inspect_grid_values_template)
 
     current_compare_md = game_dir / "current_compare.md"
     if not current_compare_md.exists():

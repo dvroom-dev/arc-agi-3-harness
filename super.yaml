@@ -81,6 +81,8 @@ prompt_parts:
         - `python3 model.py status --game-id "${vars.game_id}"`
         - `python3 model.py compare_sequences --game-id "${vars.game_id}"`
         - `python3 inspect_sequence.py --current-mismatch`
+        - `python3 inspect_grid_slice.py --file level_current/current_state.hex --rows 36:55 --cols 29:38`
+        - `python3 inspect_grid_values.py --file level_current/current_state.hex --value C --value 9`
         - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`
         `play.py` is a static harness-owned `exec_file` entrypoint. Put level-specific replay logic in `play_lib.py`, not in `play.py`.
         Bad examples:
@@ -88,10 +90,11 @@ prompt_parts:
         - `python3 model.py status grid=env.grid`
         - `python3 model.py compare_sequences ... ; print(...)`
         - `python3 -c '...'`
+        - `awk '...' level_current/current_state.hex`
         - `python3 model.py exec_file --game-id "${vars.game_id}" /abs/path/to/play.py`
         Do not use shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null`.
         If you parse JSON from a CLI, parse stdout only. Never pipe `2>&1` into `json.load`, `jq`, or another JSON parser.
-        Prefer existing helper scripts such as `inspect_sequence.py` and `inspect_components.py`.
+        Prefer existing helper scripts such as `inspect_sequence.py`, `inspect_components.py`, `inspect_grid_slice.py`, and `inspect_grid_values.py`.
         If `code_model` truly needs custom analysis, add a small read-only helper script in the workspace and run it directly; do not improvise `python3 -c` snippets.
         Use `python3 inspect_components.py --coverage --level LEVEL` to verify that exact component geometry covers every seen state for the current level.
         When using provider file-edit tools, read the file first, then edit/write it.
@@ -387,7 +390,7 @@ modes:
       shell_invocation_policy:
         disallow:
           - match_type: regex
-            pattern: '(^|[^<])(?:\d+)?>>?'
+            pattern: '(^|[\s;|&(])(?:\d+)?>>?'
             case_sensitive: true
           - match_type: contains
             pattern: ARC_CONFIG_DIR
@@ -410,6 +413,9 @@ modes:
             case_sensitive: true
           - match_type: regex
             pattern: '^python3 (\./)?inspect_sequence\.py(\s|$)'
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^python3 (\./)?inspect_grid_(slice|values)\.py(\s|$)'
             case_sensitive: true
       provider_builtin_tools:
         claude:
@@ -452,7 +458,7 @@ modes:
             Theory mode owns raw grid/diff inspection.
             Read/write permissions for this mode are shown in the generated `Mode Permissions (agent-visible)` section. Treat that section as authoritative and do not attempt writes outside those enforced permissions.
             Do not use `arc_repl` in this mode.
-            The only Python command allowed here is `python3 inspect_components.py ...` for component coverage/mismatch checks.
+            The only Python commands allowed here are `python3 inspect_components.py ...`, `python3 inspect_grid_slice.py ...`, and `python3 inspect_grid_values.py ...`.
             Use raw `.hex`, sequence metadata, and compare artifacts to define components and map every visible pixel to named elements.
             Do not use theory mode to debug `model.py`, `model_lib.py`, compare internals, or coordinate-counting contradictions after compare is already clean; that belongs in `code_model`. On level 1, a ready next probe belongs in `explore_and_solve`; on level 2+, a ready evidence probe belongs in `explore_only` and a ready solution attempt belongs in `solve_model`.
             Runtime/harness investigation is out of scope here. If artifacts appear inconsistent, cite the exact conflicting workspace files and switch modes or report the blocker; do not inspect tooling internals.
@@ -496,6 +502,8 @@ modes:
             - on level 1, maintain the `# Explore Plan` section in `theory.md`; it is the only handoff surface for `explore_and_solve`;
             - on level 2+, keep exactly one `# Evidence Gap` section when one bounded real-game observation about a newly introduced visible component or newly changed visible component state is still missing, and exactly one `# Model Plan` section when frontier model/play work is ready;
             - run `python3 inspect_components.py --coverage --level <LEVEL>` before leaving theory mode;
+            - use `python3 inspect_grid_slice.py --file ... --rows START:END --cols START:END` for sanctioned row/column extraction instead of `awk`, shell loops, or `python3 -c`;
+            - use `python3 inspect_grid_values.py --file ... --value X [--value Y ...]` for sanctioned value counts and bounding boxes instead of ad hoc Python snippets;
             - use `component_coverage.*` as the canonical source for observed grid shapes; do not count rendered `Read` line numbers to infer dimensions;
             - read `current_compare.md` first whenever compare matters; only then open the single referenced `level_current/sequence_compare/*.md` report if needed;
             - use `current_compare.*`, the referenced compare report, and `turn_index.jsonl` to decide whether sequence artifacts exist before looking for `level_current/sequences/**`;
@@ -535,6 +543,8 @@ modes:
             - `theory.md`
             - `components.py`
             - `inspect_components.py`
+            - `inspect_grid_slice.py`
+            - `inspect_grid_values.py`
             - `component_coverage.md`
             - `level_current/sequence_compare/current_compare.md`
         - prompt_part: current_theory_file
@@ -621,7 +631,7 @@ modes:
       shell_invocation_policy:
         disallow:
           - match_type: regex
-            pattern: '(^|[^<])(?:\d+)?>>?'
+            pattern: '(^|[\s;|&(])(?:\d+)?>>?'
             case_sensitive: true
         allow:
           - match_type: exact_match
@@ -738,7 +748,7 @@ modes:
       shell_invocation_policy:
         disallow:
           - match_type: regex
-            pattern: '(^|[^<])(?:\d+)?>>?'
+            pattern: '(^|[\s;|&(])(?:\d+)?>>?'
             case_sensitive: true
         allow:
           - match_type: exact_match
@@ -868,7 +878,7 @@ modes:
       shell_invocation_policy:
         disallow:
           - match_type: regex
-            pattern: '(^|[^<])(?:\d+)?>>?'
+            pattern: '(^|[\s;|&(])(?:\d+)?>>?'
             case_sensitive: true
         allow:
           - match_type: exact_match
@@ -888,6 +898,9 @@ modes:
             case_sensitive: true
           - match_type: regex
             pattern: '^python3 (\./)?inspect_sequence\.py(\s|$)'
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^python3 (\./)?inspect_grid_(slice|values)\.py(\s|$)'
             case_sensitive: true
       provider_builtin_tools:
         claude:
@@ -921,6 +934,8 @@ modes:
               - play_lib.py
               - inspect_sequence.py
               - inspect_components.py
+              - inspect_grid_slice.py
+              - inspect_grid_values.py
               - component_coverage.json
               - component_coverage.md
               - current_compare.json
@@ -944,6 +959,8 @@ modes:
               - play_lib.py
               - inspect_sequence.py
               - inspect_components.py
+              - inspect_grid_slice.py
+              - inspect_grid_values.py
               - component_coverage.json
               - component_coverage.md
               - current_compare.json
@@ -998,6 +1015,7 @@ modes:
             Required loop:
             1) inspect `theory.md`, `components.py`, `current_compare.md`, and the referenced `level_current/sequence_compare/*.md` report;
             2) if needed, run `python3 inspect_sequence.py --current-mismatch` to print the first mismatching compare report target and step;
+               for sanctioned grid inspection, use `python3 inspect_grid_slice.py ...` or `python3 inspect_grid_values.py ...` instead of `awk` or `python3 -c`;
             3) name the exact mismatching sampled diff cells, match them to `theory.md`, and patch the missing mechanics, completion transitions, frontier branch logic, or component detectors/names needed in `model_lib.py`/`play_lib.py`/`components.py`;
             4) run `python3 model.py compare_sequences` with no explicit level so the runtime can honor any solved-level compare pin and keep work focused on the pinned solved level while wrap-up is active;
             5) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes;
@@ -1013,6 +1031,8 @@ modes:
             - `model_lib.py`
             - `play.py`
             - `play_lib.py`
+            - `inspect_grid_slice.py`
+            - `inspect_grid_values.py`
             - `component_coverage.md`
             - `current_compare.md`
             - `level_current/sequence_compare/current_compare.md`
@@ -1068,7 +1088,7 @@ modes:
       shell_invocation_policy:
         disallow:
           - match_type: regex
-            pattern: '(^|[^<])(?:\d+)?>>?'
+            pattern: '(^|[\s;|&(])(?:\d+)?>>?'
             case_sensitive: true
         allow:
           - match_type: exact_match
@@ -1088,6 +1108,9 @@ modes:
             case_sensitive: true
           - match_type: regex
             pattern: '^python3 (\./)?inspect_sequence\.py(\s|$)'
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^python3 (\./)?inspect_grid_(slice|values)\.py(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^arc_repl exec_file(\s|$)'
@@ -1124,6 +1147,8 @@ modes:
               - play_lib.py
               - inspect_sequence.py
               - inspect_components.py
+              - inspect_grid_slice.py
+              - inspect_grid_values.py
               - component_coverage.json
               - component_coverage.md
               - current_compare.json
@@ -1146,6 +1171,8 @@ modes:
               - play_lib.py
               - inspect_sequence.py
               - inspect_components.py
+              - inspect_grid_slice.py
+              - inspect_grid_values.py
               - component_coverage.json
               - component_coverage.md
               - current_compare.json
@@ -1189,6 +1216,8 @@ modes:
             - `model_lib.py`
             - `play.py`
             - `play_lib.py`
+            - `inspect_grid_slice.py`
+            - `inspect_grid_values.py`
             - `component_coverage.md`
             - `current_compare.md`
             - `level_current/sequence_compare/current_compare.md`
@@ -1226,7 +1255,7 @@ modes:
       shell_invocation_policy:
         disallow:
           - match_type: regex
-            pattern: '(^|[^<])(?:\d+)?>>?'
+            pattern: '(^|[\s;|&(])(?:\d+)?>>?'
             case_sensitive: true
         allow:
           - match_type: exact_match
