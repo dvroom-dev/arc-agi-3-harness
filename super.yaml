@@ -80,21 +80,27 @@ prompt_parts:
         Good examples:
         - `python3 model.py status --game-id "${vars.game_id}"`
         - `python3 model.py compare_sequences --game-id "${vars.game_id}"`
+        - `python3 inspect_sequence.py --current-mismatch`
         - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`
         `play.py` is a static harness-owned `exec_file` entrypoint. Put level-specific replay logic in `play_lib.py`, not in `play.py`.
         Bad examples:
         - `python3 model.py print(1+1)`
         - `python3 model.py status grid=env.grid`
         - `python3 model.py compare_sequences ... ; print(...)`
+        - `python3 -c '...'`
+        - `python3 model.py exec_file --game-id "${vars.game_id}" /abs/path/to/play.py`
         Do not use shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null`.
         If you parse JSON from a CLI, parse stdout only. Never pipe `2>&1` into `json.load`, `jq`, or another JSON parser.
+        Prefer existing helper scripts such as `inspect_sequence.py` and `inspect_components.py`.
+        If `code_model` truly needs custom analysis, add a small read-only helper script in the workspace and run it directly; do not improvise `python3 -c` snippets.
         Use `python3 inspect_components.py --coverage --level LEVEL` to verify that exact component geometry covers every seen state for the current level.
         When using provider file-edit tools, read the file first, then edit/write it.
         Do not use private/underscored internals.
     - prompt_part: component_model_runtime
   switch_mode_usage:
     - literal: |
-        To leave a mode, run the `switch_mode` CLI directly. Do not simulate a mode switch with `echo`, placeholder commands, or plain prose.
+        To leave a mode, run the `switch_mode` CLI as a shell command. There is no direct provider tool named `switch_mode`.
+        Use Bash `switch_mode ...` only. Do not try to call a provider tool named `switch_mode`, and do not simulate a mode switch with `echo`, placeholder commands, or plain prose.
 
         Required flags:
         - `--target-mode <mode>`: destination mode name
@@ -112,6 +118,7 @@ prompt_parts:
           --reason "component coverage passes and one concrete feature target is ready to probe" \
           --user-message "Probe whether the orange_blue_block moves right by one action and record the resulting state changes."
         ```
+        Use only relative workspace paths inside `--user-message` or `--mode-payload` values.
 
 supervisor:
   enabled: true
