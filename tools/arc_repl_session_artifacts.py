@@ -239,6 +239,18 @@ def _write_level_turn_files(
             else int(session.frame.levels_completed)
         ),
         "levels_completed_after": int(session.frame.levels_completed),
+        "level_complete_before": False,
+        "level_complete_after": bool(
+            int(
+                int(session.frame.levels_completed)
+                > (
+                    int(levels_before_action)
+                    if isinstance(levels_before_action, int)
+                    else int(session.frame.levels_completed)
+                )
+            )
+            or str(session.frame.state.value) == "WIN"
+        ),
         "state_before_action": str(state_before_action or ""),
         "state_after_action": str(session.frame.state.value),
         "steps_executed": len(step_snapshots),
@@ -268,6 +280,8 @@ def _write_level_turn_files(
                     "level_after": int(meta["level_after"]),
                     "levels_completed_before": int(meta["levels_completed_before"]),
                     "levels_completed_after": int(meta["levels_completed_after"]),
+                    "level_complete_before": bool(meta["level_complete_before"]),
+                    "level_complete_after": bool(meta["level_complete_after"]),
                     "state_before_action": str(meta["state_before_action"]),
                     "state_after_action": str(meta["state_after_action"]),
                 },

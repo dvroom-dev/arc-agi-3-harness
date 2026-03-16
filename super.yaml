@@ -1127,7 +1127,8 @@ modes:
             - `python3 model.py set_level --game-id "${vars.game_id}" "$LEVEL"`;
             - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`;
             - `python3 model.py status --game-id "${vars.game_id}"`;
-            - if the model proof succeeds, run the same `play.py` once in the real game with `arc_repl exec_file ./play.py`;
+            - if the model proof succeeds, run `arc_repl reset_level` before any real replay so the real game starts from the same level-initial state as the model proof;
+            - then run the same `play.py` once in the real game with `arc_repl exec_file ./play.py`;
             - then switch out promptly with completion or mismatch evidence.
             Stay in solve_model until the model-side proof plus one real replay succeeds, exposes a model bug, or clearly proves that one exact missing real-game observation must go back to `theory`.
             Read these agent-workspace files as needed:
@@ -1147,8 +1148,9 @@ modes:
       requirements:
         - "When model proof succeeds, mark the level SOLVED in `theory.md` with concise evidence."
         - "Do not enter or remain in solve_model while a solved-level compare pin is active."
+        - "Before the one allowed real-game replay in solve_model, run `arc_repl reset_level` so replay starts from level-initial state."
       violations:
-        - "Using any `arc_repl` command other than one deterministic `arc_repl exec_file ./play.py` replay after model proof succeeds."
+        - "Using any `arc_repl` command other than one `arc_repl reset_level` immediately followed by one deterministic `arc_repl exec_file ./play.py` replay after model proof succeeds."
         - "Reading raw `.hex` state files or sequence metadata directly in solve_model."
 
   recover:

@@ -74,6 +74,8 @@ class ModelEnv:
         self.current_level = 1
         self.win_levels = 7
         self.turn_budget = 100
+        self.level_complete = False
+        self.last_step_level_complete = False
         self.grid = np.zeros((0, 0), dtype=np.int8)
         self.refresh_level_initial_states()
         self._init_level(1)
@@ -96,22 +98,33 @@ class ModelEnv:
             )
         return np.array(grid, dtype=np.int8, copy=True)
 
-    def _init_level(self, level: int) -> None:
+    def _init_level(self, level: int, *, clear_last_step_level_complete: bool = True) -> None:
         self.current_level = int(level)
         self.turn = 0
         self.state = "NOT_FINISHED"
         self.full_reset = False
+        self.level_complete = False
+        if clear_last_step_level_complete:
+            self.last_step_level_complete = False
         self.grid = self.initial_grid_for_level(level)
         self.hooks.init_level(self, int(level))
 
     def step(self, action: GameAction, data=None, reasoning=None):
+        self.level_complete = False
+        self.last_step_level_complete = False
         self.hooks.apply_action(self, action, data=data, reasoning=reasoning)
-        if self.hooks.is_level_complete(self):
+        completed = bool(self.hooks.is_level_complete(self))
+        self.level_complete = completed
+        self.last_step_level_complete = completed
+        if completed:
             self.levels_completed += 1
             if self.levels_completed >= self.win_levels:
                 self.state = "WIN"
             else:
-                self._init_level(self.levels_completed + 1)
+                self._init_level(
+                    self.levels_completed + 1,
+                    clear_last_step_level_complete=False,
+                )
         return self
 
     def reset(self):
@@ -284,6 +297,7 @@ class ModelSession:
             "state": str(self.env.state),
             "current_level": int(self.env.current_level),
             "levels_completed": int(self.env.levels_completed),
+            "level_complete": bool(self.env.last_step_level_complete or str(self.env.state) == "WIN"),
             "win_levels": int(self.env.win_levels),
             "guid": getattr(self.env, "guid", None),
             "available_actions": [int(a) for a in getattr(self.env, "available_actions", [])],
@@ -312,6 +326,7 @@ class ModelSession:
             "state": str(self.env.state),
             "current_level": current_level,
             "levels_completed": levels_completed,
+            "level_complete": bool(self.env.last_step_level_complete or str(self.env.state) == "WIN"),
             "win_levels": int(self.env.win_levels),
             "guid": getattr(self.env, "guid", None),
             "available_model_levels": available_model_levels,

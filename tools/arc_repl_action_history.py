@@ -81,6 +81,14 @@ class ActionHistoryStore:
         state_after: dict,
         diff_payload: dict,
     ) -> None:
+        state_before_name = str(state_before.get("state", "")).strip().upper()
+        state_after_name = str(state_after.get("state", "")).strip().upper()
+        level_complete_before = bool(state_before.get("level_complete", False)) or state_before_name == "WIN"
+        level_complete_after = (
+            bool(state_after.get("level_complete", False))
+            or state_after_name == "WIN"
+            or int(state_before["levels_completed"]) < int(state_after["levels_completed"])
+        )
         levels_changed = int(state_before["levels_completed"]) != int(
             state_after["levels_completed"]
         )
@@ -109,6 +117,8 @@ class ActionHistoryStore:
             "level_after": int(state_after["current_level"]),
             "levels_completed_before": int(state_before["levels_completed"]),
             "levels_completed_after": int(state_after["levels_completed"]),
+            "level_complete_before": bool(level_complete_before),
+            "level_complete_after": bool(level_complete_after),
             "state_before": deepcopy(state_before),
             "state_after": deepcopy(state_after),
             "diff": final_diff_payload,

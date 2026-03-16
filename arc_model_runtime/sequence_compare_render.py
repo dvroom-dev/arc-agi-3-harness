@@ -47,14 +47,14 @@ def report_md(report: dict[str, Any]) -> str:
     if report.get("divergence_step") is not None:
         lines.append(f"- divergence_step: {int(report['divergence_step'])}")
         lines.append(f"- divergence_reason: {str(report.get('divergence_reason', ''))}")
-    if str(report.get("comparison_stop_reason") or "") == "pre_level_change_boundary":
+    if str(report.get("comparison_stop_reason") or "") == "post_level_complete_state_diff_excluded":
         lines.extend(
             [
                 "",
                 "## Boundary Note",
-                "- This sequence ended at a level boundary.",
-                "- Compare stopped before the final boundary-crossing action, so next-level materialization is excluded from parity checking.",
-                "- If game-side per-step diffs are zero at this boundary, that is expected redaction rather than missing data.",
+                "- This sequence includes a level-completing action.",
+                "- Compare checked the boundary action's completion transition, including `level_complete_before/after`, state, and `levels_completed`.",
+                "- Compare excluded the post-completion next-level grid materialization from parity checking.",
             ]
         )
     lines.extend(
@@ -114,8 +114,8 @@ def current_compare_markdown(summary_payload: dict[str, Any]) -> str:
                 lines.append(f"- divergence_reason: {reason}")
             if report.get("report_file"):
                 lines.append(f"- report_file: {report['report_file']}")
-            if str(report.get("comparison_stop_reason") or "") == "pre_level_change_boundary":
-                lines.append("- boundary_note: final boundary-crossing action excluded from compare; next-level materialization is not part of parity checking")
+            if str(report.get("comparison_stop_reason") or "") == "post_level_complete_state_diff_excluded":
+                lines.append("- boundary_note: level-completing action transition was compared, but post-completion next-level grid materialization was excluded")
             if report.get("matched") is False:
                 _append_diff_summary(lines, "Game Step Diff", report.get("game_step_diff"))
                 _append_diff_summary(lines, "Model Step Diff", report.get("model_step_diff"))
@@ -128,7 +128,7 @@ def current_compare_markdown(summary_payload: dict[str, Any]) -> str:
             "- Model Step Diff: model before -> model after for the same step.",
             "- State Diff (Game After vs Model After): game after -> model after.",
             "- Sequence indices are absolute across the level; they do not restart after reset_level. Use `end_reason` and `start_action_index` to see where a reset-bounded sequence begins.",
-            "- When `comparison_stop_reason` is `pre_level_change_boundary`, compare intentionally stopped before the final level-transition step so next-level materialization is excluded.",
+            "- When `comparison_stop_reason` is `post_level_complete_state_diff_excluded`, compare checked the completion transition but excluded the next-level grid materialization.",
         ]
     )
     lines.extend(

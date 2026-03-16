@@ -74,14 +74,6 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
     seq_id = str(payload.get("sequence_id", "seq_unknown"))
     actions = list(payload.get("actions", []) or [])
     end_reason = str(payload.get("end_reason", "") or "").strip().lower()
-    boundary_action_excluded = False
-    if end_reason == "level_change" and actions:
-        # Stop comparison before the boundary-crossing action. The final
-        # action in a level_change-ended sequence may be followed immediately by
-        # next-level state materialization or redaction, which is not a
-        # meaningful parity target for solved-level wrap-up.
-        actions = actions[:-1]
-        boundary_action_excluded = True
     report: dict[str, Any] = {
         "level": int(level),
         "sequence_id": seq_id,
@@ -95,8 +87,7 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
         "state_diff": None,
         "transition_mismatch": None,
     }
-    if boundary_action_excluded:
-        report["comparison_stop_reason"] = "pre_level_change_boundary"
+    boundary_transition_compared = False
     for action in actions:
         local_step = int(action.get("local_step", 0) or 0)
         files = action.get("files", {}) if isinstance(action.get("files"), dict) else {}
@@ -114,8 +105,18 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
         game_state_after = str(action.get("state_after", "") or "")
         game_levels_before = int(action.get("levels_completed_before", 0) or 0)
         game_levels_after = int(action.get("levels_completed_after", 0) or 0)
+        game_level_complete_before = bool(action.get("level_complete_before", False))
+        game_level_complete_after = bool(
+            action.get(
+                "level_complete_after",
+                game_levels_after > game_levels_before or game_state_after == "WIN",
+            )
+        )
         model_state_before = str(compare_env.state)
         model_levels_before = int(compare_env.levels_completed)
+        model_level_complete_before = bool(
+            getattr(compare_env, "last_step_level_complete", False) or str(compare_env.state) == "WIN"
+        )
         if model_before.shape != game_before.shape or not np.array_equal(model_before, game_before):
             report["matched"] = False
             report["divergence_step"] = local_step
@@ -130,12 +131,17 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
         model_after = np.array(compare_env.grid, dtype=np.int8, copy=True)
         model_state_after = str(compare_env.state)
         model_levels_after = int(compare_env.levels_completed)
+        model_level_complete_after = bool(
+            getattr(compare_env, "last_step_level_complete", False) or str(compare_env.state) == "WIN"
+        )
         report["actions_compared"] = int(local_step)
         if (
             model_state_before != game_state_before
             or model_state_after != game_state_after
             or model_levels_before != game_levels_before
             or model_levels_after != game_levels_after
+            or model_level_complete_before != game_level_complete_before
+            or model_level_complete_after != game_level_complete_after
         ):
             report["matched"] = False
             report["divergence_step"] = local_step
@@ -146,18 +152,33 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
                     "state_after": game_state_after,
                     "levels_completed_before": game_levels_before,
                     "levels_completed_after": game_levels_after,
+                    "level_complete_before": game_level_complete_before,
+                    "level_complete_after": game_level_complete_after,
                 },
                 "model": {
                     "state_before": model_state_before,
                     "state_after": model_state_after,
                     "levels_completed_before": model_levels_before,
                     "levels_completed_after": model_levels_after,
+                    "level_complete_before": model_level_complete_before,
+                    "level_complete_after": model_level_complete_after,
                 },
             }
-            report["game_step_diff"] = diff_payload(game_before, game_after)
-            report["model_step_diff"] = diff_payload(model_before, model_after)
-            report["state_diff"] = diff_payload(game_after, model_after)
+            completion_boundary = (
+                game_level_complete_after
+                or model_level_complete_after
+                or int(action.get("level_after", game_levels_after + 1) or (game_levels_after + 1))
+                > int(action.get("level_before", game_levels_before + 1) or (game_levels_before + 1))
+            )
+            if not completion_boundary:
+                report["game_step_diff"] = diff_payload(game_before, game_after)
+                report["model_step_diff"] = diff_payload(model_before, model_after)
+                report["state_diff"] = diff_payload(game_after, model_after)
             break
+        if game_level_complete_after or model_level_complete_after:
+            boundary_transition_compared = True
+            report["comparison_stop_reason"] = "post_level_complete_state_diff_excluded"
+            continue
         if model_after.shape != game_after.shape or not np.array_equal(model_after, game_after):
             report["matched"] = False
             report["divergence_step"] = local_step
@@ -166,6 +187,8 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
             report["model_step_diff"] = diff_payload(model_before, model_after)
             report["state_diff"] = diff_payload(game_after, model_after)
             break
+    if boundary_transition_compared and report.get("comparison_stop_reason") is None:
+        report["comparison_stop_reason"] = "post_level_complete_state_diff_excluded"
     return report
 
 

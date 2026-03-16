@@ -127,6 +127,10 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
                 "level_after": level_after,
                 "levels_completed_before": levels_before,
                 "levels_completed_after": levels_after,
+                "level_complete_before": bool(rec.get("level_complete_before", False)),
+                "level_complete_after": bool(
+                    rec.get("level_complete_after", levels_after > levels_before or state_after == "WIN")
+                ),
                 "before_rows": state_before_rows,
                 "after_rows": state_after_rows,
                 "files": {},
