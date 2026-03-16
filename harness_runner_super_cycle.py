@@ -16,6 +16,7 @@ def noop_super_cycle_error(
         and head_after_resume.get("action_summary") == "supervise:start"
         and head_before_resume.get("provider_thread_id")
         and head_before_resume.get("provider_thread_id") == head_after_resume.get("provider_thread_id")
+        and head_before_resume.get("doc_hash") != head_after_resume.get("doc_hash")
     ):
         return (
             "super completed an empty recovery cycle after a stop decision: "
