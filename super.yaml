@@ -475,6 +475,7 @@ modes:
             If a solved-level compare pin is active, stay strictly scoped to that pinned level. Do not record frontier-level observations, components, or hypotheses until the pin is cleared.
             Do not exhaustively restate stable geometry. After one initial survey, only reopen a file if it answers a specific open question or verifies a concrete handoff.
             After a completed bounded probe, theory is delta-only: record what changed, state which prior hypothesis was strengthened or falsified, keep the remaining alternatives live, and select the smallest next discriminating probe.
+            For a bounded real-game probe against a new or changed component, inspect the exact contact step first: compare the final step's `before_state` and `after_state` (or the first overlap step if earlier contact is proven) before inferring the component's effect from whole-sequence start/end state alone.
             Every completed bounded probe must end with an explicit Probe Verdict in `theory.md` using exactly one of: `resolved`, `partially_resolved`, `falsified`, or `non_discriminating`.
             A probe that reveals a direct action-linked effect of a component counts as answered for that exact question. Do not keep the old question open in the same form after that.
             When a probe resolves or falsifies the active question, replace it with the next narrower unknown instead of continuing to treat the whole component as globally mysterious.
@@ -523,6 +524,7 @@ modes:
             - once component coverage passes and the active question is already clear, stop re-deriving full-state geometry from `current_state.hex`; use existing notes/artifacts and choose the smallest decisive next step;
             - do not spend theory turns recounting coordinates or maze/topology details that are already written in `theory.md` unless a specific contradiction requires rechecking them;
             - after a completed bounded probe, update only the new evidence, the affected hypotheses, and the next smallest discriminating probe; do not rewrite the full elements/actions/geometry sections unless they are contradicted;
+            - for a bounded real-game probe on a new or changed component, inspect the last/contact step in the sequence first (`before_state` vs `after_state`) before inferring the effect from whole-sequence start/end state;
             - after every bounded probe, add a short `Probe Verdict` entry in `theory.md` with: `question asked`, `observed effect`, `what this rules out`, `what remains unknown`, and one label from `resolved|partially_resolved|falsified|non_discriminating`;
             - if a bounded probe revealed the direct action-linked effect of a component, close that exact question and replace it with the next narrower unknown instead of keeping the same broad question open;
             - if the latest probe resolved or falsified all live explanations for the active question, write 2-3 fresh plausible explanations for the remaining unexplained evidence before choosing the next step;
@@ -996,6 +998,7 @@ modes:
             Use `theory.md`, `components.py`, `component_coverage.*`, `current_compare.*`, and `level_current/sequence_compare/*.md` as the primary evidence surface here.
             If a solved-level compare pin is active, stay scoped to the pinned solved level and ignore frontier-level artifacts until the pin clears.
             Do not read raw `.hex` state files or sequence metadata directly in this mode. Use compare report markdown and sampled diff cells instead.
+            Exception: if compare is already clean for the active frontier level and the remaining blocker is writing a deterministic frontier branch, you may inspect visible current-state topology with the sanctioned helpers `inspect_grid_slice.py` and `inspect_grid_values.py`. Do not hand route-planning back to theory just because you have not yet inspected the visible walls/path layout yourself.
             Runtime/harness internals are out of scope: do not read or edit any file under `/config/tools/`.
             Treat `current_compare.json`, `current_compare.md`, and `level_current/sequence_compare/*.md` as the authoritative parity artifacts in this mode.
             If they disagree or look broken, report the exact contradiction from workspace artifacts and stay in `code_model`; do not inspect runtime/tooling source.
@@ -1025,6 +1028,7 @@ modes:
                - otherwise switch_mode to `theory` only if there is one exact missing real-game observation that blocks the next branch patch;
             6) if compare is still red and a repair is blocked, stay in `code_model` and produce a precise blocker report with exact file/line evidence and the smallest required fix; do not switch out of `code_model` while parity remains red.
             7) if there is one exact blocker preventing parity repair, ask the supervisor to escalate or resolve that blocker from `code_model`; do not switch back to `theory` until compare is clean.
+            8) if compare is already clean and the only missing piece is a deterministic frontier branch, inspect visible topology yourself with the sanctioned grid helpers and write the branch in `play_lib.py`; do not hand off to theory merely because you have not yet traced the walls/path layout.
             Read these agent-workspace files as needed; prefer component summaries over raw grid artifacts:
             - `theory.md`
             - `components.py`
@@ -1053,6 +1057,7 @@ modes:
         - "In code_model, never write outside the workspace or under `/tmp`."
         - "In code_model, if a CLI emits JSON, parse stdout only and keep stderr separate."
         - "In code_model, treat `play.py` as a static harness-owned entrypoint and put level-specific solve edits in `play_lib.py`."
+        - "In code_model, when compare is clean and the remaining blocker is deterministic frontier route topology, use the sanctioned grid helpers yourself and keep route planning in code_model instead of handing that topology question back to theory."
       violations:
         - "Using any `arc_repl` command in code_model."
         - "Reading raw `.hex` state files or sequence metadata directly in code_model."
