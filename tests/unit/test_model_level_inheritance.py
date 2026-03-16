@@ -92,3 +92,41 @@ def test_model_template_inherits_completion_from_latest_prior_level_hook(tmp_pat
     assert payload["last_step_level_complete"] is True
     assert payload["last_completed_level"] == 5
     assert payload["current_level"] == 6
+
+
+def test_model_template_preserves_legacy_generic_hooks_alongside_level_diffs(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    for level in range(1, 4):
+        _write_hex(game_dir / f"level_{level}" / "initial_state.hex", ["000", "000"])
+
+    (game_dir / "model_lib.py").write_text(
+        (game_dir / "model_lib.py").read_text()
+        + "\n\ndef init_level(env, level: int, *, cfg=None):\n"
+        + "    _ = cfg\n"
+        + "    env.init_calls = getattr(env, 'init_calls', []) + [f'generic:{level}']\n"
+        + "    env.shared_counter = 10\n"
+        + "\n\ndef init_level_3(env, *, cfg=None):\n"
+        + "    _ = cfg\n"
+        + "    env.init_calls.append('level3')\n"
+        + "    env.shared_counter += 5\n"
+        + "\n\ndef apply_action(env, action, *, data=None, reasoning=None):\n"
+        + "    _ = action, data, reasoning\n"
+        + "    env.grid[0, 0] = 7\n"
+        + "\n\ndef apply_level_3(env, action, *, data=None, reasoning=None):\n"
+        + "    _ = action, data, reasoning\n"
+        + "    env.grid[0, 1] = env.shared_counter\n"
+    )
+
+    proc = _run_model(game_dir, ["set_level", "--game-id", "ls20", "3"])
+    assert proc.returncode == 0, proc.stderr
+
+    proc = _run_model_exec(
+        game_dir,
+        "env.step(1)\nprint(json.dumps({'grid': env.grid.tolist(), 'init_calls': env.init_calls, 'shared_counter': env.shared_counter}))\n",
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout.splitlines()[0])
+    assert payload["init_calls"][-2:] == ["generic:3", "level3"]
+    assert payload["shared_counter"] == 15
+    assert payload["grid"][0] == [7, 15, 0]

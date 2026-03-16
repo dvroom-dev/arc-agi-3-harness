@@ -71,18 +71,20 @@ class Hooks(ModelHooks):
         cfg = model_lib.get_level_config(level)
         env.turn_budget = int(getattr(cfg, "turn_budget", 100))
         env.grid = env.initial_grid_for_level(level)
-        used_inherited_hooks = False
+        seen_handlers: set[int] = set()
+        initializer = getattr(model_lib, "init_level", None)
+        if callable(initializer):
+            seen_handlers.add(id(initializer))
+            initializer(env, int(level), cfg=cfg)
         shared_initializer = getattr(model_lib, "init_level_shared", None)
-        if callable(shared_initializer):
+        if callable(shared_initializer) and id(shared_initializer) not in seen_handlers:
+            seen_handlers.add(id(shared_initializer))
             shared_initializer(env, int(level), cfg=cfg)
-            used_inherited_hooks = True
         for _lvl, initializer in _iter_level_hooks("init_level", int(level)):
+            if id(initializer) in seen_handlers:
+                continue
+            seen_handlers.add(id(initializer))
             initializer(env, cfg=cfg)
-            used_inherited_hooks = True
-        if not used_inherited_hooks:
-            initializer = getattr(model_lib, "init_level", None)
-            if callable(initializer):
-                initializer(env, int(level), cfg=cfg)
 
     def apply_action(
         self,
@@ -95,18 +97,20 @@ class Hooks(ModelHooks):
         # Generic action receiver (all levels).
         env.turn += 1
         env.turn_budget -= 1
-        used_inherited_hooks = False
-        shared_applier = getattr(model_lib, "apply_action_shared", None)
-        if callable(shared_applier):
-            shared_applier(env, action, data=data, reasoning=reasoning)
-            used_inherited_hooks = True
-        for _lvl, applier in _iter_level_hooks("apply_level", int(env.current_level)):
+        seen_handlers: set[int] = set()
+        applier = getattr(model_lib, "apply_action", None)
+        if callable(applier):
+            seen_handlers.add(id(applier))
             applier(env, action, data=data, reasoning=reasoning)
-            used_inherited_hooks = True
-        if not used_inherited_hooks:
-            applier = getattr(model_lib, "apply_action", None)
-            if callable(applier):
-                applier(env, action, data=data, reasoning=reasoning)
+        shared_applier = getattr(model_lib, "apply_action_shared", None)
+        if callable(shared_applier) and id(shared_applier) not in seen_handlers:
+            seen_handlers.add(id(shared_applier))
+            shared_applier(env, action, data=data, reasoning=reasoning)
+        for _lvl, applier in _iter_level_hooks("apply_level", int(env.current_level)):
+            if id(applier) in seen_handlers:
+                continue
+            seen_handlers.add(id(applier))
+            applier(env, action, data=data, reasoning=reasoning)
 
     def is_level_complete(self, env) -> bool:
         # Later levels inherit the latest defined completion rule unless overridden.
