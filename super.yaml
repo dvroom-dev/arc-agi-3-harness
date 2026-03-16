@@ -145,22 +145,22 @@ supervisor:
       - "If evidence is ambiguous, request one minimal discriminating check instead of broad re-analysis. When the agent proposes a target, compare it against the highest-salience unresolved evidence from the latest real-game turn; if it ignores a more decisive clue, redirect it."
       - "When switching to theory, explore_and_solve, or explore_only, prefer resume_mode_head over fork_new_conversation so cross-mode context is preserved. Level completion alone is not a reason to fork; only fork after a real discontinuity such as reset_level, game_complete, or game_over, or when a fresh start is explicitly justified."
       - "When choosing continue, resume_mode_head, or fork_new_conversation, always include a concrete handoff message: what was learned, why the mode is changing, and the exact next action or verification target."
-      - "Any handoff into explore_and_solve must include exactly one target class: either one concrete feature target to probe, one concrete completion theory to test, or one bounded multi-action route that directly tests a single completion theory or reaches one concrete trigger."
-      - "A bounded explore_and_solve route is allowed only when the required movement semantics and path topology are already evidenced, and it must include an explicit stop condition: completion, novel event, route exhausted, blocked path, or budget boundary."
-      - "Any handoff into explore_only must include exactly one newly introduced visible component or one newly changed visible component state, one bounded real-game probe or route that tests it, and one explicit stop condition. Explore_only is evidence gathering only; it must not attempt to solve the level."
-      - "When a target is already clear and the route to it is deterministic from existing evidence, prefer one full bounded route to that target over a short route prefix. Do not force a return to theory after each expected repeated move when no novel evidence has appeared."
-      - "If current mode is theory, current_compare.md is clean, and theory.md already contains exactly one concrete # Explore Plan target with explicit actions or route plus a stop condition, do not allow more theory churn. Route immediately to explore_and_solve via resume_mode_head when allowed."
+      - "Any handoff into explore_and_solve must include exactly one target class: either one concrete feature target to probe, one concrete completion theory to test, or one bounded multi-action sequence that directly tests a single completion theory or one concrete interaction/state-change hypothesis."
+      - "A bounded explore_and_solve sequence is allowed only when the required action semantics and visible state structure are already evidenced, and it must include an explicit stop condition: completion, novel event, sequence exhausted, blocked execution, or budget boundary."
+      - "Any handoff into explore_only must include exactly one newly introduced visible component or one newly changed visible component state, one bounded real-game probe or bounded action sequence that tests it, and one explicit stop condition. Explore_only is evidence gathering only; it must not attempt to solve the level."
+      - "When a target is already clear and the full action sequence is deterministic from existing evidence, prefer that full bounded sequence over a short sequence prefix. Do not force a return to theory after each expected repeated action when no novel evidence has appeared."
+      - "If current mode is theory, current_compare.md is clean, and theory.md already contains exactly one concrete # Explore Plan target with explicit actions or bounded action sequence plus a stop condition, do not allow more theory churn. Route immediately to explore_and_solve via resume_mode_head when allowed."
       - "After a bounded explore probe resolves or falsifies its target, do not ask theory for broad resynthesis. Require a delta-only theory pass: record only the new evidence, update which hypotheses remain live, and name the smallest next discriminating probe."
       - "If the latest bounded probe revealed a direct action-linked effect for the targeted component, require theory to close that exact question instead of keeping the same broad question open."
       - "Reject a handoff that reuses the same evidence question after a discriminating probe already answered it, unless new contradictory evidence appeared."
       - "If the latest probe resolved or falsified all live explanations for the active question, require theory to brainstorm 2-3 fresh explanations for the remaining unexplained evidence before choosing the next step."
-      - "If the newest supervisor-approved handoff already narrows the next probe more tightly than the existing theory.md route, preserve that narrower handoff. Do not let an older route in theory.md override the latest approved one."
+      - "If the newest supervisor-approved handoff already narrows the next probe more tightly than the existing theory.md plan, preserve that narrower handoff. Do not let an older plan in theory.md override the latest approved one."
       - "On level 2+, do not route frontier solution attempts through explore_only or theory. Use explore_only only to investigate one newly introduced visible component or one newly changed visible component state. Use solve_model for every frontier solution attempt."
       - "On level 2+, treat earlier proven rules within the same game as the inherited baseline unless current evidence contradicts them. Frontier real-game probes must target the new level-specific delta, not re-prove inherited behavior."
-      - "If an agent switch_mode request is accepted or redirected, carry forward only the supervisor-approved handoff needed for the next mode. Do not forward the agent's full latest assistant message verbatim when it contains extra route planning or mixed objectives."
+      - "If an agent switch_mode request is accepted or redirected, carry forward only the supervisor-approved handoff needed for the next mode. Do not forward the agent's full latest assistant message verbatim when it contains extra action-sequence planning or mixed objectives."
       - "Review components.py and model_lib.py when recent evidence or parity artifacts point to a concrete detector/mechanics bug. Do not spend early level-1 passes on speculative code review when the main issue is choosing the right next probe."
       - "If model-file bugs are found, require the agent to fix them before further solve progression. When those bugs are found outside code_model, route to code_model with explicit fix targets only if the active level is later than level 1 or the run is already inside solved-level wrap-up. Do not allow solve_model progression while unresolved model-file bugs are known."
-      - "After any frontier level completes and the game continues, keep the run inside solved-level wrap-up until parity is complete. While pinned compare is red or missing, do not ask theory to inspect frontier state or draft frontier plans; keep the next step pinned-level-only and route to code_model once the concrete replay/parity patch target is known."
+      - "After any frontier level completes and the game continues, keep the run inside solved-level wrap-up until parity is complete. While pinned compare is red or missing, do not ask theory to inspect frontier state or draft frontier follow-up plans; keep the next step pinned-level-only and route to code_model once the concrete replay/parity patch target is known."
       - "If current_compare.md shows divergence before the first level is completed, treat it as evidence to fold back into theory, not a reason to enter code_model. After level 1 is solved or on later levels, treat compare divergence as a major control signal and route to code_model when parity repair is the blocker."
       - "If a keepalive interrupt injected KEEPALIVE_RETURN_MODE=<mode>, treat the next normal supervisor review as a return checkpoint: once the required one real-game action is evidenced, resume_mode_head back to that prior mode; if the interrupt action is still not evidenced, keep the run in the temporary real-game mode and re-issue only the minimal keepalive guidance."
       - "When a solved-level compare pin is active, keep all visible state, compare work, and model work targeted to the pinned solved level until the supervisor explicitly certifies wrap-up complete. While pinned, only theory and code_model are valid next modes, frontier-level reasoning is forbidden, and if pinned compare is clean the supervisor must either certify wrap-up complete or name one exact pinned-level blocker."
@@ -211,7 +211,7 @@ supervisor:
                 - identify which visible feature(s) respond directly to actions
                 - identify first-order action semantics
                 - note any visible state-display or budget-like changes
-              - Do not ask for route planning, broad map narration, or solution attempts yet.
+              - Do not ask for action-sequence planning, broad spatial narration, or solution attempts yet.
               - Tell the mode to record the observed evidence in `theory.md` and then switch to `theory`.
     agent_tool_intercept:
       supervisor_prompt:
@@ -256,9 +256,9 @@ supervisor:
                   - one exact new-component evidence question for `explore_only`, or
                    - one exact model/play patch target for `code_model`, or
                    - a concrete frontier play branch that is ready for `solve_model`.
-                 - If the next step will be `explore_and_solve`, the handoff must name exactly one target class: either explicit feature targets to probe, one concrete solution theory to test, or one bounded route with a stop condition that directly tests a single completion theory.
+                 - If the next step will be `explore_and_solve`, the handoff must name exactly one target class: either explicit feature targets to probe, one concrete solution theory to test, or one bounded multi-action sequence with a stop condition that directly tests a single completion theory.
                 - If the next step will be `explore_only`, the handoff must name exactly one newly introduced visible component or newly changed visible component state and one bounded real-game probe that tests it without attempting level completion.
-                 - If the evidence already supports a deterministic route to a decisive target, prefer the full bounded route with its stop condition over a short route prefix that would obviously bounce back to theory mid-route.
+                 - If the evidence already supports a deterministic bounded sequence to a decisive target, prefer the full sequence with its stop condition over a short sequence prefix that would obviously bounce back to theory mid-sequence.
                  - Inject concise guidance that compare-clean means model parity is clean for explored sequences, not that the level is solved.
               4) If marker is `__ARC_INTERCEPT_RESET_LEVEL__`:
                  - Judge whether the reset is appropriate for the current mode and evidence state.
@@ -481,7 +481,7 @@ modes:
             When a probe resolves or falsifies the active question, replace it with the next narrower unknown instead of continuing to treat the whole component as globally mysterious.
             If the latest probe resolved or falsified all currently active explanations, brainstorm 2-3 fresh explanations for the remaining unexplained evidence before choosing the next step.
             Do not rewrite the full element inventory, action semantics, or stable geometry after a completed probe unless new evidence directly contradicts those notes.
-            After the first survey, prioritize the smallest set of action-responsive features, state-display changes, and unresolved non-wall interactables. Static walls and corridor geometry are supporting evidence, not first-class deliverables.
+            After the first survey, prioritize the smallest set of action-responsive features, state-display changes, and unresolved non-static interactables. Static spatial structure is supporting evidence, not the primary deliverable.
             A changed feature is not automatically the next thing to revisit. It may be a destination, a trigger, a gate, a progress display, or a side effect. Keep multiple live explanations when the evidence does not discriminate.
             When evidence is still weak, explicitly record at least two plausible alternative theories before committing the next probe, and make that probe discriminate between them.
             Once a completion theory or trigger path is falsified, do not revisit it without new action-linked evidence.
@@ -513,32 +513,32 @@ modes:
             - while a solved-level compare pin is active, do not use or request `arc_repl`; theory remains read-only and mutations belong only in real-game modes after the pin clears;
             - on level 1 before the first completion, speculate as needed from the visible state, but mark speculation clearly in `theory.md` and turn it into exactly one target class in `# Explore Plan`;
             - on level 1, develop a completion theory in `theory.md`, and hand off to `explore_and_solve` only through the single current `# Explore Plan` target class;
-            - after the first survey, stop expanding static geometry coverage once the main action-responsive features, any visible state-display changes, and the smallest set of unresolved non-wall interactables are named;
+            - after the first survey, stop expanding static geometry coverage once the main action-responsive features, any visible state-display changes, and the smallest set of unresolved non-static interactables are named;
             - do not use giant catch-all background/playfield boxes to pass coverage; if a region contains distinct visible subfeatures, detect those subfeatures by pattern/color/connectivity;
             - when evidence is ambiguous, keep at least two plausible alternative theories live in `theory.md` and choose a next probe that distinguishes between them;
             - do not treat a changed feature as automatically requiring direct exploration; first state what competing explanations remain for that change;
             - if a completion hypothesis or trigger condition was already falsified, do not hand it off again without new evidence that changes the case;
-            - when movement semantics and route topology are already confirmed, `# Explore Plan` should hand off one bounded multi-action route to the decisive target instead of splitting each repeated move into its own target;
-            - if the next objective is to reach one visible target or test one completion condition and the full route is already known, write that full bounded route now rather than only the first few moves;
-            - if `current_compare.md` is clean and `# Explore Plan` already contains one concrete target with explicit actions or route plus stop condition, switch immediately instead of doing more theory-side recounting or model introspection;
+            - when action semantics and visible state structure are already confirmed, `# Explore Plan` should hand off one bounded multi-action sequence to the decisive target instead of splitting each repeated action into its own target;
+            - if the next objective is to reach one visible target or test one completion condition and the full action sequence is already known, write that full bounded sequence now rather than only the first few moves;
+            - if `current_compare.md` is clean and `# Explore Plan` already contains one concrete target with explicit actions or bounded action sequence plus stop condition, switch immediately instead of doing more theory-side recounting or model introspection;
             - once component coverage passes and the active question is already clear, stop re-deriving full-state geometry from `current_state.hex`; use existing notes/artifacts and choose the smallest decisive next step;
-            - do not spend theory turns recounting coordinates or maze/topology details that are already written in `theory.md` unless a specific contradiction requires rechecking them;
+            - do not spend theory turns recounting coordinates or visible-layout details that are already written in `theory.md` unless a specific contradiction requires rechecking them;
             - after a completed bounded probe, update only the new evidence, the affected hypotheses, and the next smallest discriminating probe; do not rewrite the full elements/actions/geometry sections unless they are contradicted;
             - for a bounded real-game probe on a new or changed component, inspect the last/contact step in the sequence first (`before_state` vs `after_state`) before inferring the effect from whole-sequence start/end state;
             - after every bounded probe, add a short `Probe Verdict` entry in `theory.md` with: `question asked`, `observed effect`, `what this rules out`, `what remains unknown`, and one label from `resolved|partially_resolved|falsified|non_discriminating`;
             - if a bounded probe revealed the direct action-linked effect of a component, close that exact question and replace it with the next narrower unknown instead of keeping the same broad question open;
             - if the latest probe resolved or falsified all live explanations for the active question, write 2-3 fresh plausible explanations for the remaining unexplained evidence before choosing the next step;
-            - prefer the shortest discriminating probe that can change the theory over authoring a long route plan while core movement or interaction mechanics are still uncertain;
-            - if the next probe is already one action, hand off exactly that one action; do not expand it back into an older longer route;
+            - prefer the shortest discriminating probe that can change the theory over authoring a long action sequence while core action or interaction mechanics are still uncertain;
+            - if the next probe is already one action, hand off exactly that one action; do not expand it back into an older longer action sequence;
             - while a solved-level compare pin is active and compare is clean, either prepare final pinned-level certification or name one exact pinned-level blocker; do not write frontier-level plans;
             - while a solved-level compare pin is active and compare is not clean, stay strictly on pinned-level replay/parity work; do not inspect or summarize frontier start-state artifacts even if the terminal pinned state visually resembles the next frontier state;
-            - on level 2+, do not write a frontier real-game solve route in theory mode;
+            - on level 2+, do not write a frontier real-game solve action sequence in theory mode;
             - on level 2+, start from prior levels' proven rules as the inherited baseline unless current evidence contradicts them;
             - on level 2+, run coverage and compare the current visible component set against prior levels before proposing a real-game probe;
             - on level 2+, define any newly introduced visible component or newly changed visible component state in `components.py` before handing off `explore_only`;
             - on level 2+, use `# Evidence Gap` only for one bounded real-game observation that explore_only can answer about a newly introduced visible component or newly changed visible component state, and use `# Model Plan` for the frontier play/model branch that code_model or solve_model should handle next;
             - on level 2+, do not use `# Evidence Gap` to re-prove inherited baseline behavior unless current frontier evidence contradicts it;
-            - on level 2+, do not defer a newly introduced visible component or newly changed visible component state just because a speculative route appears to avoid it; if it could plausibly gate completion and has no action-linked evidence yet, keep it as the blocker and hand off `explore_only` unless existing evidence explicitly rules it out;
+            - on level 2+, do not defer a newly introduced visible component or newly changed visible component state just because a speculative action sequence appears to avoid it; if it could plausibly gate completion and has no action-linked evidence yet, keep it as the blocker and hand off `explore_only` unless existing evidence explicitly rules it out;
             - on later levels, decide whether the next step is `explore_only`, `code_model`, `solve_model`, or `recover`;
             - if switching, include a concrete handoff message with exact files/evidence to inspect or the exact probe to run.
             Read these agent-workspace files as needed instead of relying on inlined contents:
@@ -571,10 +571,10 @@ modes:
         - "On level 2+, treat earlier proven rules in the same game as the inherited baseline unless current evidence contradicts them."
         - "On level 2+, run coverage and compare the current visible component set against prior levels before requesting a real-game probe."
         - "On level 2+, if a newly introduced visible component or newly changed visible component state is the blocker, add or update it in `components.py` before handing off `explore_only`."
-        - "On level 2+, do not treat a newly introduced visible component or newly changed visible component state as safely ignorable just because a speculative route avoids it; if it could plausibly gate completion and has no action-linked evidence yet, resolve it first or explicitly rule it out from existing evidence."
+        - "On level 2+, do not treat a newly introduced visible component or newly changed visible component state as safely ignorable just because a speculative action sequence avoids it; if it could plausibly gate completion and has no action-linked evidence yet, resolve it first or explicitly rule it out from existing evidence."
         - "When evidence is weak or ambiguous, keep at least two plausible alternative theories live in `theory.md` and choose the next probe to discriminate between them."
         - "A changed feature may be a destination, trigger, gate, progress display, or side effect; do not jump from 'it changed' to one assumed function without discriminating evidence."
-        - "After the first survey, prioritize action-responsive features, state-display changes, and unresolved non-wall interactables; do not keep expanding static wall/corridor descriptions once those anchors are named."
+        - "After the first survey, prioritize action-responsive features, state-display changes, and unresolved non-static interactables; do not keep expanding static spatial-structure descriptions once those anchors are named."
         - "Do not revisit a falsified completion hypothesis or trigger path unless new action-linked evidence changes it."
         - "After every bounded probe, record a Probe Verdict in `theory.md` using exactly one of `resolved`, `partially_resolved`, `falsified`, or `non_discriminating`."
         - "If a probe produced a direct action-linked component effect, treat that exact question as answered and replace it with the next narrower unknown."
@@ -583,15 +583,15 @@ modes:
         - "Once component coverage passes and the active question is already clear, do not reread `current_state.hex` just to restate stable geometry or recount coordinates."
         - "After a completed bounded probe, keep the next theory pass delta-only: update only the new evidence, affected hypotheses, and the next smallest discriminating probe."
         - "In theory mode, when the next step is already identifiable from current evidence, choose the smallest decisive next step instead of spending another turn re-deriving the full state."
-        - "Do not hand off a long bounded route from theory while core movement or interaction mechanics remain uncertain; prefer the shortest probe that discriminates between the remaining alternatives."
-        - "If the next discriminating probe is one action, hand off exactly that one action instead of reviving an older longer route."
-        - "When movement semantics and route topology are already evidenced, a level-1 `# Explore Plan` may hand off one bounded multi-action route to test a single completion theory or reach one concrete trigger."
-        - "Do not split a deterministic repeated-move route into separate per-step target classes once the repeated move semantics are already confirmed."
-        - "Do not hand off an unbounded route plan, a mixed probe-plus-then-route script, or multiple target classes; `explore_and_solve` should receive one target class with either a minimal probe sequence or one bounded route plus a stop condition."
-        - "If `current_compare.md` is clean and `theory.md` already contains exactly one concrete `# Explore Plan` target with explicit actions or route and a stop condition, switch immediately to `explore_and_solve` instead of continuing theory analysis."
+        - "Do not hand off a long bounded action sequence from theory while core action or interaction mechanics remain uncertain; prefer the shortest probe that discriminates between the remaining alternatives."
+        - "If the next discriminating probe is one action, hand off exactly that one action instead of reviving an older longer action sequence."
+        - "When action semantics and visible state structure are already evidenced, a level-1 `# Explore Plan` may hand off one bounded multi-action sequence to test a single completion theory or one concrete interaction/state-change hypothesis."
+        - "Do not split a deterministic repeated-action sequence into separate per-step target classes once the repeated action semantics are already confirmed."
+        - "Do not hand off an unbounded action-sequence plan, a mixed probe-plus-then-sequence script, or multiple target classes; `explore_and_solve` should receive one target class with either a minimal probe sequence or one bounded multi-action sequence plus a stop condition."
+        - "If `current_compare.md` is clean and `theory.md` already contains exactly one concrete `# Explore Plan` target with explicit actions or bounded action sequence and a stop condition, switch immediately to `explore_and_solve` instead of continuing theory analysis."
         - "On level 2+, if exactly one bounded real-game observation is still missing about a newly introduced visible component or newly changed visible component state, write it in `# Evidence Gap` and switch_mode to `explore_only`."
         - "On level 2+, if new components or changed semantics require mechanics work, or if there is an exact frontier play/model patch target, switch_mode to `code_model` with explicit patch targets."
-        - "On level 2+, do not hand off a frontier real-game solve route from theory. Once a frontier branch is ready, route to `solve_model` for solution testing."
+        - "On level 2+, do not hand off a frontier real-game solve action sequence from theory. Once a frontier branch is ready, route to `solve_model` for solution testing."
         - "On level 2+, do not request a real-game probe whose purpose is to re-prove inherited baseline behavior without contradictory evidence."
         - "On level 2+, do not route to `solve_model` while a newly introduced visible component or newly changed visible component state still has zero action-linked evidence and could plausibly affect completion, unless current evidence explicitly rules that component out as non-gating."
         - "While a solved-level wrap-up pin is active, do not include wrap-up certification flags on theory -> code_model or theory -> theory handoffs. Those flags are reserved for the final certified release out of wrap-up."
@@ -605,9 +605,9 @@ modes:
         - "Using `arc_repl` or any Python execution other than `python3 inspect_components.py ...` in theory mode."
         - "Using absolute repo/run paths or deriving workspace paths from `${vars.game_id}` in theory mode."
         - "Leaving theory mode without a fresh passing `component_coverage.json` for the active level."
-        - "Staying in theory mode after compare is clean and `theory.md` already contains one concrete `# Explore Plan` target with explicit actions or route plus stop condition."
-        - "Handing off an unbounded route plan, a mixed staged probe-plus-route script, or multiple target classes from theory mode into `explore_and_solve` or `explore_only`."
-        - "Handing off a frontier level-2+ real-game solve route from theory mode."
+        - "Staying in theory mode after compare is clean and `theory.md` already contains one concrete `# Explore Plan` target with explicit actions or bounded action sequence plus stop condition."
+        - "Handing off an unbounded action-sequence plan, a mixed staged probe-plus-sequence script, or multiple target classes from theory mode into `explore_and_solve` or `explore_only`."
+        - "Handing off a frontier level-2+ real-game solve action sequence from theory mode."
         - "Handing off `explore_only` on level 2+ without naming a specific newly introduced visible component or newly changed visible component state."
         - "Using `# Evidence Gap` on level 2+ to re-prove inherited baseline behavior rather than explore the new level-specific delta."
         - "Writing any file other than `theory.md` or `components.py` in theory mode."
@@ -685,7 +685,7 @@ modes:
             Goal: on level 2+, answer one bounded real-game evidence question about a newly introduced visible component or newly changed visible component state that theory already named.
             This mode must not attempt to solve the level.
             Read `theory.md` first and treat the current `# Evidence Gap` section as the full contract for the turn.
-            Run only the bounded probe or route needed to answer that one question, then update `theory.md` and return to theory.
+            Run only the bounded probe or bounded action sequence needed to answer that one question, then update `theory.md` and return to theory.
             Do not inspect `.ai-supervisor/**`, blob files, provider/runtime source, or control-plane internals here.
             You may read raw state artifacts in this mode because the point is to gather one exact piece of frontier evidence.
         - prompt_part: arc_repl_probe_runtime
@@ -697,12 +697,12 @@ modes:
             Explore-only is level-2+ evidence gathering only:
             - read the current `# Evidence Gap` section in `theory.md` first and treat it as the full contract for this turn;
             - confirm that the handoff names one newly introduced visible component or one newly changed visible component state;
-            - perform only the handed-off bounded probe or route needed to answer that one evidence question about that component;
-            - stop as soon as that question is answered, falsified, blocked, or the explicit bounded-route stop condition is reached;
+            - perform only the handed-off bounded probe or bounded action sequence needed to answer that one evidence question about that component;
+            - stop as soon as that question is answered, falsified, blocked, or the explicit bounded-sequence stop condition is reached;
             - write the observed outcome, its implication, and a `Probe Verdict` into `theory.md`;
             - the `Probe Verdict` must state: `question asked`, `observed effect`, `what this rules out`, `what remains unknown`, and exactly one label from `resolved|partially_resolved|falsified|non_discriminating`;
             - then switch_mode back to theory.
-            Do not attempt level completion, broad route search, generic layout mapping, or multi-hypothesis wandering in this mode.
+            Do not attempt level completion, broad action-sequence search, generic visible-structure mapping, or multi-hypothesis wandering in this mode.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
             For actionful probes, inspect the returned `artifacts.after_state_hex` first before reopening on-disk turn artifacts.
             Only write `theory.md` in this mode.
@@ -725,7 +725,7 @@ modes:
         - "Attempting a full level solve or broad solution search in explore_only."
         - "Broadening explore_only to new unhanded-off targets or free-form wandering without first switching back for a new `# Evidence Gap`."
         - "Creating new files or scripts in explore_only."
-        - "Using explore_only to write or refine a frontier solution route instead of answering one bounded evidence question."
+        - "Using explore_only to write or refine a frontier solution action sequence instead of answering one bounded evidence question."
         - "Using explore_only to re-prove inherited baseline behavior instead of probing the handed-off new or changed component."
 
   explore_and_solve:
@@ -803,7 +803,7 @@ modes:
             This mode may inspect raw `.hex` state files and sequence metadata because level-1 completion is not modeled yet.
             Keep the loop tight: probe or try a likely solution, update `theory.md`, and switch back once the specific evidence or completion result is known.
             Do not inspect `.ai-supervisor/**`, blob files, provider/runtime source, or control-plane internals here. If a tool result mentions those paths, ignore them and continue with workspace-visible game evidence only.
-            Prefer the newest supervisor-approved handoff over any older route text still present in `theory.md`. If the supervisor narrowed the probe to one action or a shorter bounded route, execute that newer handoff rather than reviving the stale longer route.
+            Prefer the newest supervisor-approved handoff over any older plan text still present in `theory.md`. If the supervisor narrowed the probe to one action or a shorter bounded sequence, execute that newer handoff rather than reviving the stale longer plan.
         - prompt_part: arc_repl_probe_runtime
     user_message:
       operation: append
@@ -813,15 +813,15 @@ modes:
             Explore-and-solve is level-1 only:
             - if `theory.md` does not yet contain a concrete `# Explore Plan`, treat this as the initial bootstrap turn: take only a very small action sample to identify which visible feature(s) respond directly to actions, the action semantics, and any visible state-display or budget changes, then write that evidence into `theory.md` and switch to theory;
             - otherwise read the current `# Explore Plan` section in `theory.md` first and treat it as the entire contract for this turn;
-            - if the supervisor handoff in this activation message is stricter or narrower than the existing `# Explore Plan` text, follow the supervisor handoff for this turn and treat older route text in `theory.md` as stale until theory rewrites it;
-            - perform the handed-off bounded route or probe sequence until that one target class is actually answered;
-            - stay focused only on that handed-off target class until it is answered, falsified, or its explicit bounded-route stop condition is reached;
+            - if the supervisor handoff in this activation message is stricter or narrower than the existing `# Explore Plan` text, follow the supervisor handoff for this turn and treat older plan text in `theory.md` as stale until theory rewrites it;
+            - perform the handed-off bounded action sequence or probe sequence until that one target class is actually answered;
+            - stay focused only on that handed-off target class until it is answered, falsified, or its explicit bounded-sequence stop condition is reached;
             - write the observed outcome and its likely implication into `theory.md`;
             - then switch_mode promptly.
-            Do not invent a new route plan, feature target, or solution theory in this mode after the bootstrap turn. If the current `# Explore Plan` is exhausted, switch back to theory.
-            If the current `# Explore Plan` is a bounded route, do not bounce back to theory after each expected repeated move; keep going until completion, a novel event, the explicit stop condition, or a blocker.
+            Do not invent a new action-sequence plan, feature target, or solution theory in this mode after the bootstrap turn. If the current `# Explore Plan` is exhausted, switch back to theory.
+            If the current `# Explore Plan` is a bounded action sequence, do not bounce back to theory after each expected repeated action; keep going until completion, a novel event, the explicit stop condition, or a blocker.
             The bootstrap turn should stay tiny: one or two distinct actions maximum, only enough to identify first-order action effects and which visible features respond to them.
-            Once a route is deterministic and directly tests the current handed-off completion theory or reaches the handed-off target, keep executing it until the explicit stop condition instead of turning repeated moves into fresh micro-plans or short route prefixes.
+            Once a bounded action sequence is deterministic and directly tests the current handed-off completion theory or reaches the handed-off target, keep executing it until the explicit stop condition instead of turning repeated actions into fresh micro-plans or short sequence prefixes.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
             For actionful probes, inspect the returned `artifacts.after_state_hex` first before reopening on-disk turn artifacts.
             Do not use read-only `arc_repl` calls as inspection tools.
@@ -837,13 +837,13 @@ modes:
       requirements:
         - "Use explore_and_solve only on level 1 before the first completion."
         - "On the initial level-1 turn, if `theory.md` has no concrete `# Explore Plan`, use explore_and_solve only for a tiny bootstrap action sample and then return to theory."
-        - "Otherwise, in explore_and_solve, read the current `# Explore Plan` section in `theory.md` and carry out the full handed-off bounded route or probe sequence needed to answer that target class."
-        - "If the current activation handoff from the supervisor is narrower or newer than the route text already in `theory.md`, execute the supervisor handoff for this turn and treat the older theory route text as stale."
-        - "Do not exit explore_and_solve until the current `# Explore Plan` target class has been answered or falsified and recorded, or its explicit bounded-route stop condition has been reached."
+        - "Otherwise, in explore_and_solve, read the current `# Explore Plan` section in `theory.md` and carry out the full handed-off bounded action sequence or probe sequence needed to answer that target class."
+        - "If the current activation handoff from the supervisor is narrower or newer than the plan text already in `theory.md`, execute the supervisor handoff for this turn and treat the older theory plan text as stale."
+        - "Do not exit explore_and_solve until the current `# Explore Plan` target class has been answered or falsified and recorded, or its explicit bounded-sequence stop condition has been reached."
         - "Do not switch back to theory from explore_and_solve without new real-game evidence from this explore turn, unless a supervisor or policy blocker prevented action execution."
-        - "Do not turn explore_and_solve into free-form route planning or broad solution search; stay inside the current `# Explore Plan` target class."
-        - "When the current `# Explore Plan` is a bounded route, continue through expected repeated moves without reopening theory unless a novel event, blocker, completion, or explicit stop condition occurs."
-        - "Do not shorten a clear bounded route into a mid-route pause just because several expected repeated moves have already occurred."
+        - "Do not turn explore_and_solve into free-form action-sequence planning or broad solution search; stay inside the current `# Explore Plan` target class."
+        - "When the current `# Explore Plan` is a bounded action sequence, continue through expected repeated actions without reopening theory unless a novel event, blocker, completion, or explicit stop condition occurs."
+        - "Do not shorten a clear bounded action sequence into a mid-sequence pause just because several expected repeated actions have already occurred."
         - "The initial bootstrap turn may take at most two distinct real-game actions before returning to theory."
         - "After each real-game probe or solution attempt, update `theory.md` before switching modes."
         - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
@@ -851,9 +851,9 @@ modes:
         - "Using explore_and_solve on level 2+."
         - "Creating new files or scripts in explore_and_solve."
         - "Broadening explore_and_solve to new unhanded-off targets or free-form map wandering without first switching back for a new `# Explore Plan`."
-        - "Exiting explore_and_solve before the current `# Explore Plan` target class has been answered or falsified, or before its explicit bounded-route stop condition is reached."
+        - "Exiting explore_and_solve before the current `# Explore Plan` target class has been answered or falsified, or before its explicit bounded-sequence stop condition is reached."
         - "Returning to theory from explore_and_solve without new real-game evidence from the current explore turn, unless a supervisor or policy blocker prevented action execution."
-        - "Using explore_and_solve to invent or refine a route plan instead of executing the handed-off target."
+        - "Using explore_and_solve to invent or refine an action-sequence plan instead of executing the handed-off target."
         - "Reading workspace files unrelated to the current level evidence in explore_and_solve."
         - "Using explore_and_solve for broad analysis instead of a concrete probe or solution attempt."
 
@@ -994,11 +994,11 @@ modes:
             - do not assume `env.step(...)` returns identical wrapper types in both contexts; normalize fields before logging;
             - do not assume scratch stderr redirection, shell output redirection, or temp files are available.
             On level 2+, do not treat this mode as a generic readiness review. Either patch the frontier mechanics/play branch needed for model proof, or identify one exact missing real-game observation that theory must resolve next.
-            Do not do open-ended route planning here; write only the smallest deterministic frontier branch that current evidence supports.
+            Do not do open-ended action-sequence planning here; write only the smallest deterministic frontier branch that current evidence supports.
             Use `theory.md`, `components.py`, `component_coverage.*`, `current_compare.*`, and `level_current/sequence_compare/*.md` as the primary evidence surface here.
             If a solved-level compare pin is active, stay scoped to the pinned solved level and ignore frontier-level artifacts until the pin clears.
             Do not read raw `.hex` state files or sequence metadata directly in this mode. Use compare report markdown and sampled diff cells instead.
-            Exception: if compare is already clean for the active frontier level and the remaining blocker is writing a deterministic frontier branch, you may inspect visible current-state topology with the sanctioned helpers `inspect_grid_slice.py` and `inspect_grid_values.py`. Do not hand route-planning back to theory just because you have not yet inspected the visible walls/path layout yourself.
+            Exception: if compare is already clean for the active frontier level and the remaining blocker is writing a deterministic frontier branch, you may inspect visible `level_current/initial_state.hex` or `level_current/current_state.hex` structure with the sanctioned helpers `inspect_grid_slice.py` and `inspect_grid_values.py`. Do not hand branch construction back to theory just because you have not yet inspected the visible state structure yourself.
             Runtime/harness internals are out of scope: do not read or edit any file under `/config/tools/`.
             Treat `current_compare.json`, `current_compare.md`, and `level_current/sequence_compare/*.md` as the authoritative parity artifacts in this mode.
             If they disagree or look broken, report the exact contradiction from workspace artifacts and stay in `code_model`; do not inspect runtime/tooling source.
@@ -1028,7 +1028,7 @@ modes:
                - otherwise switch_mode to `theory` only if there is one exact missing real-game observation that blocks the next branch patch;
             6) if compare is still red and a repair is blocked, stay in `code_model` and produce a precise blocker report with exact file/line evidence and the smallest required fix; do not switch out of `code_model` while parity remains red.
             7) if there is one exact blocker preventing parity repair, ask the supervisor to escalate or resolve that blocker from `code_model`; do not switch back to `theory` until compare is clean.
-            8) if compare is already clean and the only missing piece is a deterministic frontier branch, inspect visible topology yourself with the sanctioned grid helpers and write the branch in `play_lib.py`; do not hand off to theory merely because you have not yet traced the walls/path layout.
+            8) if compare is already clean and the only missing piece is a deterministic frontier branch, inspect visible `level_current/initial_state.hex` or `level_current/current_state.hex` yourself with the sanctioned grid helpers and write the branch in `play_lib.py`; do not hand off to theory merely because you have not yet inspected the visible state structure.
             Read these agent-workspace files as needed; prefer component summaries over raw grid artifacts:
             - `theory.md`
             - `components.py`
@@ -1057,7 +1057,7 @@ modes:
         - "In code_model, never write outside the workspace or under `/tmp`."
         - "In code_model, if a CLI emits JSON, parse stdout only and keep stderr separate."
         - "In code_model, treat `play.py` as a static harness-owned entrypoint and put level-specific solve edits in `play_lib.py`."
-        - "In code_model, when compare is clean and the remaining blocker is deterministic frontier route topology, use the sanctioned grid helpers yourself and keep route planning in code_model instead of handing that topology question back to theory."
+        - "In code_model, when compare is clean and the remaining blocker is deterministic frontier visible-state structure, use the sanctioned grid helpers yourself and keep branch construction in code_model instead of handing that structure question back to theory."
       violations:
         - "Using any `arc_repl` command in code_model."
         - "Reading raw `.hex` state files or sequence metadata directly in code_model."
@@ -1333,7 +1333,7 @@ modes:
     agent_rules:
       operation: append
       requirements:
-        - "Use known solver branches in `play_lib.py` via the static `play.py` entrypoint for replay before inventing new routes."
+        - "Use known solver branches in `play_lib.py` via the static `play.py` entrypoint for replay before inventing new full action sequences."
         - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
       violations:
         - "Doing broad exploratory probing in recover mode."

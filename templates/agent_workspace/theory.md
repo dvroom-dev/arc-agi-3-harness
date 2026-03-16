@@ -58,10 +58,10 @@ Coverage guardrail:
   - When explore should return to theory
 - Notes:
   - Keep this scoped to one target class at a time
-  - On level 1, do not put an unbounded route plan or a mixed probe-plus-then-route agenda here
-  - When movement semantics and route topology are already confirmed, this target class may be one bounded multi-action route
-  - If you hand off a bounded route, include an explicit stop condition: completion, novel event, route exhausted, blocked, or budget boundary
-  - If the target is already clear and the route is known, write the full bounded route to that target, not just the first few moves
+  - On level 1, do not put an unbounded action-sequence plan or a mixed probe-plus-then-sequence agenda here
+  - When action semantics and visible structure are already confirmed, this target class may be one bounded multi-action sequence
+  - If you hand off a bounded multi-action sequence, include an explicit stop condition: completion, novel event, sequence exhausted, blocked execution, or budget boundary
+  - If the target is already clear and the full action sequence is known, write the whole bounded sequence to that target, not just the first few moves
   - Keep the probe sequence minimal in scope, but not artificially short: include all known repeated moves needed to answer the current target class
 
 # Levels
