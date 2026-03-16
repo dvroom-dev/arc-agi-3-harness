@@ -31,5 +31,11 @@ def continue_existing_run(runtime) -> None:
     runtime.refresh_dynamic_super_env()
     runtime.recover_session_file_from_workspace(reason="continue-start", force=True)
     runtime.sync_active_conversation_id_from_session()
+    repaired_mode = runtime.repair_stale_wrapup_mode()
+    if repaired_mode:
+        runtime.log(
+            "[harness] repaired stale supervisor mode before continue: "
+            f"{repaired_mode} -> theory (pin remains active)"
+        )
     runtime.certify_or_block_wrapup_transition()
     log_monitor_sources(runtime)

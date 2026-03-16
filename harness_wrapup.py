@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,16 @@ def _int_or_none(value: Any) -> int | None:
         if value is None:
             return None
         return int(value)
+    except Exception:
+        return None
+
+
+def _parse_iso_timestamp(value: Any) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
     except Exception:
         return None
 
@@ -119,6 +130,39 @@ def load_wrapup_status_impl(runtime) -> dict[str, Any]:
         "compare_level": compare_level,
         "ready_to_certify": bool(active and coverage_passed and compare_ready),
     }
+
+
+def repair_stale_wrapup_mode_impl(runtime) -> str | None:
+    status = load_wrapup_status_impl(runtime)
+    if not bool(status["active"]):
+        return None
+
+    state_path = runtime.run_dir / "super" / "state.json"
+    state_payload = _read_json_if_exists(state_path)
+    if not isinstance(state_payload, dict):
+        return None
+
+    active_mode = str(state_payload.get("activeMode") or "").strip()
+    if not active_mode or active_mode in {"theory", "code_model"}:
+        return None
+
+    transition_payload = state_payload.get("activeTransitionPayload")
+    if isinstance(transition_payload, dict):
+        certified = str(transition_payload.get("wrapup_certified") or "").strip().lower()
+        if certified == "true":
+            return None
+
+    pin_payload = load_analysis_level_pin(runtime.active_agent_dir())
+    pin_updated_at = _parse_iso_timestamp((pin_payload or {}).get("updated_at_utc"))
+    state_updated_at = _parse_iso_timestamp(state_payload.get("updatedAt"))
+    if pin_updated_at is None or state_updated_at is None or state_updated_at >= pin_updated_at:
+        return None
+
+    state_payload["activeMode"] = "theory"
+    state_payload["activeModePayload"] = {}
+    state_payload["activeTransitionPayload"] = {}
+    state_path.write_text(json.dumps(state_payload, indent=2) + "\n")
+    return active_mode
 
 
 def validate_wrapup_surfaces_impl(runtime) -> None:

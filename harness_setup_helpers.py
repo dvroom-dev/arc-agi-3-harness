@@ -336,6 +336,7 @@ def setup_run_config_dir_impl(
         "arc_repl_session_core.py",
         "arc_repl_session_exec.py",
         "arc_repl_session_grid.py",
+        "arc_repl_session_restore.py",
         "arc_repl_session_sequences.py",
     ]
 

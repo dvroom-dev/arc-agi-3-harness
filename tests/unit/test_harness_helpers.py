@@ -243,7 +243,14 @@ def test_setup_run_config_dir_creates_wrappers(tmp_path: Path, monkeypatch: pyte
     (fake_root / "prompts").mkdir(parents=True)
     (fake_root / "arc_model_runtime").mkdir(parents=True)
     (fake_root / "arc_model_runtime" / "__init__.py").write_text("# runtime\n")
-    for f in ("arc_repl.py", "arc_repl_cli.py", "arc_repl_daemon.py", "arc_repl_exec_output.py", "arc_level.py"):
+    for f in (
+        "arc_repl.py",
+        "arc_repl_cli.py",
+        "arc_repl_daemon.py",
+        "arc_repl_exec_output.py",
+        "arc_repl_session_restore.py",
+        "arc_level.py",
+    ):
         (fake_root / "tools" / f).write_text("# tool\n")
     (fake_root / "prompts" / "new_game_auto_explore.py").write_text("print('x')\n")
 
@@ -256,6 +263,7 @@ def test_setup_run_config_dir_creates_wrappers(tmp_path: Path, monkeypatch: pyte
     assert (bin_dir / "arc_level").exists()
     assert (tools_dir / "arc_repl.py").exists()
     assert (tools_dir / "arc_level.py").exists()
+    assert (tools_dir / "arc_repl_session_restore.py").exists()
     assert (tools_dir / "arc_model_runtime" / "__init__.py").exists()
     assert not (tools_dir / "arc_action.py").exists()
     assert (run_config / "prompts" / "new_game_auto_explore.py").exists()

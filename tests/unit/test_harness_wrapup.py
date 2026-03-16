@@ -92,6 +92,8 @@ def test_wrapup_transition_blocks_frontier_modes_until_ready(tmp_path: Path) -> 
         harness_wrapup.certify_or_block_wrapup_transition_impl(runtime)
 
 
+
+
 def test_wrapup_transition_clears_pin_and_restores_frontier_view_when_ready(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "wrapup-certify"
     game_dir = run_dir / "agent" / "game_ls20"
