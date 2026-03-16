@@ -85,6 +85,7 @@ prompt_parts:
         - `python3 model.py print(1+1)`
         - `python3 model.py status grid=env.grid`
         - `python3 model.py compare_sequences ... ; print(...)`
+        Do not use shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null`.
         If you parse JSON from a CLI, parse stdout only. Never pipe `2>&1` into `json.load`, `jq`, or another JSON parser.
         Use `python3 inspect_components.py --coverage --level LEVEL` to verify that exact component geometry covers every seen state for the current level.
         When using provider file-edit tools, read the file first, then edit/write it.
@@ -373,6 +374,10 @@ modes:
         - paginate_tool_response
         - switch_mode
       shell_invocation_policy:
+        disallow:
+          - match_type: regex
+            pattern: '(^|[^<])(?:\d+)?>>?'
+            case_sensitive: true
         allow:
           - match_type: exact_match
             pattern: pwd
@@ -583,6 +588,10 @@ modes:
         - paginate_tool_response
         - switch_mode
       shell_invocation_policy:
+        disallow:
+          - match_type: regex
+            pattern: '(^|[^<])(?:\d+)?>>?'
+            case_sensitive: true
         allow:
           - match_type: exact_match
             pattern: pwd
@@ -694,6 +703,10 @@ modes:
         - paginate_tool_response
         - switch_mode
       shell_invocation_policy:
+        disallow:
+          - match_type: regex
+            pattern: '(^|[^<])(?:\d+)?>>?'
+            case_sensitive: true
         allow:
           - match_type: exact_match
             pattern: pwd
@@ -820,6 +833,10 @@ modes:
         - paginate_tool_response
         - switch_mode
       shell_invocation_policy:
+        disallow:
+          - match_type: regex
+            pattern: '(^|[^<])(?:\d+)?>>?'
+            case_sensitive: true
         allow:
           - match_type: exact_match
             pattern: pwd
@@ -934,7 +951,7 @@ modes:
             Never append ad hoc Python expressions or scratch commands onto `model.py` invocations.
             `play.py` and `play_lib.py` must run under both `arc_repl exec_file ./play.py` and `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`. Keep them compatible with both execution contexts instead of debugging the runtime:
             - do not assume `env.step(...)` returns identical wrapper types in both contexts; normalize fields before logging;
-            - do not assume scratch stderr redirection or temp files are available.
+            - do not assume scratch stderr redirection, shell output redirection, or temp files are available.
             On level 2+, do not treat this mode as a generic readiness review. Either patch the frontier mechanics/play branch needed for model proof, or identify one exact missing real-game observation that theory must resolve next.
             Do not do open-ended route planning here; write only the smallest deterministic frontier branch that current evidence supports.
             Use `theory.md`, `components.py`, `component_coverage.*`, `current_compare.*`, and `level_current/sequence_compare/*.md` as the primary evidence surface here.
@@ -948,6 +965,7 @@ modes:
             Read `current_compare.md` first, then open only the referenced `level_current/sequence_compare/*.md` report if deeper detail is needed.
             Edit the existing workspace files in place. Do not create scratch scripts, temporary debug programs, or alternate copies of model/play files.
             Do not write outside the workspace or under `/tmp`. If a temporary diagnostics file is absolutely necessary, keep it relative to `.` and remove it before leaving the turn.
+            Do not use shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null`.
             Never pipe `2>&1` into a JSON parser. If `model.py compare_sequences` output needs parsing, consume stdout JSON only and keep stderr separate.
         - prompt_part: model_runtime
     user_message:
@@ -1001,6 +1019,7 @@ modes:
         - "Using absolute repo/run paths or deriving workspace paths from `${vars.game_id}` in code_model."
         - "Creating scratch scripts, temp debug files, or alternate copies of model/play files in code_model."
         - "Writing to `/tmp` or any path outside the workspace in code_model."
+        - "Using shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null` in code_model."
         - "Piping `2>&1` into `json.load`, `jq`, or another JSON parser in code_model."
 
   solve_model:
@@ -1023,6 +1042,10 @@ modes:
         - paginate_tool_response
         - switch_mode
       shell_invocation_policy:
+        disallow:
+          - match_type: regex
+            pattern: '(^|[^<])(?:\d+)?>>?'
+            case_sensitive: true
         allow:
           - match_type: exact_match
             pattern: pwd
@@ -1132,6 +1155,7 @@ modes:
             - `python3 model.py status --game-id "${vars.game_id}"`;
             - if the model proof succeeds, run the same `play.py` once in the real game with `arc_repl exec_file --reset-level-first ./play.py`;
             - then switch out promptly with completion or mismatch evidence.
+            Do not use shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null` in this mode.
             Stay in solve_model until the model-side proof plus one real replay succeeds, exposes a model bug, or clearly proves that one exact missing real-game observation must go back to `theory`.
             Read these agent-workspace files as needed:
             - `theory.md`
@@ -1152,6 +1176,7 @@ modes:
         - "Do not enter or remain in solve_model while a solved-level compare pin is active."
         - "Run both model and real `exec_file` replays with `--reset-level-first`; do not put reset logic inside `play.py`."
       violations:
+        - "Using shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null` in solve_model."
         - "Running `play.py` without `--reset-level-first`, or putting reset logic inside `play.py` instead of the runtime command."
         - "Reading raw `.hex` state files or sequence metadata directly in solve_model."
 
@@ -1172,6 +1197,10 @@ modes:
         - paginate_tool_response
         - switch_mode
       shell_invocation_policy:
+        disallow:
+          - match_type: regex
+            pattern: '(^|[^<])(?:\d+)?>>?'
+            case_sensitive: true
         allow:
           - match_type: exact_match
             pattern: pwd
