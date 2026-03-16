@@ -81,6 +81,7 @@ prompt_parts:
         - `python3 model.py status --game-id "${vars.game_id}"`
         - `python3 model.py compare_sequences --game-id "${vars.game_id}"`
         - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`
+        `play.py` is a static harness-owned `exec_file` entrypoint. Put level-specific replay logic in `play_lib.py`, not in `play.py`.
         Bad examples:
         - `python3 model.py print(1+1)`
         - `python3 model.py status grid=env.grid`
@@ -347,7 +348,7 @@ agent:
     requirements:
       - "When new causal evidence is learned from real-game actions, update `theory.md`."
       - "If GAME_OVER occurs, write at least one evidence-backed GAME_OVER theory in `theory.md`."
-      - "When a frontier level is solved, ensure `play.py` contains a deterministic branch for replaying that level."
+      - "When a frontier level is solved, ensure `play_lib.py` contains a deterministic branch for replaying that level through the static `play.py` entrypoint."
     violations:
       - "Using exhaustive exploratory search over unknown state/action space (e.g., broad BFS/DFS) to discover solutions."
 
@@ -837,7 +838,7 @@ modes:
     stop_when:
       - "If a solved-level compare pin is active and compare is clean for the pinned solved level, switch_mode to theory so the supervisor can certify solved-level wrap-up complete and only then release the run to the frontier level."
       - "On level 1 before the first completion, if compare is clean across all explored current-level sequences, switch_mode to theory."
-      - "On level 2+, if compare is clean across all explored current-level sequences and `play.py`/`play_lib.py` now contain a concrete current-level branch to test, switch_mode to solve_model."
+      - "On level 2+, if compare is clean across all explored current-level sequences and `play_lib.py` now contains a concrete current-level branch to test through the static `play.py` entrypoint, switch_mode to solve_model."
       - "On level 2+, if compare is clean but one exact real-game observation is still missing before a frontier branch can be written, switch_mode to theory with that exact evidence gap."
     tools:
       allow_builtin:
@@ -924,7 +925,6 @@ modes:
               - theory.md
               - components.py
               - model_lib.py
-              - play.py
               - play_lib.py
         mock:
           allow_new_files: false
@@ -948,24 +948,24 @@ modes:
               - theory.md
               - components.py
               - model_lib.py
-              - play.py
               - play_lib.py
     system_message:
       operation: append
       parts:
         - literal: |
             Mode: code_model.
-            Goal: patch `model_lib.py`, `play.py`, and related model files until they match explored evidence and a frontier branch is ready for model proof.
+            Goal: patch `model_lib.py`, `play_lib.py`, and related model files until they match explored evidence and a frontier branch is ready for model proof.
             Do not use `arc_repl` in this mode.
             `model.py` is harness-owned runtime glue. Do not edit it or use it as a Python scratchpad.
-            Keep component definitions in `components.py` and reusable mechanics/helpers in `model_lib.py`.
+            `play.py` is a harness-owned static `exec_file` entrypoint. Do not edit it.
+            Keep component definitions in `components.py`, model mechanics/completion logic in `model_lib.py`, and level-specific solve branches/helpers in `play_lib.py`.
             `theory` and `code_model` co-own `components.py`. In `code_model`, you may reshape detector implementations and names whenever that gives the model a cleaner, more faithful component basis, provided the resulting detectors still match observed evidence and pass coverage.
             Valid `model.py` usage here is limited to CLI subcommands such as:
             - `python3 model.py status --game-id "${vars.game_id}"`
             - `python3 model.py compare_sequences --game-id "${vars.game_id}"`
             - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`
             Never append ad hoc Python expressions or scratch commands onto `model.py` invocations.
-            `play.py` and `play_lib.py` must run under both `arc_repl exec_file ./play.py` and `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`. Keep them compatible with both execution contexts instead of debugging the runtime:
+            `play.py` and `play_lib.py` must run under both `arc_repl exec_file ./play.py` and `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`. `play.py` is static; put editable level-specific logic in `play_lib.py` and keep both execution contexts compatible instead of debugging the runtime:
             - do not assume `env.step(...)` returns identical wrapper types in both contexts; normalize fields before logging;
             - do not assume scratch stderr redirection, shell output redirection, or temp files are available.
             On level 2+, do not treat this mode as a generic readiness review. Either patch the frontier mechanics/play branch needed for model proof, or identify one exact missing real-game observation that theory must resolve next.
@@ -992,12 +992,12 @@ modes:
             Required loop:
             1) inspect `theory.md`, `components.py`, `current_compare.md`, and the referenced `level_current/sequence_compare/*.md` report;
             2) if needed, run `python3 inspect_sequence.py --current-mismatch` to print the first mismatching compare report target and step;
-            3) name the exact mismatching sampled diff cells, match them to `theory.md`, and patch the missing mechanics, completion transitions, frontier branch logic, or component detectors/names needed in `model_lib.py`/`play.py`/`play_lib.py`/`components.py`;
+            3) name the exact mismatching sampled diff cells, match them to `theory.md`, and patch the missing mechanics, completion transitions, frontier branch logic, or component detectors/names needed in `model_lib.py`/`play_lib.py`/`components.py`;
             4) run `python3 model.py compare_sequences` with no explicit level so the runtime can honor any solved-level compare pin and keep work focused on the pinned solved level while wrap-up is active;
             5) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes;
             5) if compare is clean across all explored current-level sequences:
                - if a solved-level compare pin is active, switch_mode to `theory` so the supervisor can certify solved-level wrap-up complete;
-               - switch_mode to `solve_model` if a concrete current-level branch now exists in `play.py`/`play_lib.py`;
+               - switch_mode to `solve_model` if a concrete current-level branch now exists in `play_lib.py` and is ready to run through `play.py`;
                - otherwise switch_mode to `theory` only if there is one exact missing real-game observation that blocks the next branch patch;
             6) if compare is still red and a repair is blocked, stay in `code_model` and produce a precise blocker report with exact file/line evidence and the smallest required fix; do not switch out of `code_model` while parity remains red.
             7) if there is one exact blocker preventing parity repair, ask the supervisor to escalate or resolve that blocker from `code_model`; do not switch back to `theory` until compare is clean.
@@ -1026,12 +1026,14 @@ modes:
         - "In code_model, edit existing workspace files in place; do not create scratch scripts, debug-only helper files, or alternate file copies."
         - "In code_model, never write outside the workspace or under `/tmp`."
         - "In code_model, if a CLI emits JSON, parse stdout only and keep stderr separate."
+        - "In code_model, treat `play.py` as a static harness-owned entrypoint and put level-specific solve edits in `play_lib.py`."
       violations:
         - "Using any `arc_repl` command in code_model."
         - "Reading raw `.hex` state files or sequence metadata directly in code_model."
         - "Reading or editing runtime/harness internals (any path containing `/config/tools/`) in code_model."
         - "Investigating harness/runtime/provider source or control-plane internals instead of reporting a workspace-artifact blocker in code_model."
         - "Editing `model.py` in code_model."
+        - "Editing `play.py` in code_model."
         - "Using absolute repo/run paths or deriving workspace paths from `${vars.game_id}` in code_model."
         - "Creating scratch scripts, temp debug files, or alternate copies of model/play files in code_model."
         - "Writing to `/tmp` or any path outside the workspace in code_model."
@@ -1153,10 +1155,11 @@ modes:
       parts:
         - literal: |
             Mode: solve_model.
-            Goal: on level 2+, use the current `play.py` frontier branch to solve the level from start in the model, then replay that same plan once in the real game.
+            Goal: on level 2+, use the current `play_lib.py` frontier branch through the static `play.py` entrypoint to solve the level from start in the model, then replay that same plan once in the real game.
             Never enter this mode while a solved-level compare pin is active; solved-level wrap-up must be supervisor-certified complete first.
             Do not read raw `.hex` state files or sequence metadata directly in this mode.
             Solve_model is the only level-2+ solution-attempt mode. If a model-side branch is not ready yet, leave that work to code_model or theory.
+            `play.py` is a harness-owned static dispatcher. Do not edit it in this mode; put level-specific solve branches in `play_lib.py`.
         - prompt_part: model_runtime
         - prompt_part: arc_repl_playback_runtime
     user_message:
@@ -1191,9 +1194,11 @@ modes:
         - "When model proof succeeds, mark the level SOLVED in `theory.md` with concise evidence."
         - "Do not enter or remain in solve_model while a solved-level compare pin is active."
         - "Run both model and real `exec_file` replays with `--reset-level-first`; do not put reset logic inside `play.py`."
+        - "Treat `play.py` as a static harness-owned dispatcher and keep level-specific solve logic in `play_lib.py`."
       violations:
         - "Using shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null` in solve_model."
         - "Running `play.py` without `--reset-level-first`, or putting reset logic inside `play.py` instead of the runtime command."
+        - "Editing `play.py` in solve_model."
         - "Reading raw `.hex` state files or sequence metadata directly in solve_model."
 
   recover:
@@ -1277,7 +1282,7 @@ modes:
       parts:
         - literal: |
             Active game: `${vars.game_id}`.
-            Replay known solutions from `play.py` using deterministic runs until the frontier unsolved level is reached.
+            Replay known solutions from the static `play.py` entrypoint backed by `play_lib.py` until the frontier unsolved level is reached.
             After frontier is reached, switch_mode to `theory`.
             Read these agent-workspace files as needed:
             - `theory.md`
@@ -1288,7 +1293,7 @@ modes:
     agent_rules:
       operation: append
       requirements:
-        - "Use known solver branches in `play.py` for replay before inventing new routes."
+        - "Use known solver branches in `play_lib.py` via the static `play.py` entrypoint for replay before inventing new routes."
         - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
       violations:
         - "Doing broad exploratory probing in recover mode."

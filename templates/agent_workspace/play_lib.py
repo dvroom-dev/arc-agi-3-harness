@@ -9,11 +9,24 @@ not model internals.
 def plan_level_actions(state: dict, *, level: int | None = None) -> list[int]:
     """Return a candidate action list for the current level.
 
-    Replace this placeholder with reusable, evidence-backed logic.
-    Prefer generic helpers that can reason over multiple detected copies of a
-    feature rather than assuming a single distinguished instance.
+    `play.py` is a static harness-owned dispatcher. Put level-specific replay
+    branches in `plan_level_<N>` functions here, and let this dispatcher pick
+    the active one.
+
+    Prefer reusable, evidence-backed helpers that can reason over multiple
+    detected copies of a feature rather than assuming a single distinguished
+    instance.
     """
-    _ = state, level
+    lvl = level or int(state.get("current_level", 1))
+    planner = globals().get(f"plan_level_{lvl}")
+    if callable(planner):
+        return list(planner(state))
+    return []
+
+
+def plan_level_1(state: dict) -> list[int]:
+    """Level 1 replay branch placeholder."""
+    _ = state
     return []
 
 
