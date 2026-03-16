@@ -929,6 +929,9 @@ modes:
             - `python3 model.py compare_sequences --game-id "${vars.game_id}"`
             - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`
             Never append ad hoc Python expressions or scratch commands onto `model.py` invocations.
+            `play.py` and `play_lib.py` must run under both `arc_repl exec_file ./play.py` and `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`. Keep them compatible with both execution contexts instead of debugging the runtime:
+            - do not assume `env.step(...)` returns identical wrapper types in both contexts; normalize fields before logging;
+            - do not assume scratch stderr redirection or temp files are available.
             On level 2+, do not treat this mode as a generic readiness review. Either patch the frontier mechanics/play branch needed for model proof, or identify one exact missing real-game observation that theory must resolve next.
             Do not do open-ended route planning here; write only the smallest deterministic frontier branch that current evidence supports.
             Use `theory.md`, `components.py`, `component_coverage.*`, `current_compare.*`, and `level_current/sequence_compare/*.md` as the primary evidence surface here.

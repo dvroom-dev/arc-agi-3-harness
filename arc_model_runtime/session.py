@@ -201,7 +201,23 @@ class ModelSession:
         source = path.read_text()
         if not source.strip():
             return
-        exec(compile(source, str(path), "exec"), self.globals)
+        old_file = self.globals.get("__file__", None)
+        had_file = "__file__" in self.globals
+        old_name = self.globals.get("__name__", None)
+        had_name = "__name__" in self.globals
+        self.globals["__file__"] = str(path.resolve())
+        self.globals["__name__"] = "__main__"
+        try:
+            exec(compile(source, str(path), "exec"), self.globals)
+        finally:
+            if had_file:
+                self.globals["__file__"] = old_file
+            else:
+                self.globals.pop("__file__", None)
+            if had_name:
+                self.globals["__name__"] = old_name
+            else:
+                self.globals.pop("__name__", None)
 
     def _persist_env_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {}
@@ -352,7 +368,7 @@ class ModelSession:
         self._persist_to_disk("set_level")
         return {"ok": True, "action": "set_level", **self.get_status_state()}
 
-    def do_exec(self, script: str) -> tuple[dict, int]:
+    def do_exec(self, script: str, *, script_path: Path | None = None) -> tuple[dict, int]:
         if not str(script or "").strip():
             return self._error("exec", "invalid_exec_args", "exec requires script content"), 1
         synced_error = self._sync_to_frontier_level(action_name="exec")
@@ -360,9 +376,22 @@ class ModelSession:
             return synced_error, 1
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
+        old_file = self.globals.get("__file__", None)
+        had_file = "__file__" in self.globals
+        old_name = self.globals.get("__name__", None)
+        had_name = "__name__" in self.globals
+        compile_label = "<model_exec>"
+        if script_path is not None:
+            try:
+                resolved = str(Path(script_path).expanduser().resolve())
+            except Exception:
+                resolved = str(script_path)
+            self.globals["__file__"] = resolved
+            compile_label = resolved
+        self.globals["__name__"] = "__main__"
         try:
             with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                exec(compile(script, "<model_exec>", "exec"), self.globals)
+                exec(compile(script, compile_label, "exec"), self.globals)
             self._persist_to_disk("exec")
             if stdout_capture.getvalue():
                 print(stdout_capture.getvalue(), end="")
@@ -371,6 +400,15 @@ class ModelSession:
             return {"ok": True, "action": "exec", **self.get_status_state()}, 0
         except Exception as exc:
             return self._error("exec", "exec_error", str(exc), traceback.format_exc()), 1
+        finally:
+            if had_file:
+                self.globals["__file__"] = old_file
+            else:
+                self.globals.pop("__file__", None)
+            if had_name:
+                self.globals["__name__"] = old_name
+            else:
+                self.globals.pop("__name__", None)
 
     def do_exec_file(self, script_path: Path) -> tuple[dict, int]:
         if not script_path.exists():
@@ -378,7 +416,7 @@ class ModelSession:
         script = script_path.read_text()
         if not script.strip():
             return self._error("exec_file", "invalid_exec_file_args", "script file is empty"), 1
-        payload, code = self.do_exec(script)
+        payload, code = self.do_exec(script, script_path=script_path)
         payload["action"] = "exec_file"
         return payload, code
 

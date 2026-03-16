@@ -13,7 +13,10 @@ import json
 from pathlib import Path
 
 
-GAME_DIR = Path(__file__).resolve().parent
+try:
+    GAME_DIR = Path(__file__).resolve().parent
+except NameError:
+    GAME_DIR = Path.cwd()
 
 
 def _is_model(state: dict) -> bool:
@@ -24,13 +27,19 @@ def _is_model(state: dict) -> bool:
 def _run_actions(actions):
     for i, action in enumerate(actions, 1):
         frame = env.step(action)
+        state_value = frame.state
+        if hasattr(state_value, "value"):
+            state_value = state_value.value
+        levels_completed = frame.levels_completed
+        if hasattr(levels_completed, "value"):
+            levels_completed = levels_completed.value
         print(
             json.dumps(
                 {
                     "step": i,
                     "action": int(action),
-                    "state": frame.state.value,
-                    "current_level": int(frame.levels_completed) + 1,
+                    "state": str(state_value),
+                    "current_level": int(levels_completed) + 1,
                 }
             )
         )
