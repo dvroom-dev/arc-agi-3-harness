@@ -89,6 +89,8 @@ class ActionHistoryStore:
             or state_after_name == "WIN"
             or int(state_before["levels_completed"]) < int(state_after["levels_completed"])
         )
+        game_over_before = state_before_name == "GAME_OVER"
+        game_over_after = state_after_name == "GAME_OVER"
         levels_changed = int(state_before["levels_completed"]) != int(
             state_after["levels_completed"]
         )
@@ -119,6 +121,8 @@ class ActionHistoryStore:
             "levels_completed_after": int(state_after["levels_completed"]),
             "level_complete_before": bool(level_complete_before),
             "level_complete_after": bool(level_complete_after),
+            "game_over_before": bool(game_over_before),
+            "game_over_after": bool(game_over_after),
             "state_before": deepcopy(state_before),
             "state_after": deepcopy(state_after),
             "diff": final_diff_payload,

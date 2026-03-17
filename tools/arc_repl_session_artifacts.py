@@ -251,6 +251,8 @@ def _write_level_turn_files(
             )
             or str(session.frame.state.value) == "WIN"
         ),
+        "game_over_before": str(state_before_action or "") == "GAME_OVER",
+        "game_over_after": str(session.frame.state.value) == "GAME_OVER",
         "state_before_action": str(state_before_action or ""),
         "state_after_action": str(session.frame.state.value),
         "steps_executed": len(step_snapshots),
@@ -282,6 +284,8 @@ def _write_level_turn_files(
                     "levels_completed_after": int(meta["levels_completed_after"]),
                     "level_complete_before": bool(meta["level_complete_before"]),
                     "level_complete_after": bool(meta["level_complete_after"]),
+                    "game_over_before": bool(meta["game_over_before"]),
+                    "game_over_after": bool(meta["game_over_after"]),
                     "state_before_action": str(meta["state_before_action"]),
                     "state_after_action": str(meta["state_after_action"]),
                 },

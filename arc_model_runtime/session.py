@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 from arcengine import GameAction
 
+from .hooks import ModelHooks
 from .utils import (
     action_from_name,
     diff_payload,
@@ -34,30 +35,6 @@ MODEL_SESSION_SCHEMA_VERSION = 1
 MODEL_STATUS_SCHEMA_VERSION = 1
 
 
-class ModelHooks:
-    """Agent-owned mechanics hooks.
-
-    model.py should implement these methods and delegate to this runtime.
-    """
-
-    def init_level(self, env: "ModelEnv", level: int) -> None:  # pragma: no cover - hook default
-        _ = env, level
-
-    def apply_action(  # pragma: no cover - hook default
-        self,
-        env: "ModelEnv",
-        action: GameAction,
-        *,
-        data: dict | None = None,
-        reasoning: str | None = None,
-    ) -> None:
-        _ = env, action, data, reasoning
-
-    def is_level_complete(self, env: "ModelEnv") -> bool:  # pragma: no cover - hook default
-        _ = env
-        return False
-
-
 class ModelEnv:
     def __init__(self, game_id: str, game_dir: Path, hooks: ModelHooks):
         self.game_id = str(game_id or "game")
@@ -78,6 +55,9 @@ class ModelEnv:
         self.level_complete = False
         self.last_step_level_complete = False
         self.last_completed_level: int | None = None
+        self.game_over = False
+        self.last_step_game_over = False
+        self.last_game_over_level: int | None = None
         self.allow_missing_next_level_on_completion = False
         self.grid = np.zeros((0, 0), dtype=np.int8)
         self.refresh_level_initial_states()
@@ -107,15 +87,26 @@ class ModelEnv:
         self.state = "NOT_FINISHED"
         self.full_reset = False
         self.level_complete = False
+        self.game_over = False
         if clear_last_step_level_complete:
             self.last_step_level_complete = False
+            self.last_step_game_over = False
         self.grid = self.initial_grid_for_level(level)
         self.hooks.init_level(self, int(level))
 
     def step(self, action: GameAction, data=None, reasoning=None):
         self.level_complete = False
         self.last_step_level_complete = False
+        self.game_over = False
+        self.last_step_game_over = False
         self.hooks.apply_action(self, action, data=data, reasoning=reasoning)
+        game_over = bool(self.hooks.is_game_over(self) or str(self.state) == "GAME_OVER")
+        self.game_over = game_over
+        self.last_step_game_over = game_over
+        if game_over:
+            self.last_game_over_level = int(self.current_level)
+            self.state = "GAME_OVER"
+            return self
         completed = bool(self.hooks.is_level_complete(self))
         self.level_complete = completed
         self.last_step_level_complete = completed
@@ -303,20 +294,33 @@ class ModelSession:
         self._persist_to_disk("sync_frontier")
         return None
 
-    def get_state(self) -> dict:
-        self.env.refresh_level_initial_states()
+    def _state_transition_flags(self) -> dict[str, Any]:
         current_level_complete = bool(self.env.level_complete or str(self.env.state) == "WIN")
         last_step_level_complete = bool(self.env.last_step_level_complete or str(self.env.state) == "WIN")
+        current_level_game_over = bool(self.env.game_over or str(self.env.state) == "GAME_OVER")
+        last_step_game_over = bool(self.env.last_step_game_over or str(self.env.state) == "GAME_OVER")
         return {
-            "state": str(self.env.state),
-            "current_level": int(self.env.current_level),
-            "levels_completed": int(self.env.levels_completed),
             "level_complete": last_step_level_complete,
             "current_level_complete": current_level_complete,
             "last_step_level_complete": last_step_level_complete,
             "last_completed_level": (
                 int(self.env.last_completed_level) if self.env.last_completed_level is not None else None
             ),
+            "game_over": last_step_game_over,
+            "current_level_game_over": current_level_game_over,
+            "last_step_game_over": last_step_game_over,
+            "last_game_over_level": (
+                int(self.env.last_game_over_level) if self.env.last_game_over_level is not None else None
+            ),
+        }
+
+    def get_state(self) -> dict:
+        self.env.refresh_level_initial_states()
+        return {
+            "state": str(self.env.state),
+            "current_level": int(self.env.current_level),
+            "levels_completed": int(self.env.levels_completed),
+            **self._state_transition_flags(),
             "win_levels": int(self.env.win_levels),
             "guid": getattr(self.env, "guid", None),
             "available_actions": [int(a) for a in getattr(self.env, "available_actions", [])],
@@ -341,18 +345,11 @@ class ModelSession:
         available_model_levels = [int(v) for v in self.env.available_model_levels]
         if visible_level is not None:
             available_model_levels = [lvl for lvl in available_model_levels if int(lvl) <= int(visible_level)]
-        current_level_complete = bool(self.env.level_complete or str(self.env.state) == "WIN")
-        last_step_level_complete = bool(self.env.last_step_level_complete or str(self.env.state) == "WIN")
         return {
             "state": str(self.env.state),
             "current_level": current_level,
             "levels_completed": levels_completed,
-            "level_complete": last_step_level_complete,
-            "current_level_complete": current_level_complete,
-            "last_step_level_complete": last_step_level_complete,
-            "last_completed_level": (
-                int(self.env.last_completed_level) if self.env.last_completed_level is not None else None
-            ),
+            **self._state_transition_flags(),
             "win_levels": int(self.env.win_levels),
             "guid": getattr(self.env, "guid", None),
             "available_model_levels": available_model_levels,

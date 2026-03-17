@@ -86,7 +86,7 @@ prompt_parts:
         - `python3 inspect_grid_values.py --file level_current/current_state.hex --value C --value 9`
         - `python3 model.py exec_file --game-id "${vars.game_id}" ./play.py`
         `play.py` is a static harness-owned `exec_file` entrypoint. Put level-specific replay logic in `play_lib.py`, not in `play.py`.
-        `model.py` is also a static harness-owned level dispatcher: it cumulatively applies `init_level_<N>` and `apply_level_<N>` hooks from level 1 through the current level, and it inherits completion from the latest defined `is_level_complete_level_<N>` hook at or below the current level.
+        `model.py` is also a static harness-owned level dispatcher: it cumulatively applies `init_level_<N>` and `apply_level_<N>` hooks from level 1 through the current level, and it inherits completion/game-over detection from the latest defined `is_level_complete_level_<N>` / `is_game_over_level_<N>` hook at or below the current level.
         This means later levels inherit earlier mechanics by default. Add or override the current level's hook; do not duplicate earlier mechanics into every later level.
         Bad examples:
         - `python3 model.py print(1+1)`
@@ -991,7 +991,7 @@ modes:
             The static `model.py` dispatcher already makes later levels inherit earlier mechanics by default:
             - `init_level_1..init_level_N` run in ascending order
             - `apply_level_1..apply_level_N` run in ascending order
-            - completion inherits from the latest defined `is_level_complete_level_<N>` hook unless you override it at a later level
+            - completion/game-over detection inherit from the latest defined `is_level_complete_level_<N>` / `is_game_over_level_<N>` hook unless you override them at a later level
             So in `code_model`, treat later-level edits as diffs: add or override the current level's hook(s) instead of copying earlier mechanics into new levels.
             `theory` and `code_model` co-own `components.py`. In `code_model`, you may reshape detector implementations and names whenever that gives the model a cleaner, more faithful component basis, provided the resulting detectors still match observed evidence and pass coverage.
             Valid `model.py` usage here is limited to CLI subcommands such as:

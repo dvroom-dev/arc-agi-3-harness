@@ -112,10 +112,15 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
                 game_levels_after > game_levels_before or game_state_after == "WIN",
             )
         )
+        game_game_over_before = bool(action.get("game_over_before", game_state_before == "GAME_OVER"))
+        game_game_over_after = bool(action.get("game_over_after", game_state_after == "GAME_OVER"))
         model_state_before = str(compare_env.state)
         model_levels_before = int(compare_env.levels_completed)
         model_level_complete_before = bool(
             getattr(compare_env, "last_step_level_complete", False) or str(compare_env.state) == "WIN"
+        )
+        model_game_over_before = bool(
+            getattr(compare_env, "last_step_game_over", False) or str(compare_env.state) == "GAME_OVER"
         )
         if model_before.shape != game_before.shape or not np.array_equal(model_before, game_before):
             report["matched"] = False
@@ -137,10 +142,16 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
         )
         model_after = np.array(compare_env.grid, dtype=np.int8, copy=True)
         model_level_complete_after = bool(compare_env.hooks.is_level_complete(compare_env))
+        model_game_over_after = bool(compare_env.hooks.is_game_over(compare_env) or str(compare_env.state) == "GAME_OVER")
         compare_env.level_complete = model_level_complete_after
         compare_env.last_step_level_complete = model_level_complete_after
+        compare_env.game_over = model_game_over_after
+        compare_env.last_step_game_over = model_game_over_after
         model_levels_after = int(compare_env.levels_completed) + (1 if model_level_complete_after else 0)
-        model_state_after = "WIN" if model_levels_after >= int(compare_env.win_levels) else str(compare_env.state)
+        if model_game_over_after:
+            model_state_after = "GAME_OVER"
+        else:
+            model_state_after = "WIN" if model_levels_after >= int(compare_env.win_levels) else str(compare_env.state)
         completion_boundary = (
             game_level_complete_after
             or model_level_complete_after
@@ -154,6 +165,8 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
             or model_levels_before != game_levels_before
             or model_level_complete_before != game_level_complete_before
             or model_level_complete_after != game_level_complete_after
+            or model_game_over_before != game_game_over_before
+            or model_game_over_after != game_game_over_after
             or (
                 not completion_boundary
                 and model_levels_after != game_levels_after
@@ -170,6 +183,8 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
                     "levels_completed_after": game_levels_after,
                     "level_complete_before": game_level_complete_before,
                     "level_complete_after": game_level_complete_after,
+                    "game_over_before": game_game_over_before,
+                    "game_over_after": game_game_over_after,
                 },
                 "model": {
                     "state_before": model_state_before,
@@ -178,6 +193,8 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
                     "levels_completed_after": model_levels_after,
                     "level_complete_before": model_level_complete_before,
                     "level_complete_after": model_level_complete_after,
+                    "game_over_before": model_game_over_before,
+                    "game_over_after": model_game_over_after,
                 },
             }
             if not completion_boundary:

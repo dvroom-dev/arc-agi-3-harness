@@ -331,3 +331,4 @@ def test_compare_sequences_accepts_visible_pinned_completion_boundary(tmp_path: 
     report = payload["reports"][0]
     assert report["matched"] is True
     assert report["comparison_stop_reason"] == "post_level_complete_state_diff_excluded"
+

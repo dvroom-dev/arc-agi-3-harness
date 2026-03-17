@@ -9,6 +9,7 @@ Inheritance contract:
 - `apply_level_1`, `apply_level_2`, ... run in ascending order on every action.
 - Later level hooks may override earlier effects by mutating state afterward.
 - Completion inherits by default from the latest defined `is_level_complete_level_<N>` hook at or below the current level.
+- Game-over detection inherits by default from the latest defined `is_game_over_level_<N>` hook at or below the current level.
 
 Write new levels as diffs:
 - add or override the current level's hook(s)
@@ -154,6 +155,17 @@ def is_level_complete(env) -> bool:
 
     Prefer `is_level_complete_level_<N>` hooks for inherited level-specific
     completion rules. This fallback is only used when no per-level completion
+    hook is defined.
+    """
+    _ = env
+    return False
+
+
+def is_game_over(env) -> bool:
+    """Fallback game-over check.
+
+    Prefer `is_game_over_level_<N>` hooks for inherited level-specific
+    game-over rules. This fallback is only used when no per-level game-over
     hook is defined.
     """
     _ = env

@@ -14,6 +14,7 @@ Later levels inherit prior mechanics by default:
 - `init_level_1..init_level_N` run in ascending order
 - `apply_level_1..apply_level_N` run in ascending order
 - completion inherits from the latest defined `is_level_complete_level_<N>`
+- game-over detection inherits from the latest defined `is_game_over_level_<N>`
 So later-level edits in `model_lib.py` should usually add or override only the
 current level's hook(s).
 
@@ -118,6 +119,13 @@ class Hooks(ModelHooks):
         if callable(checker):
             return bool(checker(env))
         checker = getattr(model_lib, "is_level_complete", None)
+        return bool(checker(env)) if callable(checker) else False
+
+    def is_game_over(self, env) -> bool:
+        checker = _latest_level_hook(("is_game_over_level", "is_game_over"), int(env.current_level))
+        if callable(checker):
+            return bool(checker(env))
+        checker = getattr(model_lib, "is_game_over", None)
         return bool(checker(env)) if callable(checker) else False
 
 

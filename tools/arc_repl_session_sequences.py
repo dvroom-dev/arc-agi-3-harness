@@ -89,6 +89,7 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
         level_after = int(rec.get("level_after", level_before) or level_before)
         levels_before = int(rec.get("levels_completed_before", 0) or 0)
         levels_after = int(rec.get("levels_completed_after", levels_before) or levels_before)
+        state_before_name = str(rec.get("state_before", {}).get("state", "")).strip().upper()
         state_after = str(rec.get("state_after", {}).get("state", "")).strip().upper()
         state_before_rows = list(rec.get("state_before", {}).get("grid_hex_rows", []) or [])
         state_after_rows = list(rec.get("state_after", {}).get("grid_hex_rows", []) or [])
@@ -131,6 +132,8 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
                 "level_complete_after": bool(
                     rec.get("level_complete_after", levels_after > levels_before or state_after == "WIN")
                 ),
+                "game_over_before": bool(rec.get("game_over_before", state_before_name == "GAME_OVER")),
+                "game_over_after": bool(rec.get("game_over_after", state_after == "GAME_OVER")),
                 "before_rows": state_before_rows,
                 "after_rows": state_after_rows,
                 "files": {},
