@@ -65,6 +65,16 @@ def test_component_coverage_helper_reports_uncovered_pixels(tmp_path: Path) -> N
     assert (game_dir / "component_coverage.md").exists()
 
 
+def test_component_template_exposes_component_query_helpers(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    source = (game_dir / "components.py").read_text()
+    assert "def find_components(" in source
+    assert "def find_one_component(" in source
+    assert "def component_cells(" in source
+    assert "def component_bbox(" in source
+
+
 def test_component_coverage_does_not_advance_analysis_level_pin_phase(tmp_path: Path) -> None:
     game_dir = tmp_path / "game_ls20"
     _copy_model_templates(game_dir)

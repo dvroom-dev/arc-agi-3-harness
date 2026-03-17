@@ -988,6 +988,8 @@ modes:
             `model.py` is harness-owned runtime glue. Do not edit it or use it as a Python scratchpad.
             `play.py` is a harness-owned static `exec_file` entrypoint. Do not edit it.
             Keep component definitions in `components.py`, model mechanics/completion logic in `model_lib.py`, and level-specific solve branches/helpers in `play_lib.py`.
+            `components.py` is the authoritative source for visible-component detection. If a needed visible entity already has a detector there, use that detector or the query helpers exposed by `components.py`; do not duplicate raw pixel-value scans, cluster finders, or parallel locator logic for that same entity inside `model_lib.py` or `play_lib.py`.
+            If a detector in `components.py` is wrong or insufficient for model/play work, fix `components.py` instead of adding a second detector path in `model_lib.py` or `play_lib.py`.
             The static `model.py` dispatcher already makes later levels inherit earlier mechanics by default:
             - `init_level_1..init_level_N` run in ascending order
             - `apply_level_1..apply_level_N` run in ascending order
@@ -1032,6 +1034,7 @@ modes:
                for sanctioned grid inspection, use `python3 inspect_grid_slice.py ...` or `python3 inspect_grid_values.py ...` instead of `awk` or `python3 -c`;
             3) reduce compare to one exact active repair target: sequence id, action index, and mismatch class; if the mismatch is a transition mismatch, name the exact field(s) (`state_*`, `levels_completed_*`, `level_complete_*`, `game_over_*`) before continuing;
             4) name the exact mismatching sampled diff cells or transition fields, match them to `theory.md`, and patch the missing mechanics, completion transitions, frontier branch logic, or component detectors/names needed in `model_lib.py`/`play_lib.py`/`components.py`;
+               if a needed visible entity already has a detector in `components.py`, use that detector from `model_lib.py`/`play_lib.py` instead of re-deriving it from raw value scans there;
                on later levels, patch by adding or overriding the current level's hook(s) rather than re-copying earlier mechanics;
             5) run `python3 model.py compare_sequences` with no explicit level so the runtime can honor any solved-level compare pin and keep work focused on the pinned solved level while wrap-up is active;
             6) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes;
@@ -1068,6 +1071,8 @@ modes:
         - "If the active mismatch is a late transition mismatch, patch or disprove that one transition before revisiting broader level mechanics or branch design."
         - "On level 2+, do not leave code_model with only 'completion unknown'. Either patch the frontier branch/play logic, or hand back exactly one missing real-game observation."
         - "In code_model, read `current_compare.md` first and only then open the single referenced per-sequence compare report if deeper detail is needed."
+        - "In code_model, if a visible entity already has a detector in `components.py`, use that detector from `model_lib.py` or `play_lib.py` instead of duplicating raw locator logic there."
+        - "In code_model, if a `components.py` detector is wrong, patch `components.py`; do not add a second independent detector path for the same visible entity in `model_lib.py` or `play_lib.py`."
         - "In code_model, edit existing workspace files in place; do not create scratch scripts, debug-only helper files, or alternate file copies."
         - "In code_model, never write outside the workspace or under `/tmp`."
         - "In code_model, if a CLI emits JSON, parse stdout only and keep stderr separate."
@@ -1079,6 +1084,7 @@ modes:
         - "Reading raw `.hex` state files or sequence metadata directly in code_model."
         - "Reading or editing runtime/harness internals (any path containing `/config/tools/`) in code_model."
         - "Investigating harness/runtime/provider source or control-plane internals instead of reporting a workspace-artifact blocker in code_model."
+        - "Duplicating visible-component detector logic in `model_lib.py` or `play_lib.py` for an entity that already has a detector in `components.py`."
         - "Editing `model.py` in code_model."
         - "Editing `play.py` in code_model."
         - "Using absolute repo/run paths or deriving workspace paths from `${vars.game_id}` in code_model."

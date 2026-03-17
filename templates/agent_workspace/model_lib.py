@@ -2,6 +2,10 @@
 
 Goal: keep model.py thin. Put reusable mechanics and completion logic here.
 Component definitions live in `components.py`.
+If a visible entity already has a detector in `components.py`, use that detector
+or the query helpers there (`find_components`, `find_one_component`,
+`component_cells`, `component_bbox`) instead of re-deriving the entity from raw
+pixel-value scans in this file.
 
 Inheritance contract:
 - `model.py` is harness-owned and applies level hooks cumulatively.
@@ -25,7 +29,16 @@ from dataclasses import dataclass
 import numpy as np
 
 import artifact_helpers
-from components import COMPONENT_REGISTRY, ComponentBox, iter_components, make_component
+from components import (
+    COMPONENT_REGISTRY,
+    ComponentBox,
+    component_bbox,
+    component_cells,
+    find_components,
+    find_one_component,
+    iter_components,
+    make_component,
+)
 
 @dataclass(frozen=True)
 class LevelConfig:

@@ -3,6 +3,10 @@
 This file is auto-loaded into arc_repl/model.py exec globals as `play_lib` helpers.
 Keep this focused on game-play abstractions (feature detection, planning, action builders),
 not model internals.
+
+If a visible entity already has a detector in `components.py`, planner helpers
+should use that detector or the query helpers there rather than duplicating raw
+pixel-value searches in this file.
 """
 
 

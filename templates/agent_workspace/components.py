@@ -71,6 +71,44 @@ def iter_components(grid: np.ndarray) -> list[ComponentShape]:
     return components
 
 
+def find_components(kind: str, grid: np.ndarray) -> list[ComponentShape]:
+    """Return detected components for one registered kind."""
+    detector = COMPONENT_REGISTRY.get(str(kind))
+    if not callable(detector):
+        return []
+    items: list[ComponentShape] = []
+    for component in detector(grid):
+        if component.kind != kind:
+            component = ComponentShape(kind=kind, cells=component.cells, attrs=dict(component.attrs))
+        items.append(component)
+    return items
+
+
+def find_one_component(kind: str, grid: np.ndarray) -> ComponentShape | None:
+    """Return exactly one detected component when available, else None.
+
+    Model/play code should use this helper instead of re-deriving visible
+    component positions from raw pixel-value scans when a detector already
+    exists in `components.py`.
+    """
+    items = find_components(kind, grid)
+    if not items:
+        return None
+    return items[0]
+
+
+def component_cells(kind: str, grid: np.ndarray) -> tuple[GridCell, ...]:
+    """Convenience helper for exact cells of one detected component."""
+    component = find_one_component(kind, grid)
+    return component.cells if component is not None else ()
+
+
+def component_bbox(kind: str, grid: np.ndarray) -> tuple[int, int, int, int] | None:
+    """Convenience helper for bbox of one detected component."""
+    component = find_one_component(kind, grid)
+    return component.bbox if component is not None else None
+
+
 def make_component(
     kind: str,
     *,
