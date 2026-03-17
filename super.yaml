@@ -484,10 +484,13 @@ modes:
             A probe that reveals a direct action-linked effect of a component counts as answered for that exact question. Do not keep the old question open in the same form after that.
             When a probe resolves or falsifies the active question, replace it with the next narrower unknown instead of continuing to treat the whole component as globally mysterious.
             If the latest probe resolved or falsified all currently active explanations, brainstorm 2-3 fresh explanations for the remaining unexplained evidence before choosing the next step.
+            Maintain a `# Completion Invariants` section in `theory.md` for stable cross-level rules that earlier action-linked evidence established about how completion becomes possible. Keep those invariants live by default on later levels unless current evidence directly contradicts them.
+            Do not replace a stable cross-level invariant with a new local story from one level unless the new level has direct contradictory evidence.
             Do not rewrite the full element inventory, action semantics, or stable geometry after a completed probe unless new evidence directly contradicts those notes.
             After the first survey, prioritize the smallest set of action-responsive features, state-display changes, and unresolved non-static interactables. Static spatial structure is supporting evidence, not the primary deliverable.
             A changed feature is not automatically the next thing to revisit. It may be a destination, a trigger, a gate, a progress display, or a side effect. Keep multiple live explanations when the evidence does not discriminate.
             When evidence is still weak, explicitly record at least two plausible alternative theories before committing the next probe, and make that probe discriminate between them.
+            If a later level shows another instance or changed state of a previously known interaction family, do not rule that instance out from static reasoning alone. Keep it live until action-linked evidence on that specific instance rules it out or confirms its role.
             Once a completion theory or trigger path is falsified, do not revisit it without new action-linked evidence.
             If you can already name the smallest next step, switch modes promptly instead of continuing broad analysis.
         - prompt_part: artifact_read_path
@@ -501,6 +504,7 @@ modes:
             Active game: `${vars.game_id}`.
             Deliverables for this mode:
             - update `theory.md` with components, action effects, completion candidates, and unknowns;
+            - maintain a `# Completion Invariants` section in `theory.md` for stable cross-level completion-enabling rules that earlier levels established, and only mark one overturned when the current level has direct contradictory evidence;
             - keep `components.py` detectors broad enough that every visible pixel in every seen state for the active level lies inside at least one exact component geometry, but only through detectors that inspect visual content rather than static coordinates alone;
             - keep `components.py` names neutral; if you think a component has a specific function, record that only as a role hypothesis in `theory.md` with evidence;
             - in theory mode, you may add new detectors freely, but only rename or rewrite detector code that theory previously introduced;
@@ -543,6 +547,7 @@ modes:
             - on level 2+, use `# Evidence Gap` only for one bounded real-game observation that explore_only can answer about a newly introduced visible component or newly changed visible component state, and use `# Model Plan` for the frontier play/model branch that code_model or solve_model should handle next;
             - on level 2+, do not use `# Evidence Gap` to re-prove inherited baseline behavior unless current frontier evidence contradicts it;
             - on level 2+, do not defer a newly introduced visible component or newly changed visible component state just because a speculative action sequence appears to avoid it; if it could plausibly gate completion and has no action-linked evidence yet, keep it as the blocker and hand off `explore_only` unless existing evidence explicitly rules it out;
+            - on level 2+, do not rule out a changed inherited instance of a previously known interaction family from static reasoning alone; require action-linked evidence on that specific instance before declaring it non-gating;
             - on later levels, decide whether the next step is `explore_only`, `code_model`, `solve_model`, or `recover`;
             - if switching, include a concrete handoff message with exact files/evidence to inspect or the exact probe to run.
             Read these agent-workspace files as needed instead of relying on inlined contents:
@@ -574,8 +579,10 @@ modes:
         - "Use speculation in theory mode when evidence is incomplete, but label it clearly as a hypothesis. On level 1, keep the active `# Explore Plan` scoped to one target class; on level 2+, keep `# Evidence Gap` or `# Model Plan` scoped to one exact next step."
         - "On level 2+, treat earlier proven rules in the same game as the inherited baseline unless current evidence contradicts them."
         - "On level 2+, run coverage and compare the current visible component set against prior levels before requesting a real-game probe."
+        - "In theory mode, maintain `# Completion Invariants` for stable cross-level completion-enabling rules, and keep them live unless direct contradictory evidence overturns them."
         - "On level 2+, if a newly introduced visible component or newly changed visible component state is the blocker, add or update it in `components.py` before handing off `explore_only`."
         - "On level 2+, do not treat a newly introduced visible component or newly changed visible component state as safely ignorable just because a speculative action sequence avoids it; if it could plausibly gate completion and has no action-linked evidence yet, resolve it first or explicitly rule it out from existing evidence."
+        - "On level 2+, do not rule out a changed inherited instance of a previously known interaction family without action-linked evidence on that instance."
         - "When evidence is weak or ambiguous, keep at least two plausible alternative theories live in `theory.md` and choose the next probe to discriminate between them."
         - "A changed feature may be a destination, trigger, gate, progress display, or side effect; do not jump from 'it changed' to one assumed function without discriminating evidence."
         - "After the first survey, prioritize action-responsive features, state-display changes, and unresolved non-static interactables; do not keep expanding static spatial-structure descriptions once those anchors are named."

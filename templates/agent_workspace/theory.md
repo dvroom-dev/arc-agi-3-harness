@@ -41,6 +41,15 @@ Coverage guardrail:
   - Missing evidence:
   - Alternative explanations still live:
 
+# Completion Invariants
+- Invariant:
+  - Scope: which earlier levels support this as a stable rule or recurring pattern
+  - Confidence: High|Medium|Low
+  - Evidence:
+  - Contradictions checked:
+  - Still assumed on the current level: yes|no|uncertain
+  - If not assumed, what exact evidence overturned it:
+
 # Unknowns
 - Unknown:
   - Why it matters:
