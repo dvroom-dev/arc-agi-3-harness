@@ -1011,6 +1011,8 @@ modes:
             Runtime/harness internals are out of scope: do not read or edit any file under `/config/tools/`.
             Treat `current_compare.json`, `current_compare.md`, and `level_current/sequence_compare/*.md` as the authoritative parity artifacts in this mode.
             If they disagree or look broken, report the exact contradiction from workspace artifacts and stay in `code_model`; do not inspect runtime/tooling source.
+            When compare is red, reduce the problem to one exact named mismatch before doing broader reasoning. Name the specific sequence, action index, and mismatch class (for example `after_state_mismatch`, `state_transition_mismatch`, `level_complete_after`, `game_over_after`, or one exact component delta) and treat that as the only active repair target until it is either fixed or replaced by a newer exact mismatch from fresh compare output.
+            If compare has already narrowed to one late transition mismatch, do not restart broad branch analysis, re-derive the whole level theory, or speculate about unrelated earlier mechanics. Patch or disprove that one transition first.
             If compare is red and you have one exact blocker, stay in `code_model` and report that blocker precisely; do not bounce back to `theory` while parity remains red.
             Use relative workspace paths only. Do not synthesize absolute run/repo paths or derive `game_<id>` directories from `${vars.game_id}`.
             Read `current_compare.md` first, then open only the referenced `level_current/sequence_compare/*.md` report if deeper detail is needed.
@@ -1028,17 +1030,18 @@ modes:
             1) inspect `theory.md`, `components.py`, `current_compare.md`, and the referenced `level_current/sequence_compare/*.md` report;
             2) if needed, run `python3 inspect_sequence.py --current-mismatch` to print the first mismatching compare report target and step;
                for sanctioned grid inspection, use `python3 inspect_grid_slice.py ...` or `python3 inspect_grid_values.py ...` instead of `awk` or `python3 -c`;
-            3) name the exact mismatching sampled diff cells, match them to `theory.md`, and patch the missing mechanics, completion transitions, frontier branch logic, or component detectors/names needed in `model_lib.py`/`play_lib.py`/`components.py`;
+            3) reduce compare to one exact active repair target: sequence id, action index, and mismatch class; if the mismatch is a transition mismatch, name the exact field(s) (`state_*`, `levels_completed_*`, `level_complete_*`, `game_over_*`) before continuing;
+            4) name the exact mismatching sampled diff cells or transition fields, match them to `theory.md`, and patch the missing mechanics, completion transitions, frontier branch logic, or component detectors/names needed in `model_lib.py`/`play_lib.py`/`components.py`;
                on later levels, patch by adding or overriding the current level's hook(s) rather than re-copying earlier mechanics;
-            4) run `python3 model.py compare_sequences` with no explicit level so the runtime can honor any solved-level compare pin and keep work focused on the pinned solved level while wrap-up is active;
-            5) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes;
-            5) if compare is clean across all explored current-level sequences:
+            5) run `python3 model.py compare_sequences` with no explicit level so the runtime can honor any solved-level compare pin and keep work focused on the pinned solved level while wrap-up is active;
+            6) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes;
+            7) if compare is clean across all explored current-level sequences:
                - if a solved-level compare pin is active, switch_mode to `theory` so the supervisor can certify solved-level wrap-up complete;
                - switch_mode to `solve_model` if a concrete current-level branch now exists in `play_lib.py` and is ready to run through `play.py`;
                - otherwise switch_mode to `theory` only if there is one exact missing real-game observation that blocks the next branch patch;
-            6) if compare is still red and a repair is blocked, stay in `code_model` and produce a precise blocker report with exact file/line evidence and the smallest required fix; do not switch out of `code_model` while parity remains red.
-            7) if there is one exact blocker preventing parity repair, ask the supervisor to escalate or resolve that blocker from `code_model`; do not switch back to `theory` until compare is clean.
-            8) if compare is already clean and the only missing piece is a deterministic frontier branch, inspect visible `level_current/initial_state.hex` or `level_current/current_state.hex` yourself with the sanctioned grid helpers and write the branch in `play_lib.py`; do not hand off to theory merely because you have not yet inspected the visible state structure.
+            8) if compare is still red and a repair is blocked, stay in `code_model` and produce a precise blocker report with exact file/line evidence and the smallest required fix; do not switch out of `code_model` while parity remains red.
+            9) if there is one exact blocker preventing parity repair, ask the supervisor to escalate or resolve that blocker from `code_model`; do not switch back to `theory` until compare is clean.
+            10) if compare is already clean and the only missing piece is a deterministic frontier branch, inspect visible `level_current/initial_state.hex` or `level_current/current_state.hex` yourself with the sanctioned grid helpers and write the branch in `play_lib.py`; do not hand off to theory merely because you have not yet inspected the visible state structure.
             Read these agent-workspace files as needed; prefer component summaries over raw grid artifacts:
             - `theory.md`
             - `components.py`
@@ -1061,6 +1064,8 @@ modes:
         - "While a solved-level wrap-up pin is active, do not include wrap-up certification flags on code_model -> theory or code_model -> code_model handoffs. Those flags are reserved for the final certified release out of wrap-up."
         - "End each code_model turn with model-file edits, theory updates, or a `switch_mode` CLI call."
         - "If compare is red and a single exact blocker remains, stay in code_model and report the blocker instead of switching back to theory."
+        - "When compare is red, reduce it to one exact active repair target: sequence id, action index, and mismatch class before broader reasoning."
+        - "If the active mismatch is a late transition mismatch, patch or disprove that one transition before revisiting broader level mechanics or branch design."
         - "On level 2+, do not leave code_model with only 'completion unknown'. Either patch the frontier branch/play logic, or hand back exactly one missing real-game observation."
         - "In code_model, read `current_compare.md` first and only then open the single referenced per-sequence compare report if deeper detail is needed."
         - "In code_model, edit existing workspace files in place; do not create scratch scripts, debug-only helper files, or alternate file copies."
