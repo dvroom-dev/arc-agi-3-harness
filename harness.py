@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -154,9 +155,7 @@ def _remove_stream_sync_path(path: Path) -> None:
     if path.is_symlink() or path.is_file():
         path.unlink(missing_ok=True)
         return
-    for child in path.iterdir():
-        _remove_stream_sync_path(child)
-    path.rmdir()
+    shutil.rmtree(path, ignore_errors=True)
 
 
 def _discover_stream_workspace_conversation_id(run_dir: Path) -> str | None:
@@ -263,6 +262,10 @@ def _run_super_streaming(
             raise RuntimeError(f"super exited with code {proc.returncode}")
 
         if output_path is not None:
+            artifact_stop_event.set()
+            if artifact_thread is not None:
+                artifact_thread.join(timeout=1)
+                artifact_thread = None
             existing_text = ""
             try:
                 if output_path.exists():
