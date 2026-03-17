@@ -235,6 +235,18 @@ def _write_text_atomic(path: Path, text: str) -> None:
     tmp.replace(path)
 
 
+def _export_compare_reports(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    exported: list[dict[str, Any]] = []
+    for report in reports:
+        if not isinstance(report, dict):
+            continue
+        item = dict(report)
+        if "end_reason" in item:
+            item["sequence_end_reason"] = item.pop("end_reason")
+        exported.append(item)
+    return exported
+
+
 def _persist_current_compare(session, payload: dict[str, Any]) -> None:
     pin = load_analysis_level_pin(session.game_dir)
     pinned_level: int | None = None
@@ -247,6 +259,9 @@ def _persist_current_compare(session, payload: dict[str, Any]) -> None:
     reports = payload.get("reports")
     if not isinstance(reports, list):
         reports = []
+    exported_reports = _export_compare_reports(reports)
+    exported_compare_payload = dict(payload)
+    exported_compare_payload["reports"] = exported_reports
     summary_payload = {
         "level": int(payload.get("level", session.env.current_level)),
         "command": ["python3", "model.py", "compare_sequences"],
@@ -255,11 +270,24 @@ def _persist_current_compare(session, payload: dict[str, Any]) -> None:
         "all_match": bool(payload.get("all_match")),
         "compared_sequences": int(payload.get("compared_sequences", 0) or 0),
         "diverged_sequences": int(payload.get("diverged_sequences", 0) or 0),
-        "reports": reports,
+        "reports": exported_reports,
         "mismatched_reports": [
-            report for report in reports if isinstance(report, dict) and report.get("matched") is False
+            report for report in exported_reports if isinstance(report, dict) and report.get("matched") is False
         ],
-        "compare_payload": payload,
+        "current_runtime_state": {
+            "state": str(payload.get("state", "")),
+            "current_level": int(payload.get("current_level", session.env.current_level)),
+            "levels_completed": int(payload.get("levels_completed", 0) or 0),
+            "level_complete": bool(payload.get("level_complete", False)),
+            "current_level_complete": bool(payload.get("current_level_complete", False)),
+            "last_step_level_complete": bool(payload.get("last_step_level_complete", False)),
+            "last_completed_level": payload.get("last_completed_level"),
+            "game_over": bool(payload.get("game_over", False)),
+            "current_level_game_over": bool(payload.get("current_level_game_over", False)),
+            "last_step_game_over": bool(payload.get("last_step_game_over", False)),
+            "last_game_over_level": payload.get("last_game_over_level"),
+        },
+        "compare_payload": exported_compare_payload,
         "stdout": "",
         "stderr": "",
     }

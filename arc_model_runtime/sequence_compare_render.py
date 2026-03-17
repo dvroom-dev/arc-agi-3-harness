@@ -40,8 +40,10 @@ def report_md(report: dict[str, Any]) -> str:
         lines.append(f"- start_action_index: {int(report['start_action_index'])}")
     if report.get("end_action_index") is not None:
         lines.append(f"- end_action_index: {int(report['end_action_index'])}")
-    if report.get("end_reason"):
-        lines.append(f"- end_reason: {str(report['end_reason'])}")
+    if report.get("sequence_end_reason"):
+        lines.append(f"- sequence_end_reason: {str(report['sequence_end_reason'])}")
+    elif report.get("end_reason"):
+        lines.append(f"- sequence_end_reason: {str(report['end_reason'])}")
     if report.get("comparison_stop_reason"):
         lines.append(f"- comparison_stop_reason: {str(report['comparison_stop_reason'])}")
     if report.get("divergence_step") is not None:
@@ -84,6 +86,19 @@ def current_compare_markdown(summary_payload: dict[str, Any]) -> str:
         f"- compared_sequences: {int(summary_payload['compared_sequences'])}",
         f"- diverged_sequences: {int(summary_payload['diverged_sequences'])}",
     ]
+    current_runtime_state = summary_payload.get("current_runtime_state")
+    if isinstance(current_runtime_state, dict):
+        lines.extend(
+            [
+                "",
+                "## Current Runtime State",
+                f"- state: {str(current_runtime_state.get('state', ''))}",
+                f"- current_level: {current_runtime_state.get('current_level')}",
+                f"- levels_completed: {current_runtime_state.get('levels_completed')}",
+                f"- level_complete: {str(bool(current_runtime_state.get('level_complete', False))).lower()}",
+                f"- game_over: {str(bool(current_runtime_state.get('game_over', False))).lower()}",
+            ]
+        )
     reports = summary_payload.get("reports")
     if isinstance(reports, list) and reports:
         lines.extend(["", "## Reports"])
@@ -103,8 +118,10 @@ def current_compare_markdown(summary_payload: dict[str, Any]) -> str:
                 lines.append(f"- start_action_index: {int(report['start_action_index'])}")
             if report.get("end_action_index") is not None:
                 lines.append(f"- end_action_index: {int(report['end_action_index'])}")
-            if report.get("end_reason"):
-                lines.append(f"- end_reason: {str(report['end_reason'])}")
+            if report.get("sequence_end_reason"):
+                lines.append(f"- sequence_end_reason: {str(report['sequence_end_reason'])}")
+            elif report.get("end_reason"):
+                lines.append(f"- sequence_end_reason: {str(report['end_reason'])}")
             if report.get("comparison_stop_reason"):
                 lines.append(f"- comparison_stop_reason: {str(report['comparison_stop_reason'])}")
             if report.get("divergence_step") is not None:
@@ -127,8 +144,9 @@ def current_compare_markdown(summary_payload: dict[str, Any]) -> str:
             "- Game Step Diff: game before -> game after for the mismatching step.",
             "- Model Step Diff: model before -> model after for the same step.",
             "- State Diff (Game After vs Model After): game after -> model after.",
-            "- Sequence indices are absolute across the level; they do not restart after reset_level. Use `end_reason` and `start_action_index` to see where a reset-bounded sequence begins.",
+            "- Sequence indices are absolute across the level; they do not restart after reset_level. Use `sequence_end_reason` and `start_action_index` to see where a reset-bounded sequence begins.",
             "- When `comparison_stop_reason` is `post_level_complete_state_diff_excluded`, compare checked the completion transition but excluded the next-level grid materialization.",
+            "- `sequence_end_reason` describes how that historical compared sequence ended. It is not the current live model/game state.",
         ]
     )
     lines.extend(

@@ -85,6 +85,19 @@ def _render_current_compare_markdown(summary_payload: dict) -> str:
         f"- compared_sequences: {int(summary_payload['compared_sequences'])}",
         f"- diverged_sequences: {int(summary_payload['diverged_sequences'])}",
     ]
+    current_runtime_state = summary_payload.get("current_runtime_state")
+    if isinstance(current_runtime_state, dict):
+        report_lines.extend(
+            [
+                "",
+                "## Current Runtime State",
+                f"- state: {str(current_runtime_state.get('state', ''))}",
+                f"- current_level: {current_runtime_state.get('current_level')}",
+                f"- levels_completed: {current_runtime_state.get('levels_completed')}",
+                f"- level_complete: {str(bool(current_runtime_state.get('level_complete', False))).lower()}",
+                f"- game_over: {str(bool(current_runtime_state.get('game_over', False))).lower()}",
+            ]
+        )
 
     def _append_diff_summary(title: str, payload: object) -> None:
         if not isinstance(payload, dict):
@@ -119,6 +132,10 @@ def _render_current_compare_markdown(summary_payload: dict) -> str:
             sequence_id = str(report.get("sequence_id", "unknown"))
             report_lines.append(f"- sequence_id: {sequence_id}")
             report_lines.append(f"  matched: {str(bool(report.get('matched'))).lower()}")
+            if report.get("sequence_end_reason"):
+                report_lines.append(f"  sequence_end_reason: {report.get('sequence_end_reason')}")
+            elif report.get("end_reason"):
+                report_lines.append(f"  sequence_end_reason: {report.get('end_reason')}")
             if report.get("report_file"):
                 report_lines.append(f"  report_file: {report.get('report_file')}")
             if not bool(report.get("matched", False)):
@@ -143,9 +160,22 @@ def _render_current_compare_markdown(summary_payload: dict) -> str:
             "## Full Payload",
             "- current_compare.json contains the full machine-readable compare payload.",
             "- Per-sequence markdown reports are listed above under `report_file`.",
+            "- `sequence_end_reason` is historical sequence metadata, not the current live state.",
         ]
     )
     return "\n".join(report_lines).rstrip() + "\n"
+
+
+def _export_compare_reports(reports: list[dict]) -> list[dict]:
+    exported: list[dict] = []
+    for report in reports:
+        if not isinstance(report, dict):
+            continue
+        item = dict(report)
+        if "end_reason" in item:
+            item["sequence_end_reason"] = item.pop("end_reason")
+        exported.append(item)
+    return exported
 
 
 def _write_current_compare_artifacts(
@@ -230,6 +260,12 @@ def run_exec_compare_intercept(cwd: Path, result: object) -> str | None:
     except Exception:
         diverged_sequences = 0
     mismatch = (proc.returncode != 0) or (not compare_ok) or (not all_match) or (compared_sequences <= 0)
+    exported_reports = _export_compare_reports(
+        list(parsed_payload.get("reports", []) or []) if isinstance(parsed_payload, dict) else []
+    )
+    exported_compare_payload = dict(parsed_payload) if isinstance(parsed_payload, dict) else None
+    if isinstance(exported_compare_payload, dict):
+        exported_compare_payload["reports"] = exported_reports
     summary_payload = {
         "level": int(target_level),
         "command": cmd,
@@ -238,15 +274,22 @@ def run_exec_compare_intercept(cwd: Path, result: object) -> str | None:
         "all_match": bool(all_match),
         "compared_sequences": int(compared_sequences),
         "diverged_sequences": int(diverged_sequences),
-        "reports": list(parsed_payload.get("reports", []) or []) if isinstance(parsed_payload, dict) else [],
+        "reports": exported_reports,
         "mismatched_reports": [
             report
-            for report in list(parsed_payload.get("reports", []) or [])
+            for report in exported_reports
             if isinstance(report, dict) and report.get("matched") is False
         ]
-        if isinstance(parsed_payload, dict)
+        if exported_reports
         else [],
-        "compare_payload": parsed_payload,
+        "current_runtime_state": {
+            "state": str(result.get("state", "")),
+            "current_level": result.get("current_level"),
+            "levels_completed": result.get("levels_completed"),
+            "level_complete": bool(result.get("level_complete", False)),
+            "game_over": bool(result.get("game_over", False)),
+        },
+        "compare_payload": exported_compare_payload,
         "stdout": compare_stdout,
         "stderr": compare_stderr,
     }
