@@ -1220,6 +1220,9 @@ modes:
             Do not read raw `.hex` state files or sequence metadata directly in this mode.
             Solve_model is the only level-2+ solution-attempt mode. If a model-side branch is not ready yet, leave that work to code_model or theory.
             `play.py` is a harness-owned static dispatcher. Do not edit it in this mode; put level-specific solve branches in `play_lib.py`.
+            Treat compare report metadata and current runtime state as different things. A compare report's `end_reason` describes how that historical compared sequence ended; it does NOT by itself mean the current model session or current real game is in that state now.
+            For live state in this mode, trust only the current `python3 model.py status` payload, the current `python3 model.py exec_file ...` payload, `arc_repl` replay output, and current supervisor/ARC state artifacts.
+            If `python3 model.py exec_file ...` errors while trying to initialize the next unseen level, count that as proof of completion only when the current status fields still explicitly show the just-finished level completed (for example `last_step_level_complete=true` or `last_completed_level=<LEVEL>`). If those fields do not show completion, the proof failed.
         - prompt_part: model_runtime
         - prompt_part: arc_repl_playback_runtime
     user_message:
@@ -1232,6 +1235,7 @@ modes:
             - `python3 model.py set_level --game-id "${vars.game_id}" "$LEVEL"`;
             - `python3 model.py exec_file --reset-level-first --game-id "${vars.game_id}" ./play.py`;
             - `python3 model.py status --game-id "${vars.game_id}"`;
+            - interpret success/failure from the current exec/status fields, not from `current_compare.json.reports[*].end_reason`;
             - if the model proof succeeds, run the same `play.py` once in the real game with `arc_repl exec_file --reset-level-first ./play.py`;
             - then switch out promptly with completion or mismatch evidence.
             Do not use shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null` in this mode.
@@ -1257,6 +1261,8 @@ modes:
         - "Do not enter or remain in solve_model while a solved-level compare pin is active."
         - "Run both model and real `exec_file` replays with `--reset-level-first`; do not put reset logic inside `play.py`."
         - "Treat `play.py` as a static harness-owned dispatcher and keep level-specific solve logic in `play_lib.py`."
+        - "Do not treat compare `reports[*].end_reason` as the current game/model state in solve_model; it is historical sequence metadata only."
+        - "If model exec errors while trying to initialize a missing next level, only count that as completion if current status fields explicitly record completion of the just-finished level."
       violations:
         - "Using shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null` in solve_model."
         - "Running `play.py` without `--reset-level-first`, or putting reset logic inside `play.py` instead of the runtime command."
