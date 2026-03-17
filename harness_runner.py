@@ -171,17 +171,13 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
 
                 if state and state.get("state") == "GAME_OVER":
                     game_over_resets += 1
+                    frontier_before_game_over = int(state.get("current_level", 0) or 0)
+                    completed_before_game_over = int(state.get("levels_completed", 0) or 0)
                     runtime.log(
                         f"[harness] GAME_OVER detected "
                         f"(auto-reset {game_over_resets}/{args.max_game_over_resets})"
                     )
-                    if args.max_game_over_resets <= 0:
-                        runtime.log(
-                            "[harness] GAME_OVER auto-reset disabled "
-                            "(--max-game-over-resets=0); stopping for agent/supervisor recovery."
-                        )
-                        return False
-                    if game_over_resets > args.max_game_over_resets:
+                    if args.max_game_over_resets > 0 and game_over_resets > args.max_game_over_resets:
                         runtime.log("[harness] max GAME_OVER auto-resets reached, stopping")
                         return False
                     reset_result, reset_stdout, reset_rc = runtime.run_arc_repl(
@@ -203,6 +199,14 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
                             reason="game_over_auto_reset",
                         )
                         runtime.clear_idle_keepalive_marker()
+                    runtime.force_recover_mode(
+                        reason="game_over_same_run_restart",
+                        frontier_level=frontier_before_game_over,
+                        levels_completed=completed_before_game_over,
+                    )
+                    runtime.log(
+                        "[harness] GAME_OVER recovery: same run reset in place and next supervisor cycle forced to recover mode."
+                    )
                     state = runtime.load_state()
 
                 if runtime.idle_keepalive_enabled():

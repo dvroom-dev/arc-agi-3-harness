@@ -132,7 +132,7 @@ def test_harness_main_handles_game_over_then_reset(tmp_path: Path, monkeypatch) 
     assert all(k == "t-loop__ls20" for k in seen_repl_session_keys)
 
 
-def test_harness_main_stops_on_game_over_when_auto_reset_disabled(
+def test_harness_main_recovers_from_game_over_when_auto_reset_limit_is_zero(
     tmp_path: Path, monkeypatch
 ) -> None:
     root = tmp_path / "proj"
@@ -185,7 +185,13 @@ def test_harness_main_stops_on_game_over_when_auto_reset_disabled(
                 state_counter["status_calls"] += 1
                 state_payload = {
                     "game_id": "ls20-cb3b57cc",
-                    "state": "NOT_FINISHED" if state_counter["status_calls"] == 1 else "GAME_OVER",
+                    "state": (
+                        "WIN"
+                        if reset_calls["count"] > 0
+                        else "GAME_OVER"
+                        if state_counter["status_calls"] == 1
+                        else "WIN"
+                    ),
                     "current_level": 1,
                     "levels_completed": 0,
                     "win_levels": 7,
@@ -198,7 +204,19 @@ def test_harness_main_stops_on_game_over_when_auto_reset_disabled(
                 payload = {"ok": True, **state_payload, "available_actions": [0, 1, 2, 3, 4]}
             elif action == "reset_level":
                 reset_calls["count"] += 1
-                payload = {"ok": True}
+                state_payload = {
+                    "game_id": "ls20-cb3b57cc",
+                    "state": "NOT_FINISHED",
+                    "current_level": 1,
+                    "levels_completed": 0,
+                    "win_levels": 7,
+                    "last_action": "reset_level",
+                    "action_input_name": "RESET",
+                    "full_reset": False,
+                    "telemetry": {"steps_since_last_reset": 0},
+                }
+                (arc_state_dir / "state.json").write_text(json.dumps(state_payload))
+                payload = {"ok": True, **state_payload, "available_actions": [0, 1, 2, 3, 4]}
             elif action == "shutdown":
                 payload = {"ok": True, "action": "shutdown"}
             else:
@@ -227,4 +245,7 @@ def test_harness_main_stops_on_game_over_when_auto_reset_disabled(
     monkeypatch.setattr(harness.subprocess, "run", fake_subprocess_run)
 
     harness.main()
-    assert reset_calls["count"] == 0
+    assert reset_calls["count"] == 1
+    super_state = json.loads((root / "runs" / "t-loop-no-reset" / "super" / "state.json").read_text())
+    assert super_state["activeMode"] == "recover"
+    assert super_state["activeModePayload"]["recover"] == "game_over_restart"

@@ -47,7 +47,11 @@ from harness_runtime_validation import validate_run_super_config_text
 from harness_runtime_telemetry import append_phase_timing_impl, phase_scope_impl
 from harness_scorecard_helpers import build_scorecard_client, export_scorecard_cookies_json, resolve_arc_api_key
 from tools.proc_utils import read_proc_start_ticks
-from harness_wrapup import certify_or_block_wrapup_transition_impl, repair_stale_wrapup_mode_impl
+from harness_wrapup import (
+    certify_or_block_wrapup_transition_impl,
+    force_recover_mode_impl,
+    repair_stale_wrapup_mode_impl,
+)
 
 
 class HarnessRuntime:
@@ -356,6 +360,20 @@ class HarnessRuntime:
 
     def repair_stale_wrapup_mode(self) -> str | None:
         return repair_stale_wrapup_mode_impl(self)
+
+    def force_recover_mode(
+        self,
+        *,
+        reason: str,
+        frontier_level: int | None,
+        levels_completed: int | None,
+    ) -> None:
+        return force_recover_mode_impl(
+            self,
+            reason=reason,
+            frontier_level=frontier_level,
+            levels_completed=levels_completed,
+        )
 
     def session_frontmatter(self) -> dict[str, str]: return session_frontmatter_impl(self)
 

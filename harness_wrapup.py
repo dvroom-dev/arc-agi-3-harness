@@ -165,6 +165,33 @@ def repair_stale_wrapup_mode_impl(runtime) -> str | None:
     return active_mode
 
 
+def force_recover_mode_impl(
+    runtime,
+    *,
+    reason: str,
+    frontier_level: int | None,
+    levels_completed: int | None,
+) -> None:
+    state_path = runtime.run_dir / "super" / "state.json"
+    state_payload = _read_json_if_exists(state_path) or {}
+    if not isinstance(state_payload, dict):
+        state_payload = {}
+
+    state_payload["activeMode"] = "recover"
+    state_payload["activeModePayload"] = {
+        "recover": "game_over_restart",
+        "user_message": (
+            "GAME_OVER occurred and the same run was reset in place. "
+            "Start in recover mode, replay previously solved levels, and return to the latest unsolved frontier. "
+            f"Frontier before GAME_OVER was level={frontier_level!r}, levels_completed={levels_completed!r}. "
+            f"Reason: {reason}"
+        ),
+    }
+    state_payload["activeTransitionPayload"] = {}
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps(state_payload, indent=2) + "\n")
+
+
 def validate_wrapup_surfaces_impl(runtime) -> None:
     status = load_wrapup_status_impl(runtime)
     if not bool(status["active"]):

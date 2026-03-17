@@ -70,8 +70,8 @@ def parse_args_impl() -> argparse.Namespace:
     parser.add_argument(
         "--max-game-over-resets", type=int, default=0,
         help=(
-            "Maximum harness-driven automatic reset_level calls after GAME_OVER before stopping "
-            "(default: 0, disabled; let agent/supervisor own recovery)."
+            "Maximum harness-driven same-run reset_level calls after GAME_OVER before stopping "
+            "(default: 0, unlimited; after each reset the harness resumes in recover mode)."
         ),
     )
     parser.add_argument(
