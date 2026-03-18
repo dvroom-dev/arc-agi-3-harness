@@ -13,10 +13,29 @@ export interface ParsedToolResult {
   status: "ok" | "error";
 }
 
-const COMPACT_TOOL_DETAILS_OMITTED = "(details omitted in compact view)";
-
 function buildPreviewLine(content: string) {
   return content.replace(/\s+/g, " ").trim() || "(empty)";
+}
+
+function contentText(content: unknown): string {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((entry) => {
+      if (!entry || typeof entry !== "object") return "";
+      if ((entry as { type?: unknown }).type === "text") {
+        const text = (entry as { text?: unknown }).text;
+        return typeof text === "string" ? text : "";
+      }
+      if ((entry as { type?: unknown }).type === "tool_result") {
+        const contentValue = (entry as { content?: unknown }).content;
+        if (typeof contentValue === "string") return contentValue;
+      }
+      return "";
+    })
+    .filter(Boolean)
+    .join("\n")
+    .trim();
 }
 
 export function parseToolCallEvent(event: RawEventEntry): ParsedToolCall {
@@ -27,6 +46,7 @@ export function parseToolCallEvent(event: RawEventEntry): ParsedToolCall {
   const content = message?.content;
   let name = event.itemSummary || "tool_call";
   let toolUseId: string | null = null;
+  let body = "";
   if (Array.isArray(content)) {
     const toolUse = content.find(
       (entry) =>
@@ -43,13 +63,19 @@ export function parseToolCallEvent(event: RawEventEntry): ParsedToolCall {
       if (typeof toolUse.id === "string" && toolUse.id.trim()) {
         toolUseId = toolUse.id;
       }
+      const input = toolUse.input;
+      if (typeof input === "string") {
+        body = input;
+      } else if (input && typeof input === "object") {
+        body = JSON.stringify(input, null, 2);
+      }
     }
   }
 
   return {
     name,
     toolUseId,
-    body: COMPACT_TOOL_DETAILS_OMITTED,
+    body: body || name,
   };
 }
 
@@ -60,6 +86,7 @@ export function parseToolResultEvent(event: RawEventEntry): ParsedToolResult {
       : null;
   const content = message?.content;
 
+  let body = contentText(content);
   let toolUseId: string | null = null;
   if (Array.isArray(content)) {
     const toolResult = content.find(
@@ -72,10 +99,15 @@ export function parseToolResultEvent(event: RawEventEntry): ParsedToolResult {
       toolUseId = toolResult.tool_use_id;
     }
   }
+  if (!body && typeof event.raw.tool_use_result === "string") {
+    body = event.raw.tool_use_result;
+  } else if (!body && event.raw.tool_use_result && typeof event.raw.tool_use_result === "object") {
+    body = JSON.stringify(event.raw.tool_use_result, null, 2);
+  }
 
   return {
     toolUseId,
-    body: COMPACT_TOOL_DETAILS_OMITTED,
+    body,
     status: event.itemKind === "tool_error" ? "error" : "ok",
   };
 }

@@ -15,8 +15,6 @@ export interface ConversationBlock {
   raw: string;
 }
 
-const COMPACT_TOOL_DETAILS_OMITTED = "(details omitted in compact view)";
-
 function parseFenceHeader(
   line: string
 ): { fence: string; kind: string; meta: Record<string, string> } | null {
@@ -201,19 +199,23 @@ function parseLegacyToolCall(block: ConversationBlock) {
     const payload = JSON.parse(block.content) as {
       type?: string;
       summary?: string;
+      details?: { first_tool_input?: string };
     };
     const summary = typeof payload.summary === "string" ? payload.summary : block.raw;
     const nameMatch = summary.match(/^tool_call\s+(.+)$/);
     return {
       type: typeof payload.type === "string" ? payload.type : null,
       name: headerName || nameMatch?.[1] || summary || "tool",
-      call: COMPACT_TOOL_DETAILS_OMITTED,
+      call:
+        typeof payload.details?.first_tool_input === "string"
+          ? payload.details.first_tool_input
+          : "(call details unavailable)",
     };
   } catch {
     return {
       type: null,
       name: headerName || block.raw || "tool",
-      call: COMPACT_TOOL_DETAILS_OMITTED,
+      call: block.content || "(call details unavailable)",
     };
   }
 }
@@ -221,6 +223,9 @@ function parseLegacyToolCall(block: ConversationBlock) {
 function parseLegacyToolResult(block: ConversationBlock) {
   const lines = block.content.split("\n");
   const statusLine = lines.find((line) => line.startsWith("status: "));
+  const bodyStart = lines.findIndex((line) => line.trim() === "");
+  const prefixedBody = bodyStart >= 0 ? lines.slice(bodyStart + 1).join("\n").trim() : block.content.trim();
+  const compactBody = prefixedBody.replace(/^\(ok=(true|false)\)\s*\n?/, "").trim();
   const rawStatus = statusLine?.replace(/^status:\s*/, "").trim().toLowerCase() || "ok";
   const status =
     rawStatus === "completed" || rawStatus === "ok"
@@ -230,7 +235,7 @@ function parseLegacyToolResult(block: ConversationBlock) {
         : "pending";
   return {
     status,
-    body: status === "pending" ? "(result pending)" : COMPACT_TOOL_DETAILS_OMITTED,
+    body: status === "pending" ? "(result pending)" : compactBody || prefixedBody || "(empty)",
   };
 }
 

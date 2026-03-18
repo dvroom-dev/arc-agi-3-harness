@@ -3,8 +3,6 @@
 import { useState } from "react";
 import type { ConversationBlock } from "@/lib/conversation";
 
-const COMPACT_TOOL_DETAILS_OMITTED = "(details omitted in compact view)";
-
 function fileTone(title: string | undefined) {
   const lower = (title || "").toLowerCase();
   if (lower.endsWith(".py")) {
@@ -237,10 +235,8 @@ export function ToolBlock({ block }: { block: ConversationBlock }) {
   const [expanded, setExpanded] = useState(false);
   const callPreview = buildSingleLinePreview(parsed.call);
   const resultPreview = parsed.result ? buildSingleLinePreview(parsed.result) : null;
-  const hasCallDetails =
-    parsed.call.trim().length > 0 && parsed.call.trim() !== COMPACT_TOOL_DETAILS_OMITTED;
-  const hasResultDetails =
-    Boolean(parsed.result?.trim()) && parsed.result?.trim() !== COMPACT_TOOL_DETAILS_OMITTED;
+  const hasCallDetails = parsed.call.trim().length > 0;
+  const hasResultDetails = Boolean(parsed.result?.trim());
   const isExpandable = hasCallDetails || hasResultDetails;
   const statusLabel = parsed.status.toUpperCase();
   const icon = expanded ? "v" : ">";
