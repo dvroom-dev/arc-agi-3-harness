@@ -2,16 +2,33 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { LOGS_DIR } from "@/lib/paths";
+import { LOGS_DIR, runDir } from "@/lib/paths";
 import { readStoredRunParams } from "@/lib/runParams.server";
 import type { StoredRunParams } from "@/lib/runParams";
+import { readRunStateSnapshot } from "@/lib/runStateSnapshot.server";
+import type { RunStatusSummary } from "@/lib/types";
 
 const execFileAsync = promisify(execFile);
 
 const TERMINAL_STATES = new Set(["WIN", "LOSS", "GAME_OVER", "FAILED", "STOPPED"]);
+const CONTINUABLE_STATES = new Set(["STOPPED", "FAILED", "GAME_OVER", "LOSS"]);
+const PROVIDER_ERROR_PATTERNS = [
+  /provider[_\s-]*error/i,
+  /provider execution error/i,
+  /usage limit/i,
+  /rate limit/i,
+  /quota/i,
+  /context window/i,
+  /remote compact task/i,
+];
 
 function isTerminalState(state: string): boolean {
   return TERMINAL_STATES.has((state || "").trim().toUpperCase());
+}
+
+function isProviderErrorDetail(detail: string | null): boolean {
+  if (!detail) return false;
+  return PROVIDER_ERROR_PATTERNS.some((pattern) => pattern.test(detail));
 }
 
 interface ActiveRunProcess {
@@ -253,6 +270,247 @@ function inferExitedStateFromLog(logTail: string): string {
     return "STOPPED";
   }
   return "STOPPED";
+}
+
+function cleanDetail(detail: string): string {
+  return detail.replace(/\s+/g, " ").trim();
+}
+
+function extractHarnessFailureDetail(logTail: string): string | null {
+  const lines = logTail
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]!;
+    if (line.startsWith("[harness] FATAL:")) {
+      return cleanDetail(line.replace(/^\[harness\] FATAL:\s*/, ""));
+    }
+  }
+
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index]!;
+    if (/^(RuntimeError|ValueError|AssertionError|TypeError|Error):/.test(line)) {
+      return cleanDetail(line.replace(/^[A-Za-z]+Error:\s*/, ""));
+    }
+  }
+
+  return null;
+}
+
+function summarizeDisplayedState(state: string, active: boolean) {
+  const normalized = (state || "UNKNOWN").trim().toUpperCase() || "UNKNOWN";
+  if (active && !isTerminalState(normalized)) {
+    return {
+      statusLabel: "Running",
+      category: "running",
+      categoryLabel: "Running",
+    } as const;
+  }
+
+  switch (normalized) {
+    case "WIN":
+      return {
+        statusLabel: "Success",
+        category: "success",
+        categoryLabel: "Success",
+      } as const;
+    case "STOPPED":
+      return {
+        statusLabel: "Stopped",
+        category: "stopped",
+        categoryLabel: "Stopped",
+      } as const;
+    case "GAME_OVER":
+      return {
+        statusLabel: "Game Over",
+        category: "game_over",
+        categoryLabel: "Game Over",
+      } as const;
+    case "LOSS":
+      return {
+        statusLabel: "Loss",
+        category: "loss",
+        categoryLabel: "Loss",
+      } as const;
+    case "FAILED":
+      return {
+        statusLabel: "Failed",
+        category: "unknown",
+        categoryLabel: "Unknown Failure",
+      } as const;
+    default:
+      return {
+        statusLabel: normalized === "UNKNOWN" ? "Unknown" : normalized,
+        category: "unknown",
+        categoryLabel: "Unknown",
+      } as const;
+  }
+}
+
+async function readLatestProviderReviewError(runId: string): Promise<{
+  at: string;
+  kind: string;
+  message: string;
+  providerThreadId: string | null;
+  providerTurnId: string | null;
+} | null> {
+  const conversationsDir = path.join(runDir(runId), ".ai-supervisor", "conversations");
+  let conversationEntries: fs.Dirent[] = [];
+  try {
+    conversationEntries = await fs.readdir(conversationsDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  const errors = await Promise.all(
+    conversationEntries
+      .filter((entry) => entry.isDirectory())
+      .map(async (entry) => {
+        const reviewsDir = path.join(conversationsDir, entry.name, "reviews");
+        let reviewFiles: string[] = [];
+        try {
+          reviewFiles = await fs.readdir(reviewsDir);
+        } catch {
+          return [];
+        }
+
+        const responseFiles = reviewFiles.filter((file) => file.endsWith("_response.txt"));
+        return Promise.all(
+          responseFiles.map(async (file) => {
+            const filePath = path.join(reviewsDir, file);
+            try {
+              const [raw, stat] = await Promise.all([
+                fs.readFile(filePath, "utf-8"),
+                fs.stat(filePath),
+              ]);
+              const parsed = JSON.parse(raw) as {
+                error_type?: unknown;
+                error?: unknown;
+                message?: unknown;
+                provider_thread_id?: unknown;
+                provider_turn_id?: unknown;
+              };
+              const kind =
+                typeof parsed.error_type === "string" ? parsed.error_type.trim() : "";
+              if (!kind) return null;
+              const detail =
+                typeof parsed.error === "string" && parsed.error.trim()
+                  ? parsed.error.trim()
+                  : typeof parsed.message === "string" && parsed.message.trim()
+                    ? parsed.message.trim()
+                    : kind;
+              return {
+                at: stat.mtime.toISOString(),
+                kind,
+                message: cleanDetail(detail),
+                providerThreadId:
+                  typeof parsed.provider_thread_id === "string"
+                    ? parsed.provider_thread_id.trim() || null
+                    : null,
+                providerTurnId:
+                  typeof parsed.provider_turn_id === "string"
+                    ? parsed.provider_turn_id.trim() || null
+                    : null,
+              };
+            } catch {
+              return null;
+            }
+          })
+        );
+      })
+  );
+
+  return errors
+    .flat()
+    .filter(
+      (
+        entry
+      ): entry is {
+        at: string;
+        kind: string;
+        message: string;
+        providerThreadId: string | null;
+        providerTurnId: string | null;
+      } => Boolean(entry)
+    )
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+    .at(0) ?? null;
+}
+
+export async function readRunStatusSummary(runId: string): Promise<RunStatusSummary> {
+  const [stateSnapshot, storedRunParams] = await Promise.all([
+    readRunStateSnapshot(runId),
+    readStoredRunParams(runId),
+  ]);
+  const rawState = typeof stateSnapshot?.state === "string" ? stateSnapshot.state : "UNKNOWN";
+  const lookupIds = runProcessLookupIdsFromStoredRunParams(runId, storedRunParams);
+  const activeRunIds = await listActiveRunIds();
+  const displayedState = await inferDisplayedRunState({
+    runId,
+    state: rawState,
+    activeRunIds,
+    lookupIds,
+  });
+  const active = Array.from(lookupIds).some((lookupId) => activeRunIds.has(lookupId));
+  const logTail = await readLogTail(runId);
+  const harnessFailureDetail = extractHarnessFailureDetail(logTail);
+  const providerReviewError = await readLatestProviderReviewError(runId);
+  const hasLog = await fs
+    .access(path.join(LOGS_DIR, `${runId}.log`))
+    .then(() => true)
+    .catch(() => false);
+  const canContinue =
+    !active &&
+    CONTINUABLE_STATES.has(displayedState.toUpperCase()) &&
+    (hasLog || storedRunParams !== null);
+
+  const base = summarizeDisplayedState(displayedState, active);
+  let category = base.category;
+  let categoryLabel = base.categoryLabel;
+  let detail: string | null = null;
+
+  if (displayedState.toUpperCase() === "FAILED") {
+    if (harnessFailureDetail && !isProviderErrorDetail(harnessFailureDetail)) {
+      category = "harness_error";
+      categoryLabel = "Harness Error";
+      detail = harnessFailureDetail;
+    } else if (
+      providerReviewError &&
+      (providerReviewError.kind === "provider_execution_error" ||
+        isProviderErrorDetail(providerReviewError.message))
+    ) {
+      category = "provider_error";
+      categoryLabel = "Provider Error";
+      detail = providerReviewError.message;
+    } else if (harnessFailureDetail) {
+      category = "provider_error";
+      categoryLabel = "Provider Error";
+      detail = harnessFailureDetail;
+    } else {
+      category = "unknown";
+      categoryLabel = "Unknown Failure";
+    }
+  } else if (displayedState.toUpperCase() === "STOPPED") {
+    detail = null;
+  } else if (displayedState.toUpperCase() === "GAME_OVER") {
+    detail = "The ARC run ended in GAME_OVER.";
+  } else if (displayedState.toUpperCase() === "LOSS") {
+    detail = "The ARC run ended in LOSS.";
+  }
+
+  return {
+    runId,
+    state: displayedState,
+    statusLabel: base.statusLabel,
+    active,
+    category,
+    categoryLabel,
+    detail,
+    canContinue,
+    action: active && !isTerminalState(displayedState) ? "stop" : canContinue ? "continue" : null,
+  };
 }
 
 export async function inferDisplayedRunState(args: {

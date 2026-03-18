@@ -15,6 +15,28 @@ export interface RunSummary {
   modifiedAt: number; // unix ms
 }
 
+export type RunStatusCategory =
+  | "running"
+  | "success"
+  | "provider_error"
+  | "harness_error"
+  | "game_over"
+  | "loss"
+  | "stopped"
+  | "unknown";
+
+export interface RunStatusSummary {
+  runId: string;
+  state: string;
+  statusLabel: string;
+  active: boolean;
+  category: RunStatusCategory;
+  categoryLabel: string;
+  detail: string | null;
+  canContinue: boolean;
+  action: "stop" | "continue" | null;
+}
+
 // --- Game state (state.json) ---
 export interface GameState {
   game_id: string;
