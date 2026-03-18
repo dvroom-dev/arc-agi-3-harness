@@ -202,6 +202,24 @@ export function rawEventToBlocks(event: RawEventEntry): ConversationBlock[] {
     return blocks;
   }
 
+  if (event.raw.type === "system" && event.raw.subtype === "status") {
+    const status = typeof event.raw.status === "string" ? event.raw.status.trim() : "";
+    if (status === "compacting") {
+      const lines = [
+        `provider: ${event.provider || "unknown"}`,
+        `status: ${status}`,
+        `session_id: ${typeof event.raw.session_id === "string" ? event.raw.session_id : "unknown"}`,
+      ];
+      blocks.push({
+        kind: "text",
+        title: "Provider Status",
+        content: lines.join("\n"),
+        raw: lines.join("\n"),
+      });
+    }
+    return blocks;
+  }
+
   const message =
     event.raw.message && typeof event.raw.message === "object"
       ? (event.raw.message as { content?: unknown })

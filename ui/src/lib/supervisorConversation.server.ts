@@ -8,6 +8,10 @@ import {
   summarizeToolBursts,
   type ToolActivitySummary,
 } from "@/lib/supervisorToolActivity.server";
+import {
+  formatModeAssessmentBlock,
+  parseSupervisorResponse,
+} from "@/lib/supervisorReviewResponse.server";
 
 interface SuperStateFile {
   conversationId?: unknown;
@@ -19,13 +23,6 @@ interface ReviewEntry {
   at: string;
   promptText: string;
   responseText: string | null;
-}
-
-interface ParsedSupervisorResponse {
-  decision: string | null;
-  payload: Record<string, unknown> | null;
-  modeAssessment: Record<string, unknown> | null;
-  reasoning: string | null;
 }
 
 interface ResolvedSupervisorConversation {
@@ -75,39 +72,6 @@ function promptMeta(promptText: string) {
     promptText.match(/^Why this review ran:\s*(.+)$/m)?.[1]?.trim() ??
     null;
   return { trigger, mode, allowedNextModes, why };
-}
-
-function parseSupervisorResponse(responseText: string | null): ParsedSupervisorResponse {
-  if (!responseText) {
-    return {
-      decision: null,
-      payload: null,
-      modeAssessment: null,
-      reasoning: null,
-    };
-  }
-  try {
-    const parsed = JSON.parse(responseText) as Record<string, unknown>;
-    return {
-      decision: typeof parsed.decision === "string" ? parsed.decision : null,
-      payload:
-        parsed.payload && typeof parsed.payload === "object"
-          ? (parsed.payload as Record<string, unknown>)
-          : null,
-      modeAssessment:
-        parsed.mode_assessment && typeof parsed.mode_assessment === "object"
-          ? (parsed.mode_assessment as Record<string, unknown>)
-          : null,
-      reasoning: typeof parsed.reasoning === "string" ? parsed.reasoning.trim() : null,
-    };
-  } catch {
-    return {
-      decision: null,
-      payload: null,
-      modeAssessment: null,
-      reasoning: null,
-    };
-  }
 }
 
 function buildToolActivityBlock(
@@ -196,34 +160,6 @@ function formatDecisionBlock(promptText: string, responseText: string | null): s
   return lines.join("\n");
 }
 
-function formatModeAssessmentBlock(modeAssessment: Record<string, unknown> | null): string | null {
-  if (!modeAssessment) return null;
-  const lines: string[] = [];
-  if (typeof modeAssessment.current_mode_stop_satisfied === "boolean") {
-    lines.push(`current_mode_stop_satisfied: ${String(modeAssessment.current_mode_stop_satisfied)}`);
-  }
-  if (typeof modeAssessment.recommended_action === "string") {
-    lines.push(`recommended_action: ${modeAssessment.recommended_action}`);
-  }
-  const ranked = Array.isArray(modeAssessment.candidate_modes_ranked)
-    ? modeAssessment.candidate_modes_ranked
-    : [];
-  for (const candidate of ranked) {
-    if (!candidate || typeof candidate !== "object") continue;
-    const mode = typeof (candidate as { mode?: unknown }).mode === "string"
-      ? (candidate as { mode: string }).mode
-      : "(unknown)";
-    const confidence = typeof (candidate as { confidence?: unknown }).confidence === "string"
-      ? (candidate as { confidence: string }).confidence
-      : "unknown";
-    const evidence = typeof (candidate as { evidence?: unknown }).evidence === "string"
-      ? (candidate as { evidence: string }).evidence.trim()
-      : "";
-    lines.push(`candidate_${mode}: ${confidence}${evidence ? ` - ${evidence}` : ""}`);
-  }
-  return lines.length > 0 ? lines.join("\n") : null;
-}
-
 function buildReviewBlocks(review: ReviewEntry): ConversationBlock[] {
   const parsed = parseSupervisorResponse(review.responseText);
   const payload = parsed.payload;
@@ -233,12 +169,6 @@ function buildReviewBlocks(review: ReviewEntry): ConversationBlock[] {
       title: "Review Context",
       content: formatReviewContextBlock(review),
       raw: review.promptText,
-    },
-    {
-      kind: "text",
-      title: "Supervisor Decision",
-      content: formatDecisionBlock(review.promptText, review.responseText),
-      raw: review.responseText ?? review.promptText,
     },
   ];
 
@@ -251,6 +181,32 @@ function buildReviewBlocks(review: ReviewEntry): ConversationBlock[] {
     });
     return blocks;
   }
+
+  if (parsed.errorKind) {
+    const errorLines = [
+      `kind: ${parsed.errorKind}`,
+      `message: ${parsed.errorMessage ?? "(none)"}`,
+      `provider_thread_id: ${parsed.providerThreadId ?? "(none)"}`,
+      `provider_turn_id: ${parsed.providerTurnId ?? "(none)"}`,
+    ];
+    blocks.push({
+      kind: "text",
+      title:
+        parsed.errorKind === "provider_execution_error"
+          ? "Provider Error"
+          : "Supervisor Review Error",
+      content: errorLines.join("\n"),
+      raw: review.responseText,
+    });
+    return blocks;
+  }
+
+  blocks.push({
+    kind: "text",
+    title: "Supervisor Decision",
+    content: formatDecisionBlock(review.promptText, review.responseText),
+    raw: review.responseText ?? review.promptText,
+  });
 
   if (typeof payload?.message === "string" && payload.message.trim()) {
     blocks.push({
