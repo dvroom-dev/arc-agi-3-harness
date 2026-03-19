@@ -1,0 +1,970 @@
+{
+  "generated_at_utc": "2026-03-18T18:06:41.775656+00:00",
+  "source": {
+    "catalog_url": "https://developers.openai.com/api/docs/models/all",
+    "catalog_type": "official_openai_docs",
+    "notes": "This is a docs-derived catalog of documented model IDs, aliases, and snapshots. Account-visible availability can differ."
+  },
+  "top_level_model_count": 81,
+  "documented_name_count": 143,
+  "top_level_models": [
+    {
+      "model_id": "babbage-002",
+      "display_name": "babbage-002",
+      "deprecated": true,
+      "page_url": "https://developers.openai.com/api/docs/models/babbage-002",
+      "documented_names": [
+        "babbage-002"
+      ]
+    },
+    {
+      "model_id": "chatgpt-4o-latest",
+      "display_name": "ChatGPT-4o",
+      "deprecated": true,
+      "page_url": "https://developers.openai.com/api/docs/models/chatgpt-4o-latest",
+      "documented_names": [
+        "chatgpt-4o-latest"
+      ]
+    },
+    {
+      "model_id": "chatgpt-image-latest",
+      "display_name": "chatgpt-image-latest",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/chatgpt-image-latest",
+      "documented_names": [
+        "chatgpt-image-latest"
+      ]
+    },
+    {
+      "model_id": "codex-mini-latest",
+      "display_name": "codex-mini-latest",
+      "deprecated": true,
+      "page_url": "https://developers.openai.com/api/docs/models/codex-mini-latest",
+      "documented_names": [
+        "codex-mini-latest"
+      ]
+    },
+    {
+      "model_id": "computer-use-preview",
+      "display_name": "computer-use-preview",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/computer-use-preview",
+      "documented_names": [
+        "computer-use-preview",
+        "computer-use-preview-2025-03-11"
+      ]
+    },
+    {
+      "model_id": "dall-e-2",
+      "display_name": "DALL\u00b7E 2",
+      "deprecated": true,
+      "page_url": "https://developers.openai.com/api/docs/models/dall-e-2",
+      "documented_names": [
+        "dall-e-2"
+      ]
+    },
+    {
+      "model_id": "dall-e-3",
+      "display_name": "DALL\u00b7E 3",
+      "deprecated": true,
+      "page_url": "https://developers.openai.com/api/docs/models/dall-e-3",
+      "documented_names": [
+        "dall-e-3"
+      ]
+    },
+    {
+      "model_id": "davinci-002",
+      "display_name": "davinci-002",
+      "deprecated": true,
+      "page_url": "https://developers.openai.com/api/docs/models/davinci-002",
+      "documented_names": [
+        "davinci-002"
+      ]
+    },
+    {
+      "model_id": "gpt-3.5-turbo",
+      "display_name": "GPT-3.5 Turbo",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-3.5-turbo",
+      "documented_names": [
+        "gpt-3.5-turbo",
+        "gpt-3.5-turbo-0125",
+        "gpt-3.5-turbo-1106",
+        "gpt-3.5-turbo-instruct"
+      ]
+    },
+    {
+      "model_id": "gpt-4",
+      "display_name": "GPT-4",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4",
+      "documented_names": [
+        "gpt-4",
+        "gpt-4-0314",
+        "gpt-4-0613"
+      ]
+    },
+    {
+      "model_id": "gpt-4-turbo",
+      "display_name": "GPT-4 Turbo",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4-turbo",
+      "documented_names": [
+        "gpt-4-turbo",
+        "gpt-4-turbo-2024-04-09",
+        "gpt-4-turbo-preview"
+      ]
+    },
+    {
+      "model_id": "gpt-4-turbo-preview",
+      "display_name": "GPT-4 Turbo Preview",
+      "deprecated": true,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4-turbo-preview",
+      "documented_names": [
+        "gpt-4-turbo-preview"
+      ]
+    },
+    {
+      "model_id": "gpt-4.1",
+      "display_name": "GPT-4.1",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4.1",
+      "documented_names": [
+        "gpt-4.1",
+        "gpt-4.1-2025-04-14"
+      ]
+    },
+    {
+      "model_id": "gpt-4.1-mini",
+      "display_name": "GPT-4.1 mini",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4.1-mini",
+      "documented_names": [
+        "gpt-4.1-mini",
+        "gpt-4.1-mini-2025-04-14"
+      ]
+    },
+    {
+      "model_id": "gpt-4.1-nano",
+      "display_name": "GPT-4.1 nano",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4.1-nano",
+      "documented_names": [
+        "gpt-4.1-nano",
+        "gpt-4.1-nano-2025-04-14"
+      ]
+    },
+    {
+      "model_id": "gpt-4.5-preview",
+      "display_name": "GPT-4.5 Preview (Deprecated)",
+      "deprecated": true,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4.5-preview",
+      "documented_names": [
+        "gpt-4.5-preview",
+        "gpt-4.5-preview-2025-02-27"
+      ]
+    },
+    {
+      "model_id": "gpt-4o",
+      "display_name": "GPT-4o",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4o",
+      "documented_names": [
+        "gpt-4o",
+        "gpt-4o-2024-05-13",
+        "gpt-4o-2024-08-06",
+        "gpt-4o-2024-11-20"
+      ]
+    },
+    {
+      "model_id": "gpt-4o-audio-preview",
+      "display_name": "GPT-4o Audio",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4o-audio-preview",
+      "documented_names": [
+        "gpt-4o-audio-preview",
+        "gpt-4o-audio-preview-2024-10-01",
+        "gpt-4o-audio-preview-2024-12-17",
+        "gpt-4o-audio-preview-2025-06-03"
+      ]
+    },
+    {
+      "model_id": "gpt-4o-mini",
+      "display_name": "GPT-4o mini",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4o-mini",
+      "documented_names": [
+        "gpt-4o-mini",
+        "gpt-4o-mini-2024-07-18"
+      ]
+    },
+    {
+      "model_id": "gpt-4o-mini-audio-preview",
+      "display_name": "GPT-4o mini Audio",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4o-mini-audio-preview",
+      "documented_names": [
+        "gpt-4o-mini-audio-preview",
+        "gpt-4o-mini-audio-preview-2024-12-17"
+      ]
+    },
+    {
+      "model_id": "gpt-4o-mini-realtime-preview",
+      "display_name": "GPT-4o mini Realtime",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4o-mini-realtime-preview",
+      "documented_names": [
+        "gpt-4o-mini-realtime-preview",
+        "gpt-4o-mini-realtime-preview-2024-12-17"
+      ]
+    },
+    {
+      "model_id": "gpt-4o-mini-search-preview",
+      "display_name": "GPT-4o mini Search Preview",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4o-mini-search-preview",
+      "documented_names": [
+        "gpt-4o-mini-search-preview",
+        "gpt-4o-mini-search-preview-2025-03-11"
+      ]
+    },
+    {
+      "model_id": "gpt-4o-mini-transcribe",
+      "display_name": "GPT-4o mini Transcribe",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4o-mini-transcribe",
+      "documented_names": [
+        "gpt-4o-mini-transcribe",
+        "gpt-4o-mini-transcribe-2025-03-20",
+        "gpt-4o-mini-transcribe-2025-12-15"
+      ]
+    },
+    {
+      "model_id": "gpt-4o-mini-tts",
+      "display_name": "GPT-4o mini TTS",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4o-mini-tts",
+      "documented_names": [
+        "gpt-4o-mini-tts",
+        "gpt-4o-mini-tts-2025-03-20",
+        "gpt-4o-mini-tts-2025-12-15"
+      ]
+    },
+    {
+      "model_id": "gpt-4o-realtime-preview",
+      "display_name": "GPT-4o Realtime",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4o-realtime-preview",
+      "documented_names": [
+        "gpt-4o-realtime-preview",
+        "gpt-4o-realtime-preview-2024-10-01",
+        "gpt-4o-realtime-preview-2024-12-17",
+        "gpt-4o-realtime-preview-2025-06-03"
+      ]
+    },
+    {
+      "model_id": "gpt-4o-search-preview",
+      "display_name": "GPT-4o Search Preview",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4o-search-preview",
+      "documented_names": [
+        "gpt-4o-search-preview",
+        "gpt-4o-search-preview-2025-03-11"
+      ]
+    },
+    {
+      "model_id": "gpt-4o-transcribe",
+      "display_name": "GPT-4o Transcribe",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4o-transcribe",
+      "documented_names": [
+        "gpt-4o-transcribe"
+      ]
+    },
+    {
+      "model_id": "gpt-4o-transcribe-diarize",
+      "display_name": "GPT-4o Transcribe Diarize",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-4o-transcribe-diarize",
+      "documented_names": [
+        "gpt-4o-transcribe-diarize"
+      ]
+    },
+    {
+      "model_id": "gpt-5",
+      "display_name": "GPT-5",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5",
+      "documented_names": [
+        "gpt-5",
+        "gpt-5-2025-08-07"
+      ]
+    },
+    {
+      "model_id": "gpt-5-chat-latest",
+      "display_name": "GPT-5 Chat",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5-chat-latest",
+      "documented_names": [
+        "gpt-5-chat-latest"
+      ]
+    },
+    {
+      "model_id": "gpt-5-codex",
+      "display_name": "GPT-5-Codex",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5-codex",
+      "documented_names": [
+        "gpt-5-codex"
+      ]
+    },
+    {
+      "model_id": "gpt-5-mini",
+      "display_name": "GPT-5 mini",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5-mini",
+      "documented_names": [
+        "gpt-5-mini",
+        "gpt-5-mini-2025-08-07"
+      ]
+    },
+    {
+      "model_id": "gpt-5-nano",
+      "display_name": "GPT-5 nano",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5-nano",
+      "documented_names": [
+        "gpt-5-nano",
+        "gpt-5-nano-2025-08-07"
+      ]
+    },
+    {
+      "model_id": "gpt-5-pro",
+      "display_name": "GPT-5 pro",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5-pro",
+      "documented_names": [
+        "gpt-5-pro",
+        "gpt-5-pro-2025-10-06"
+      ]
+    },
+    {
+      "model_id": "gpt-5.1",
+      "display_name": "GPT-5.1",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.1",
+      "documented_names": [
+        "gpt-5.1",
+        "gpt-5.1-2025-11-13"
+      ]
+    },
+    {
+      "model_id": "gpt-5.1-chat-latest",
+      "display_name": "GPT-5.1 Chat",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.1-chat-latest",
+      "documented_names": [
+        "gpt-5.1-chat-latest"
+      ]
+    },
+    {
+      "model_id": "gpt-5.1-codex",
+      "display_name": "GPT-5.1 Codex",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.1-codex",
+      "documented_names": [
+        "gpt-5.1-codex"
+      ]
+    },
+    {
+      "model_id": "gpt-5.1-codex-max",
+      "display_name": "GPT-5.1-Codex-Max",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.1-codex-max",
+      "documented_names": [
+        "gpt-5.1-codex-max"
+      ]
+    },
+    {
+      "model_id": "gpt-5.1-codex-mini",
+      "display_name": "GPT-5.1 Codex mini",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.1-codex-mini",
+      "documented_names": [
+        "gpt-5.1-codex-mini"
+      ]
+    },
+    {
+      "model_id": "gpt-5.2",
+      "display_name": "GPT-5.2",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.2",
+      "documented_names": [
+        "gpt-5.2",
+        "gpt-5.2-2025-12-11"
+      ]
+    },
+    {
+      "model_id": "gpt-5.2-chat-latest",
+      "display_name": "GPT-5.2 Chat",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.2-chat-latest",
+      "documented_names": [
+        "gpt-5.2-chat-latest"
+      ]
+    },
+    {
+      "model_id": "gpt-5.2-codex",
+      "display_name": "GPT-5.2-Codex",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.2-codex",
+      "documented_names": [
+        "gpt-5.2-codex"
+      ]
+    },
+    {
+      "model_id": "gpt-5.2-pro",
+      "display_name": "GPT-5.2 pro",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.2-pro",
+      "documented_names": [
+        "gpt-5.2-pro",
+        "gpt-5.2-pro-2025-12-11"
+      ]
+    },
+    {
+      "model_id": "gpt-5.3-chat-latest",
+      "display_name": "GPT-5.3 Chat",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.3-chat-latest",
+      "documented_names": [
+        "gpt-5.3-chat-latest"
+      ]
+    },
+    {
+      "model_id": "gpt-5.3-codex",
+      "display_name": "GPT-5.3-Codex",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.3-codex",
+      "documented_names": [
+        "gpt-5.3-codex"
+      ]
+    },
+    {
+      "model_id": "gpt-5.4",
+      "display_name": "GPT-5.4",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.4",
+      "documented_names": [
+        "gpt-5.4",
+        "gpt-5.4-2026-03-05"
+      ]
+    },
+    {
+      "model_id": "gpt-5.4-mini",
+      "display_name": "GPT-5.4 mini",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.4-mini",
+      "documented_names": [
+        "gpt-5.4-mini",
+        "gpt-5.4-mini-2026-03-17"
+      ]
+    },
+    {
+      "model_id": "gpt-5.4-nano",
+      "display_name": "GPT-5.4 nano",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.4-nano",
+      "documented_names": [
+        "gpt-5.4-nano",
+        "gpt-5.4-nano-2026-03-17"
+      ]
+    },
+    {
+      "model_id": "gpt-5.4-pro",
+      "display_name": "GPT-5.4 pro",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-5.4-pro",
+      "documented_names": [
+        "gpt-5.4-pro",
+        "gpt-5.4-pro-2026-03-05"
+      ]
+    },
+    {
+      "model_id": "gpt-audio",
+      "display_name": "gpt-audio",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-audio",
+      "documented_names": [
+        "gpt-audio",
+        "gpt-audio-2025-08-28"
+      ]
+    },
+    {
+      "model_id": "gpt-audio-1.5",
+      "display_name": "gpt-audio-1.5",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-audio-1.5",
+      "documented_names": [
+        "gpt-audio-1.5"
+      ]
+    },
+    {
+      "model_id": "gpt-audio-mini",
+      "display_name": "gpt-audio-mini",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-audio-mini",
+      "documented_names": [
+        "gpt-audio-mini",
+        "gpt-audio-mini-2025-10-06",
+        "gpt-audio-mini-2025-12-15"
+      ]
+    },
+    {
+      "model_id": "gpt-image-1",
+      "display_name": "GPT Image 1",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-image-1",
+      "documented_names": [
+        "gpt-image-1"
+      ]
+    },
+    {
+      "model_id": "gpt-image-1-mini",
+      "display_name": "gpt-image-1-mini",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-image-1-mini",
+      "documented_names": [
+        "gpt-image-1-mini"
+      ]
+    },
+    {
+      "model_id": "gpt-image-1.5",
+      "display_name": "GPT Image 1.5",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-image-1.5",
+      "documented_names": [
+        "gpt-image-1.5",
+        "gpt-image-1.5-2025-12-16"
+      ]
+    },
+    {
+      "model_id": "gpt-oss-120b",
+      "display_name": "gpt-oss-120b",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-oss-120b",
+      "documented_names": [
+        "gpt-oss-120b"
+      ]
+    },
+    {
+      "model_id": "gpt-oss-20b",
+      "display_name": "gpt-oss-20b",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-oss-20b",
+      "documented_names": [
+        "gpt-oss-20b"
+      ]
+    },
+    {
+      "model_id": "gpt-realtime",
+      "display_name": "gpt-realtime",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-realtime",
+      "documented_names": [
+        "gpt-realtime",
+        "gpt-realtime-2025-08-28"
+      ]
+    },
+    {
+      "model_id": "gpt-realtime-1.5",
+      "display_name": "gpt-realtime-1.5",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-realtime-1.5",
+      "documented_names": [
+        "gpt-realtime-1.5"
+      ]
+    },
+    {
+      "model_id": "gpt-realtime-mini",
+      "display_name": "gpt-realtime-mini",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/gpt-realtime-mini",
+      "documented_names": [
+        "gpt-realtime-mini",
+        "gpt-realtime-mini-2025-10-06",
+        "gpt-realtime-mini-2025-12-15"
+      ]
+    },
+    {
+      "model_id": "o1",
+      "display_name": "o1",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/o1",
+      "documented_names": [
+        "o1",
+        "o1-2024-12-17",
+        "o1-preview",
+        "o1-preview-2024-09-12"
+      ]
+    },
+    {
+      "model_id": "o1-mini",
+      "display_name": "o1-mini",
+      "deprecated": true,
+      "page_url": "https://developers.openai.com/api/docs/models/o1-mini",
+      "documented_names": [
+        "o1-mini",
+        "o1-mini-2024-09-12"
+      ]
+    },
+    {
+      "model_id": "o1-preview",
+      "display_name": "o1 Preview",
+      "deprecated": true,
+      "page_url": "https://developers.openai.com/api/docs/models/o1-preview",
+      "documented_names": [
+        "o1-preview",
+        "o1-preview-2024-09-12"
+      ]
+    },
+    {
+      "model_id": "o1-pro",
+      "display_name": "o1-pro",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/o1-pro",
+      "documented_names": [
+        "o1-pro",
+        "o1-pro-2025-03-19"
+      ]
+    },
+    {
+      "model_id": "o3",
+      "display_name": "o3",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/o3",
+      "documented_names": [
+        "o3",
+        "o3-2025-04-16"
+      ]
+    },
+    {
+      "model_id": "o3-deep-research",
+      "display_name": "o3-deep-research",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/o3-deep-research",
+      "documented_names": [
+        "o3-deep-research",
+        "o3-deep-research-2025-06-26"
+      ]
+    },
+    {
+      "model_id": "o3-mini",
+      "display_name": "o3-mini",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/o3-mini",
+      "documented_names": [
+        "o3-mini",
+        "o3-mini-2025-01-31"
+      ]
+    },
+    {
+      "model_id": "o3-pro",
+      "display_name": "o3-pro",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/o3-pro",
+      "documented_names": [
+        "o3-pro",
+        "o3-pro-2025-06-10"
+      ]
+    },
+    {
+      "model_id": "o4-mini",
+      "display_name": "o4-mini",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/o4-mini",
+      "documented_names": [
+        "o4-mini",
+        "o4-mini-2025-04-16"
+      ]
+    },
+    {
+      "model_id": "o4-mini-deep-research",
+      "display_name": "o4-mini-deep-research",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/o4-mini-deep-research",
+      "documented_names": [
+        "o4-mini-deep-research",
+        "o4-mini-deep-research-2025-06-26"
+      ]
+    },
+    {
+      "model_id": "omni-moderation-latest",
+      "display_name": "omni-moderation",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/omni-moderation-latest",
+      "documented_names": [
+        "omni-moderation-2024-09-26",
+        "omni-moderation-latest"
+      ]
+    },
+    {
+      "model_id": "sora-2",
+      "display_name": "Sora 2",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/sora-2",
+      "documented_names": [
+        "sora-2",
+        "sora-2-2025-10-06",
+        "sora-2-2025-12-08"
+      ]
+    },
+    {
+      "model_id": "sora-2-pro",
+      "display_name": "Sora 2 Pro",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/sora-2-pro",
+      "documented_names": [
+        "sora-2-pro",
+        "sora-2-pro-2025-10-06"
+      ]
+    },
+    {
+      "model_id": "text-embedding-3-large",
+      "display_name": "text-embedding-3-large",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/text-embedding-3-large",
+      "documented_names": [
+        "text-embedding-3-large"
+      ]
+    },
+    {
+      "model_id": "text-embedding-3-small",
+      "display_name": "text-embedding-3-small",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/text-embedding-3-small",
+      "documented_names": [
+        "text-embedding-3-small"
+      ]
+    },
+    {
+      "model_id": "text-embedding-ada-002",
+      "display_name": "text-embedding-ada-002",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/text-embedding-ada-002",
+      "documented_names": [
+        "text-embedding-ada-002"
+      ]
+    },
+    {
+      "model_id": "text-moderation-latest",
+      "display_name": "text-moderation",
+      "deprecated": true,
+      "page_url": "https://developers.openai.com/api/docs/models/text-moderation-latest",
+      "documented_names": [
+        "text-moderation-007",
+        "text-moderation-latest"
+      ]
+    },
+    {
+      "model_id": "text-moderation-stable",
+      "display_name": "text-moderation-stable",
+      "deprecated": true,
+      "page_url": "https://developers.openai.com/api/docs/models/text-moderation-stable",
+      "documented_names": [
+        "text-moderation-007",
+        "text-moderation-stable"
+      ]
+    },
+    {
+      "model_id": "tts-1",
+      "display_name": "TTS-1",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/tts-1",
+      "documented_names": [
+        "tts-1"
+      ]
+    },
+    {
+      "model_id": "tts-1-hd",
+      "display_name": "TTS-1 HD",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/tts-1-hd",
+      "documented_names": [
+        "tts-1-hd"
+      ]
+    },
+    {
+      "model_id": "whisper-1",
+      "display_name": "Whisper",
+      "deprecated": false,
+      "page_url": "https://developers.openai.com/api/docs/models/whisper-1",
+      "documented_names": [
+        "whisper-1"
+      ]
+    }
+  ],
+  "documented_names": [
+    "babbage-002",
+    "chatgpt-4o-latest",
+    "chatgpt-image-latest",
+    "codex-mini-latest",
+    "computer-use-preview",
+    "computer-use-preview-2025-03-11",
+    "dall-e-2",
+    "dall-e-3",
+    "davinci-002",
+    "gpt-3.5-turbo",
+    "gpt-3.5-turbo-0125",
+    "gpt-3.5-turbo-1106",
+    "gpt-3.5-turbo-instruct",
+    "gpt-4",
+    "gpt-4-0314",
+    "gpt-4-0613",
+    "gpt-4-turbo",
+    "gpt-4-turbo-2024-04-09",
+    "gpt-4-turbo-preview",
+    "gpt-4.1",
+    "gpt-4.1-2025-04-14",
+    "gpt-4.1-mini",
+    "gpt-4.1-mini-2025-04-14",
+    "gpt-4.1-nano",
+    "gpt-4.1-nano-2025-04-14",
+    "gpt-4.5-preview",
+    "gpt-4.5-preview-2025-02-27",
+    "gpt-4o",
+    "gpt-4o-2024-05-13",
+    "gpt-4o-2024-08-06",
+    "gpt-4o-2024-11-20",
+    "gpt-4o-audio-preview",
+    "gpt-4o-audio-preview-2024-10-01",
+    "gpt-4o-audio-preview-2024-12-17",
+    "gpt-4o-audio-preview-2025-06-03",
+    "gpt-4o-mini",
+    "gpt-4o-mini-2024-07-18",
+    "gpt-4o-mini-audio-preview",
+    "gpt-4o-mini-audio-preview-2024-12-17",
+    "gpt-4o-mini-realtime-preview",
+    "gpt-4o-mini-realtime-preview-2024-12-17",
+    "gpt-4o-mini-search-preview",
+    "gpt-4o-mini-search-preview-2025-03-11",
+    "gpt-4o-mini-transcribe",
+    "gpt-4o-mini-transcribe-2025-03-20",
+    "gpt-4o-mini-transcribe-2025-12-15",
+    "gpt-4o-mini-tts",
+    "gpt-4o-mini-tts-2025-03-20",
+    "gpt-4o-mini-tts-2025-12-15",
+    "gpt-4o-realtime-preview",
+    "gpt-4o-realtime-preview-2024-10-01",
+    "gpt-4o-realtime-preview-2024-12-17",
+    "gpt-4o-realtime-preview-2025-06-03",
+    "gpt-4o-search-preview",
+    "gpt-4o-search-preview-2025-03-11",
+    "gpt-4o-transcribe",
+    "gpt-4o-transcribe-diarize",
+    "gpt-5",
+    "gpt-5-2025-08-07",
+    "gpt-5-chat-latest",
+    "gpt-5-codex",
+    "gpt-5-mini",
+    "gpt-5-mini-2025-08-07",
+    "gpt-5-nano",
+    "gpt-5-nano-2025-08-07",
+    "gpt-5-pro",
+    "gpt-5-pro-2025-10-06",
+    "gpt-5.1",
+    "gpt-5.1-2025-11-13",
+    "gpt-5.1-chat-latest",
+    "gpt-5.1-codex",
+    "gpt-5.1-codex-max",
+    "gpt-5.1-codex-mini",
+    "gpt-5.2",
+    "gpt-5.2-2025-12-11",
+    "gpt-5.2-chat-latest",
+    "gpt-5.2-codex",
+    "gpt-5.2-pro",
+    "gpt-5.2-pro-2025-12-11",
+    "gpt-5.3-chat-latest",
+    "gpt-5.3-codex",
+    "gpt-5.4",
+    "gpt-5.4-2026-03-05",
+    "gpt-5.4-mini",
+    "gpt-5.4-mini-2026-03-17",
+    "gpt-5.4-nano",
+    "gpt-5.4-nano-2026-03-17",
+    "gpt-5.4-pro",
+    "gpt-5.4-pro-2026-03-05",
+    "gpt-audio",
+    "gpt-audio-1.5",
+    "gpt-audio-2025-08-28",
+    "gpt-audio-mini",
+    "gpt-audio-mini-2025-10-06",
+    "gpt-audio-mini-2025-12-15",
+    "gpt-image-1",
+    "gpt-image-1-mini",
+    "gpt-image-1.5",
+    "gpt-image-1.5-2025-12-16",
+    "gpt-oss-120b",
+    "gpt-oss-20b",
+    "gpt-realtime",
+    "gpt-realtime-1.5",
+    "gpt-realtime-2025-08-28",
+    "gpt-realtime-mini",
+    "gpt-realtime-mini-2025-10-06",
+    "gpt-realtime-mini-2025-12-15",
+    "o1",
+    "o1-2024-12-17",
+    "o1-mini",
+    "o1-mini-2024-09-12",
+    "o1-preview",
+    "o1-preview-2024-09-12",
+    "o1-pro",
+    "o1-pro-2025-03-19",
+    "o3",
+    "o3-2025-04-16",
+    "o3-deep-research",
+    "o3-deep-research-2025-06-26",
+    "o3-mini",
+    "o3-mini-2025-01-31",
+    "o3-pro",
+    "o3-pro-2025-06-10",
+    "o4-mini",
+    "o4-mini-2025-04-16",
+    "o4-mini-deep-research",
+    "o4-mini-deep-research-2025-06-26",
+    "omni-moderation-2024-09-26",
+    "omni-moderation-latest",
+    "sora-2",
+    "sora-2-2025-10-06",
+    "sora-2-2025-12-08",
+    "sora-2-pro",
+    "sora-2-pro-2025-10-06",
+    "text-embedding-3-large",
+    "text-embedding-3-small",
+    "text-embedding-ada-002",
+    "text-moderation-007",
+    "text-moderation-latest",
+    "text-moderation-stable",
+    "tts-1",
+    "tts-1-hd",
+    "whisper-1"
+  ],
+  "deprecated_top_level_model_ids": [
+    "babbage-002",
+    "chatgpt-4o-latest",
+    "codex-mini-latest",
+    "dall-e-2",
+    "dall-e-3",
+    "davinci-002",
+    "gpt-4-turbo-preview",
+    "gpt-4.5-preview",
+    "o1-mini",
+    "o1-preview",
+    "text-moderation-latest",
+    "text-moderation-stable"
+  ],
+  "regenerate": {
+    "docs_only": "python scripts/update_openai_models.py",
+    "with_api_list": "OPENAI_API_KEY=... python scripts/update_openai_models.py --include-api-list"
+  }
+}
