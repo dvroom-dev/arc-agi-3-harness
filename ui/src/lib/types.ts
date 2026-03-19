@@ -220,6 +220,7 @@ export interface SuperInterventionEntry {
   ruleChecks: SuperCheckResult[] | null;
   violationChecks: SuperCheckResult[] | null;
   provider: string | null;
+  supervisorProvider: string | null;
   model: string | null;
   supervisorModel: string | null;
   prevMode: string | null;
@@ -305,6 +306,12 @@ export interface LogFeedPayload {
 export interface RunActivitySummary {
   branches: AgentConversationBranch[];
   branchesError: string | null;
+  runtime: {
+    agentProvider: string | null;
+    agentModel: string | null;
+    supervisorProvider: string | null;
+    supervisorModel: string | null;
+  };
   supervisor: {
     status: "running" | "idle" | "disabled";
   };

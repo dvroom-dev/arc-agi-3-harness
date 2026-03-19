@@ -13,55 +13,66 @@ import { readRunStateListSnapshot } from "@/lib/runStateSnapshot.server";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const requestUrl = new URL(request.url);
+    const rawLimit = Number.parseInt(requestUrl.searchParams.get("limit") || "", 10);
+    const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? rawLimit : null;
     const entries = await fs.readdir(RUNS_DIR, { withFileTypes: true });
     const activeRunIds = await listActiveRunIds();
     const logFileNames = new Set(
       (await fs.readdir(LOGS_DIR).catch(() => []))
         .filter((entry): entry is string => typeof entry === "string")
     );
-
-    const runs = (
+    const runStats = (
       await Promise.all(
-        entries.map(async (entry): Promise<RunSummary | null> => {
+        entries.map(async (entry) => {
           if (!entry.isDirectory()) return null;
-          const runId = entry.name;
-          const [state, stat, recordedRunParams] = await Promise.all([
-            readRunStateListSnapshot(runId),
-            fs.stat(path.join(RUNS_DIR, runId)),
-            readRecordedRunParams(runId),
-          ]);
-          const hasLog = logFileNames.has(`${runId}.log`);
-          const lookupIds = runProcessLookupIdsFromStoredRunParams(runId, recordedRunParams);
-          const displayedState = await inferDisplayedRunState({
-            runId,
-            state: (state?.state as string) || "UNKNOWN",
-            activeRunIds,
-            lookupIds,
-          });
-
+          const stat = await fs.stat(path.join(RUNS_DIR, entry.name));
           return {
-            id: runId,
-            state: displayedState,
-            gameId: (state?.game_id as string) || "",
-            currentLevel: (state?.current_level as number) || 0,
-            levelsCompleted: (state?.levels_completed as number) || 0,
-            totalLevels: (state?.win_levels as number) || 7,
-            totalSteps: (state?.total_steps as number) || 0,
-            hasLog,
-            canImportParams: hasLog || recordedRunParams !== null,
-            canContinue:
-              ["STOPPED", "FAILED", "GAME_OVER", "LOSS"].includes(displayedState.toUpperCase())
-              && (hasLog || recordedRunParams !== null),
+            id: entry.name,
             modifiedAt: stat.mtimeMs,
           };
         })
       )
-    ).filter((run): run is RunSummary => Boolean(run));
+    )
+      .filter((entry): entry is { id: string; modifiedAt: number } => Boolean(entry))
+      .sort((a, b) => b.modifiedAt - a.modifiedAt);
 
-    // Sort by modification time, newest first
-    runs.sort((a, b) => b.modifiedAt - a.modifiedAt);
+    const selectedRuns = limit === null ? runStats : runStats.slice(0, limit);
+
+    const runs = await Promise.all(
+      selectedRuns.map(async ({ id: runId, modifiedAt }): Promise<RunSummary> => {
+        const [state, recordedRunParams] = await Promise.all([
+          readRunStateListSnapshot(runId),
+          readRecordedRunParams(runId),
+        ]);
+        const hasLog = logFileNames.has(`${runId}.log`);
+        const lookupIds = runProcessLookupIdsFromStoredRunParams(runId, recordedRunParams);
+        const displayedState = await inferDisplayedRunState({
+          runId,
+          state: (state?.state as string) || "UNKNOWN",
+          activeRunIds,
+          lookupIds,
+        });
+
+        return {
+          id: runId,
+          state: displayedState,
+          gameId: (state?.game_id as string) || "",
+          currentLevel: (state?.current_level as number) || 0,
+          levelsCompleted: (state?.levels_completed as number) || 0,
+          totalLevels: (state?.win_levels as number) || 7,
+          totalSteps: (state?.total_steps as number) || 0,
+          hasLog,
+          canImportParams: hasLog || recordedRunParams !== null,
+          canContinue:
+            ["STOPPED", "FAILED", "GAME_OVER", "LOSS"].includes(displayedState.toUpperCase())
+            && (hasLog || recordedRunParams !== null),
+          modifiedAt,
+        };
+      })
+    );
 
     return NextResponse.json(runs);
   } catch (error) {

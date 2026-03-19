@@ -2,6 +2,7 @@ import fs from "fs/promises";
 import path from "path";
 import { parseConversationBlocks, type ConversationBlock } from "@/lib/conversation";
 import { runDir } from "@/lib/paths";
+import { loadRunHistoryForks } from "@/lib/agentConversationData.server";
 
 interface PatchOp {
   op: "equal" | "delete" | "insert";
@@ -46,6 +47,24 @@ export interface StoredConversationBranch {
   documentText: string;
   initialUserPreview: string | null;
   nextCreatedAt: string | null;
+}
+
+export interface StoredConversationBranchSummary {
+  key: string;
+  conversationId: string;
+  forkId: string;
+  parentId: string | null;
+  createdAt: string;
+  mode: string | null;
+  active: boolean;
+  head: boolean;
+  actionSummary: string | null;
+  initialUserPreview: string | null;
+  lastAssistantPreview: string | null;
+  nextCreatedAt: string | null;
+  assistantTurns: number;
+  toolCallCount: number;
+  toolResultCount: number;
 }
 
 function splitLines(text: string): string[] {
@@ -134,6 +153,74 @@ async function loadForkFiles(
   return { index, forkMap };
 }
 
+async function loadConversationIndex(
+  runId: string,
+  conversationId: string
+): Promise<ConversationIndexFile> {
+  const conversationDir = path.join(
+    runDir(runId),
+    ".ai-supervisor",
+    "conversations",
+    conversationId
+  );
+  return JSON.parse(
+    await fs.readFile(path.join(conversationDir, "index.json"), "utf-8")
+  ) as ConversationIndexFile;
+}
+
+async function loadForkPayload(
+  runId: string,
+  conversationId: string,
+  forkId: string,
+  memo: Map<string, ForkFile>
+): Promise<ForkFile> {
+  const cached = memo.get(forkId);
+  if (cached) return cached;
+  const forkPath = path.join(
+    runDir(runId),
+    ".ai-supervisor",
+    "conversations",
+    conversationId,
+    "forks",
+    `${forkId}.json`
+  );
+  const payload = JSON.parse(await fs.readFile(forkPath, "utf-8")) as ForkFile;
+  memo.set(forkId, payload);
+  return payload;
+}
+
+async function reconstructForkDocumentFromDisk(
+  runId: string,
+  conversationId: string,
+  forkId: string,
+  payloadMemo: Map<string, ForkFile>,
+  textMemo: Map<string, string>
+): Promise<string> {
+  const cached = textMemo.get(forkId);
+  if (cached !== undefined) return cached;
+  const fork = await loadForkPayload(runId, conversationId, forkId, payloadMemo);
+
+  let documentText: string;
+  if (fork.storage !== "patch") {
+    documentText = typeof fork.documentText === "string" ? fork.documentText : "";
+  } else {
+    const parentId = typeof fork.parentId === "string" ? fork.parentId : null;
+    if (!parentId) throw new Error(`fork ${forkId} missing parent`);
+    const parentText = await reconstructForkDocumentFromDisk(
+      runId,
+      conversationId,
+      parentId,
+      payloadMemo,
+      textMemo
+    );
+    if (!fork.patch) throw new Error(`fork ${forkId} missing patch payload`);
+    documentText = applyPatch(parentText, fork.patch);
+  }
+
+  textMemo.set(forkId, documentText);
+  return documentText;
+}
+
 function reconstructForkDocument(
   forkMap: Map<string, ForkFile>,
   forkId: string,
@@ -202,6 +289,74 @@ export async function loadStoredConversationBranches(
       nextCreatedAt: forks[idx + 1]?.createdAt ?? null,
     } satisfies StoredConversationBranch;
   });
+}
+
+export async function loadStoredConversationBranchSummaries(
+  runId: string,
+  conversationId: string
+): Promise<StoredConversationBranchSummary[]> {
+  const [index, historyForks] = await Promise.all([
+    loadConversationIndex(runId, conversationId),
+    loadRunHistoryForks(runId),
+  ]);
+  const historyByForkId = new Map(
+    historyForks
+      .filter((fork) => fork.conversationId === conversationId && typeof fork.forkId === "string")
+      .map((fork) => [fork.forkId!, fork])
+  );
+  const forks = (index.forks ?? [])
+    .filter((fork): fork is Required<Pick<ConversationIndexFork, "id" | "createdAt">> & ConversationIndexFork =>
+      typeof fork.id === "string" && typeof fork.createdAt === "string"
+    )
+    .sort((a, b) => parseTime(a.createdAt) - parseTime(b.createdAt));
+  const headForkIds = new Set(
+    Array.isArray(index.headIds)
+      ? index.headIds.filter((forkId): forkId is string => typeof forkId === "string")
+      : []
+  );
+  const activeForkId =
+    typeof index.headId === "string"
+      ? index.headId
+      : Array.isArray(index.headIds) && typeof index.headIds[0] === "string"
+        ? index.headIds[0]
+        : null;
+
+  return forks.map((fork, idx) => {
+    const history = historyByForkId.get(fork.id);
+    return {
+      key: fork.id,
+      conversationId,
+      forkId: fork.id,
+      parentId: typeof fork.parentId === "string" ? fork.parentId : null,
+      createdAt: fork.createdAt,
+      mode: typeof history?.mode === "string" ? history.mode : null,
+      active: fork.id === activeForkId,
+      head: headForkIds.has(fork.id),
+      actionSummary: typeof fork.actionSummary === "string" ? fork.actionSummary : null,
+      initialUserPreview:
+        typeof history?.initialUserPreview === "string" ? history.initialUserPreview : null,
+      lastAssistantPreview:
+        typeof history?.lastAssistantPreview === "string" ? history.lastAssistantPreview : null,
+      nextCreatedAt: forks[idx + 1]?.createdAt ?? null,
+      assistantTurns: Number.isFinite(history?.assistantTurns) ? Number(history?.assistantTurns) : 0,
+      toolCallCount: Number.isFinite(history?.toolCallCount) ? Number(history?.toolCallCount) : 0,
+      toolResultCount: Number.isFinite(history?.toolResultCount) ? Number(history?.toolResultCount) : 0,
+    } satisfies StoredConversationBranchSummary;
+  });
+}
+
+export async function loadConversationBranchDocument(
+  runId: string,
+  conversationId: string,
+  forkId: string
+): Promise<string> {
+  return reconstructForkDocumentFromDisk(
+    runId,
+    conversationId,
+    forkId,
+    new Map<string, ForkFile>(),
+    new Map<string, string>()
+  );
 }
 
 export function sliceBranchDocumentSeed(documentText: string): ConversationBlock[] {

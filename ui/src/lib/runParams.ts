@@ -51,7 +51,7 @@ export const DEFAULT_RUN_LAUNCH_PARAMS: RunLaunchParams = {
   scorecardOwnerCheckId: "",
   scorecardSessionPreflight: false,
   scoreAfterSolve: false,
-  scoreAfterSolveStartMode: "recover",
+  scoreAfterSolveStartMode: "",
 };
 
 function normalizeString(value: unknown, fallback = ""): string {
@@ -98,8 +98,10 @@ export function normalizeRunLaunchParams(value: unknown): RunLaunchParams {
     scorecardSessionPreflight: normalizeBoolean(raw.scorecardSessionPreflight),
     scoreAfterSolve: normalizeBoolean(raw.scoreAfterSolve),
     scoreAfterSolveStartMode:
-      normalizeString(raw.scoreAfterSolveStartMode, DEFAULT_RUN_LAUNCH_PARAMS.scoreAfterSolveStartMode)
-      || DEFAULT_RUN_LAUNCH_PARAMS.scoreAfterSolveStartMode,
+      normalizeString(
+        raw.scoreAfterSolveStartMode,
+        DEFAULT_RUN_LAUNCH_PARAMS.scoreAfterSolveStartMode
+      ),
   };
 
   return normalized;
@@ -135,7 +137,9 @@ export function summarizeRunLaunchParams(params: RunLaunchParams): string {
   if (params.arcBaseUrl) lines.push(`ARC base URL: ${params.arcBaseUrl}`);
   if (params.scorecardId) lines.push(`Scorecard ID: ${params.scorecardId}`);
   if (params.scorecardOwnerCheckId) lines.push(`Owner check ID: ${params.scorecardOwnerCheckId}`);
-  if (params.scoreAfterSolve) lines.push(`Score-after-solve: ${params.scoreAfterSolveStartMode}`);
+  if (params.scoreAfterSolve) {
+    lines.push(`Score-after-solve: ${params.scoreAfterSolveStartMode || "recover (default)"}`);
+  }
   if (params.openScorecard) lines.push("Open scorecard: yes");
   if (params.scorecardSessionPreflight) lines.push("Scorecard preflight: yes");
   if (params.noSupervisor) lines.push("Supervisor: disabled");

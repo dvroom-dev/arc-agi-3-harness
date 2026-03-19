@@ -59,7 +59,7 @@ export function RunList({
 
   useEffect(() => {
     const load = () =>
-      fetch("/api/runs")
+      fetch("/api/runs?limit=100")
         .then((r) => r.json())
         .then(setRuns)
         .catch(console.error);

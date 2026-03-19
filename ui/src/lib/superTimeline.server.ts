@@ -23,6 +23,7 @@ interface ConversationFork {
   forkSummary: string | null;
   reason: string | null;
   providerName: string | null;
+  supervisorProviderName: string | null;
   model: string | null;
   supervisorModel: string | null;
   mode: string | null;
@@ -179,6 +180,8 @@ async function loadConversationForks(runId: string): Promise<{
               ? ((fork.actions[0] as { reasoning: string }).reasoning || null)
               : null,
           providerName: typeof fork.providerName === "string" ? fork.providerName : null,
+          supervisorProviderName:
+            typeof fork.supervisorProviderName === "string" ? fork.supervisorProviderName : null,
           model: typeof fork.model === "string" ? fork.model : null,
           supervisorModel: typeof fork.supervisorModel === "string" ? fork.supervisorModel : null,
           mode,
@@ -380,6 +383,7 @@ export async function buildSuperTimeline(runId: string): Promise<SuperTimelinePa
       ruleChecks: reviewChecks?.ruleChecks ?? null,
       violationChecks: reviewChecks?.violationChecks ?? null,
       provider: fork.providerName,
+      supervisorProvider: fork.supervisorProviderName,
       model: fork.model,
       supervisorModel: fork.supervisorModel,
       prevMode: prevStart?.mode ?? null,

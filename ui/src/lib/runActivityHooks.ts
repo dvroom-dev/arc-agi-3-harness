@@ -11,6 +11,12 @@ import type {
 const EMPTY_ACTIVITY_SUMMARY: RunActivitySummary = {
   branches: [],
   branchesError: null,
+  runtime: {
+    agentProvider: null,
+    agentModel: null,
+    supervisorProvider: null,
+    supervisorModel: null,
+  },
   supervisor: {
     status: "disabled",
   },

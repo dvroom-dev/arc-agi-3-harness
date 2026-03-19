@@ -9,7 +9,12 @@ import { FileTree } from "./FileTree";
 import { FileViewer } from "./FileViewer";
 import { HistoryTable } from "./HistoryTable";
 import { ScoreView } from "./ScoreView";
-import { useContinueRun, useRunStatusSummary, useStopRun } from "@/lib/runActivityHooks";
+import {
+  useContinueRun,
+  useRunActivitySummary,
+  useRunStatusSummary,
+  useStopRun,
+} from "@/lib/runActivityHooks";
 import type { RunStatusSummary } from "@/lib/types";
 
 interface RunDashboardProps {
@@ -30,6 +35,7 @@ const TABS: { id: Tab; label: string }[] = [
 export function RunDashboard({ runId, onRunStopped }: RunDashboardProps) {
   const [activeTab, setActiveTab] = useState<Tab>("timeline");
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const { data: activity } = useRunActivitySummary(runId);
   const { data: runStatus } = useRunStatusSummary(runId);
   const { stopping, stopMessage, stopRun } = useStopRun(runId, onRunStopped);
   const { continuing, continueMessage, continueRun } = useContinueRun(runId, onRunStopped);
@@ -70,6 +76,10 @@ export function RunDashboard({ runId, onRunStopped }: RunDashboardProps) {
               {runStatus.detail ? (
                 <div className="mt-2 max-w-3xl text-xs text-zinc-400">{runStatus.detail}</div>
               ) : null}
+              <div className="mt-2 space-y-1 text-xs text-zinc-500">
+                <div>{formatAgentRuntimeLine(activity.runtime.agentProvider, activity.runtime.agentModel)}</div>
+                <div>{formatSupervisorRuntimeLine(activity.runtime.supervisorProvider, activity.runtime.supervisorModel)}</div>
+              </div>
               {actionMessage ? (
                 <div className="mt-1 text-xs text-zinc-500">{actionMessage}</div>
               ) : null}
@@ -144,6 +154,19 @@ export function RunDashboard({ runId, onRunStopped }: RunDashboardProps) {
       <ActivityPane key={runId} runId={runId} />
     </div>
   );
+}
+
+function formatAgentRuntimeLine(provider: string | null, model: string | null) {
+  const providerText = provider || "unknown provider";
+  const modelText = model || "unknown model";
+  return `Agent: ${providerText} / ${modelText}`;
+}
+
+function formatSupervisorRuntimeLine(provider: string | null, model: string | null) {
+  if (provider && model) {
+    return `Supervisor: ${provider} / ${model}`;
+  }
+  return `Supervisor: ${model || "unknown model"}`;
 }
 
 function statusBadgeTone(runStatus: RunStatusSummary) {

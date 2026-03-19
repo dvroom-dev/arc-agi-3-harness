@@ -2,13 +2,19 @@ import fs from "fs/promises";
 import path from "path";
 import type { ConversationBlock } from "@/lib/conversation";
 import { runDir } from "@/lib/paths";
-import { loadStoredConversationBranches } from "@/lib/agentConversationStore.server";
+import { loadStoredConversationBranchSummaries } from "@/lib/agentConversationStore.server";
 import {
   buildToolEventBlock,
   parseToolCallEvent,
   parseToolResultEvent,
   type ParsedToolCall,
 } from "@/lib/agentConversationTools.server";
+import {
+  assistantMetaDeltaText,
+  assistantMetaEventText,
+  assistantMetaItemId,
+  contentText,
+} from "@/lib/agentConversationReasoning.server";
 
 export interface RawEventEntry {
   ts: string;
@@ -94,7 +100,7 @@ export async function loadInterventions(
     "index.json"
   );
   try {
-    const storedBranches = await loadStoredConversationBranches(runId, conversationId);
+    const storedBranches = await loadStoredConversationBranchSummaries(runId, conversationId);
     const childModeByParentId = new Map<string, string | null>();
     for (const branch of storedBranches) {
       if (branch.actionSummary !== "supervise:start" || !branch.parentId) continue;
@@ -137,27 +143,6 @@ export async function loadInterventions(
   } catch {
     return [];
   }
-}
-
-function contentText(content: unknown): string {
-  if (typeof content === "string") return content.trim();
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((entry) => {
-      if (!entry || typeof entry !== "object") return "";
-      if ((entry as { type?: unknown }).type === "text") {
-        const text = (entry as { text?: unknown }).text;
-        return typeof text === "string" ? text : "";
-      }
-      if ((entry as { type?: unknown }).type === "thinking") {
-        const thinking = (entry as { thinking?: unknown }).thinking;
-        return typeof thinking === "string" ? thinking : "";
-      }
-      return "";
-    })
-    .filter(Boolean)
-    .join("\n")
-    .trim();
 }
 
 function assistantEventText(event: RawEventEntry): string | null {
@@ -231,15 +216,7 @@ export function rawEventToBlocks(event: RawEventEntry): ConversationBlock[] {
   }
 
   if (event.itemKind === "assistant_meta") {
-    const body =
-      contentText(
-        event.raw.message && typeof event.raw.message === "object"
-          ? (event.raw.message as { content?: unknown }).content
-          : null
-      ) ||
-      (typeof event.raw.text === "string" ? event.raw.text.trim() : "") ||
-      event.itemSummary ||
-      "assistant_reasoning";
+    const body = assistantMetaEventText(event);
     if (body) {
       blocks.push({
         kind: "reasoning",
@@ -314,6 +291,7 @@ export function rawEventToBlocks(event: RawEventEntry): ConversationBlock[] {
 export function rawEventsToTimedBlocks(events: RawEventEntry[]) {
   const timedBlocks: Array<{ ts: string; blocks: ConversationBlock[] }> = [];
   const pendingToolCalls = new Map<string, number>();
+  const pendingAssistantMetaText = new Map<string, string>();
   let lastAssistantEvent:
     | {
         sourceType: "assistant" | "assistant_message" | "result";
@@ -322,6 +300,41 @@ export function rawEventsToTimedBlocks(events: RawEventEntry[]) {
     | null = null;
 
   for (const event of events) {
+    if (event.itemKind === "assistant_meta") {
+      const delta = assistantMetaDeltaText(event);
+      const itemId = assistantMetaItemId(event);
+      if (delta && itemId) {
+        pendingAssistantMetaText.set(
+          itemId,
+          `${pendingAssistantMetaText.get(itemId) ?? ""}${delta}`
+        );
+        continue;
+      }
+
+      const blocks = rawEventToBlocks(event);
+      if (blocks.length > 0) {
+        timedBlocks.push({ ts: event.ts, blocks });
+      } else if (itemId) {
+        const aggregated = (pendingAssistantMetaText.get(itemId) ?? "").trim();
+        if (aggregated) {
+          timedBlocks.push({
+            ts: event.ts,
+            blocks: [{
+              kind: "reasoning",
+              title: "Reasoning Summary",
+              content: aggregated,
+              raw: aggregated,
+            }],
+          });
+        }
+      }
+
+      if (itemId) {
+        pendingAssistantMetaText.delete(itemId);
+      }
+      continue;
+    }
+
     if (event.itemKind === "tool_call") {
       const toolCall = parseToolCallEvent(event);
       if (!toolCall) continue;

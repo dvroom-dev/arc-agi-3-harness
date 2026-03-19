@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_RUN_LAUNCH_PARAMS,
   normalizeRunLaunchParams,
@@ -14,8 +14,18 @@ interface RunLauncherProps {
   onStarted: (runIds: string[]) => void;
 }
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return <label className="text-[11px] uppercase tracking-wide text-zinc-500">{children}</label>;
+function FieldLabel({
+  children,
+  htmlFor,
+}: {
+  children: React.ReactNode;
+  htmlFor?: string;
+}) {
+  return (
+    <label htmlFor={htmlFor} className="text-[11px] uppercase tracking-wide text-zinc-500">
+      {children}
+    </label>
+  );
 }
 
 function CheckboxField({
@@ -45,6 +55,7 @@ export function RunLauncher({ params, onChange, onStarted }: RunLauncherProps) {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const idPrefix = useId();
 
   const activeParams = params ?? DEFAULT_RUN_LAUNCH_PARAMS;
   const summary = useMemo(() => summarizeRunLaunchParams(activeParams), [activeParams]);
@@ -143,16 +154,18 @@ export function RunLauncher({ params, onChange, onStarted }: RunLauncherProps) {
           <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
             <div className="grid grid-cols-1 gap-3">
               <div>
-                <FieldLabel>Game ID</FieldLabel>
+                <FieldLabel htmlFor={`${idPrefix}-game-id`}>Game ID</FieldLabel>
                 <input
+                  id={`${idPrefix}-game-id`}
                   value={activeParams.gameId}
                   onChange={(e) => updateParams({ gameId: e.target.value })}
                   className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200"
                 />
               </div>
               <div>
-                <FieldLabel>Game IDs Override</FieldLabel>
+                <FieldLabel htmlFor={`${idPrefix}-game-ids`}>Game IDs Override</FieldLabel>
                 <input
+                  id={`${idPrefix}-game-ids`}
                   value={activeParams.gameIds}
                   onChange={(e) => updateParams({ gameIds: e.target.value })}
                   placeholder="ls20 ft09 vc33"
@@ -160,8 +173,9 @@ export function RunLauncher({ params, onChange, onStarted }: RunLauncherProps) {
                 />
               </div>
               <div>
-                <FieldLabel>Session Name</FieldLabel>
+                <FieldLabel htmlFor={`${idPrefix}-session-name`}>Session Name</FieldLabel>
                 <input
+                  id={`${idPrefix}-session-name`}
                   value={activeParams.sessionName}
                   onChange={(e) => updateParams({ sessionName: e.target.value })}
                   placeholder="auto timestamp"
@@ -172,8 +186,9 @@ export function RunLauncher({ params, onChange, onStarted }: RunLauncherProps) {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <FieldLabel>Operation Mode</FieldLabel>
+                <FieldLabel htmlFor={`${idPrefix}-operation-mode`}>Operation Mode</FieldLabel>
                 <select
+                  id={`${idPrefix}-operation-mode`}
                   value={activeParams.operationMode}
                   onChange={(e) => updateParams({ operationMode: e.target.value as RunLaunchParams["operationMode"] })}
                   className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200"
@@ -184,8 +199,9 @@ export function RunLauncher({ params, onChange, onStarted }: RunLauncherProps) {
                 </select>
               </div>
               <div>
-                <FieldLabel>Provider</FieldLabel>
+                <FieldLabel htmlFor={`${idPrefix}-provider`}>Provider</FieldLabel>
                 <select
+                  id={`${idPrefix}-provider`}
                   value={activeParams.provider}
                   onChange={(e) => updateParams({ provider: e.target.value as RunLaunchParams["provider"] })}
                   className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200"
@@ -197,8 +213,9 @@ export function RunLauncher({ params, onChange, onStarted }: RunLauncherProps) {
                 </select>
               </div>
               <div>
-                <FieldLabel>ARC Backend</FieldLabel>
+                <FieldLabel htmlFor={`${idPrefix}-arc-backend`}>ARC Backend</FieldLabel>
                 <select
+                  id={`${idPrefix}-arc-backend`}
                   value={activeParams.arcBackend}
                   onChange={(e) => updateParams({ arcBackend: e.target.value as RunLaunchParams["arcBackend"] })}
                   className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200"
@@ -208,8 +225,9 @@ export function RunLauncher({ params, onChange, onStarted }: RunLauncherProps) {
                 </select>
               </div>
               <div>
-                <FieldLabel>Max Turns</FieldLabel>
+                <FieldLabel htmlFor={`${idPrefix}-max-turns`}>Max Turns</FieldLabel>
                 <input
+                  id={`${idPrefix}-max-turns`}
                   type="number"
                   value={activeParams.maxTurns ?? ""}
                   onChange={(e) => updateParams({ maxTurns: e.target.value === "" ? null : Number.parseInt(e.target.value, 10) })}
@@ -217,8 +235,9 @@ export function RunLauncher({ params, onChange, onStarted }: RunLauncherProps) {
                 />
               </div>
               <div>
-                <FieldLabel>Max GAME_OVER Resets</FieldLabel>
+                <FieldLabel htmlFor={`${idPrefix}-max-game-over-resets`}>Max GAME_OVER Resets</FieldLabel>
                 <input
+                  id={`${idPrefix}-max-game-over-resets`}
                   type="number"
                   value={activeParams.maxGameOverResets}
                   onChange={(e) => updateParams({ maxGameOverResets: Number.parseInt(e.target.value || "0", 10) || 0 })}
@@ -226,27 +245,32 @@ export function RunLauncher({ params, onChange, onStarted }: RunLauncherProps) {
                 />
               </div>
               <div>
-                <FieldLabel>Score Replay Start Mode</FieldLabel>
+                <FieldLabel htmlFor={`${idPrefix}-score-replay-start-mode`}>Score Replay Start Mode</FieldLabel>
                 <input
+                  id={`${idPrefix}-score-replay-start-mode`}
                   value={activeParams.scoreAfterSolveStartMode}
                   onChange={(e) => updateParams({ scoreAfterSolveStartMode: e.target.value })}
-                  className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200"
+                  placeholder="recover (default)"
+                  disabled={!activeParams.scoreAfterSolve}
+                  className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-950 disabled:text-zinc-500"
                 />
               </div>
             </div>
 
             <div className="grid grid-cols-1 gap-3">
               <div>
-                <FieldLabel>ARC Base URL</FieldLabel>
+                <FieldLabel htmlFor={`${idPrefix}-arc-base-url`}>ARC Base URL</FieldLabel>
                 <input
+                  id={`${idPrefix}-arc-base-url`}
                   value={activeParams.arcBaseUrl}
                   onChange={(e) => updateParams({ arcBaseUrl: e.target.value })}
                   className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200"
                 />
               </div>
               <div>
-                <FieldLabel>Scorecard ID</FieldLabel>
+                <FieldLabel htmlFor={`${idPrefix}-scorecard-id`}>Scorecard ID</FieldLabel>
                 <input
+                  id={`${idPrefix}-scorecard-id`}
                   value={activeParams.scorecardId}
                   onChange={(e) => updateParams({
                     scorecardId: e.target.value,
@@ -257,8 +281,9 @@ export function RunLauncher({ params, onChange, onStarted }: RunLauncherProps) {
                 />
               </div>
               <div>
-                <FieldLabel>Scorecard Owner Check ID</FieldLabel>
+                <FieldLabel htmlFor={`${idPrefix}-scorecard-owner-check-id`}>Scorecard Owner Check ID</FieldLabel>
                 <input
+                  id={`${idPrefix}-scorecard-owner-check-id`}
                   value={activeParams.scorecardOwnerCheckId}
                   onChange={(e) => updateParams({ scorecardOwnerCheckId: e.target.value })}
                   className="mt-1 w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-200"

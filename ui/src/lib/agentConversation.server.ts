@@ -1,11 +1,11 @@
 import type { ConversationBlock } from "@/lib/conversation";
 import { findConversationId } from "@/lib/agentConversationData.server";
 import {
-  loadStoredConversationBranches,
+  loadConversationBranchDocument,
+  loadStoredConversationBranchSummaries,
   sliceBranchDocumentSeed,
 } from "@/lib/agentConversationStore.server";
 import {
-  countBranchActivity,
   eventsInWindow,
   interventionBlock,
   loadInterventions,
@@ -93,10 +93,8 @@ export async function listAgentConversationBranches(
   if (!conversationId) {
     return loadConversationForkBranchFallback(runId);
   }
-  const [storedBranches, rawEvents, interventions] = await Promise.all([
-    loadStoredConversationBranches(runId, conversationId),
-    loadRawEvents(runId, conversationId),
-    loadInterventions(runId, conversationId),
+  const [storedBranches] = await Promise.all([
+    loadStoredConversationBranchSummaries(runId, conversationId),
   ]);
   const activeSession = await activeSessionInfo(runId);
   if (storedBranches.length === 0) {
@@ -105,8 +103,6 @@ export async function listAgentConversationBranches(
   const effectiveActiveForkId = resolveEffectiveActiveForkId(storedBranches, activeSession);
 
   const baseBranches = storedBranches.map((fork) => {
-    const { eventWindow } = eventsInWindow(rawEvents, interventions, fork.createdAt, fork.nextCreatedAt);
-    const activity = countBranchActivity(eventWindow);
     return {
       key: fork.key,
       mode: fork.mode ?? null,
@@ -118,11 +114,11 @@ export async function listAgentConversationBranches(
       active: fork.forkId === effectiveActiveForkId || (!effectiveActiveForkId && fork.active),
       head: fork.head,
       actionSummary: fork.actionSummary,
-      assistantTurns: activity.assistantTurns,
-      toolCallCount: activity.toolCallCount,
-      toolResultCount: activity.toolResultCount,
+      assistantTurns: fork.assistantTurns,
+      toolCallCount: fork.toolCallCount,
+      toolResultCount: fork.toolResultCount,
       initialUserPreview: fork.initialUserPreview,
-      lastAssistantPreview: activity.lastAssistantPreview,
+      lastAssistantPreview: fork.lastAssistantPreview,
     };
   });
 
@@ -153,13 +149,11 @@ async function readAgentBranchSkeletonDocument(
   }
   try {
     const [storedBranches, rawEvents, interventions] = await Promise.all([
-      loadStoredConversationBranches(runId, conversationId),
+      loadStoredConversationBranchSummaries(runId, conversationId),
       loadRawEvents(runId, conversationId),
       loadInterventions(runId, conversationId),
     ]);
     const baseBranches = storedBranches.map((fork) => {
-      const { eventWindow } = eventsInWindow(rawEvents, interventions, fork.createdAt, fork.nextCreatedAt);
-      const activity = countBranchActivity(eventWindow);
       return {
         key: fork.key,
         mode: fork.mode ?? null,
@@ -170,11 +164,11 @@ async function readAgentBranchSkeletonDocument(
         parentId: fork.parentId,
         createdAt: fork.createdAt,
         actionSummary: fork.actionSummary,
-        assistantTurns: activity.assistantTurns,
-        toolCallCount: activity.toolCallCount,
-        toolResultCount: activity.toolResultCount,
+        assistantTurns: fork.assistantTurns,
+        toolCallCount: fork.toolCallCount,
+        toolResultCount: fork.toolResultCount,
         initialUserPreview: fork.initialUserPreview,
-        lastAssistantPreview: activity.lastAssistantPreview,
+        lastAssistantPreview: fork.lastAssistantPreview,
       };
     });
     const episode = findAgentConversationEpisode(buildAgentConversationEpisodes(baseBranches), branchKey);
@@ -184,7 +178,8 @@ async function readAgentBranchSkeletonDocument(
       .sort((a, b) => (parseTime(a.createdAt) ?? 0) - (parseTime(b.createdAt) ?? 0));
     const branch = groupedBranches.at(-1);
     if (!branch) throw new Error("branch not found");
-    const seedBlocks = compactConversationBlocks(sliceBranchDocumentSeed(branch.documentText));
+    const branchDocument = await loadConversationBranchDocument(runId, conversationId, branch.forkId);
+    const seedBlocks = compactConversationBlocks(sliceBranchDocumentSeed(branchDocument));
     const eventBlocks: ConversationBlock[] = [];
     for (const groupBranch of groupedBranches) {
       const { eventWindow, interventionWindow } = eventsInWindow(
@@ -212,7 +207,7 @@ async function readAgentBranchSkeletonDocument(
       blocks: [...seedBlocks, ...windowed.blocks],
       source: `${branch.mode || "agent"} conversation`,
       totalLines:
-        branch.documentText.split("\n").length +
+        branchDocument.split("\n").length +
         dedupedEventBlocks.reduce((sum, block) => sum + block.content.split("\n").length, 0),
       totalEvents: seedEventCount + windowed.totalEvents,
       shownEvents: seedEventCount + windowed.shownEvents,
@@ -249,12 +244,15 @@ export async function readAgentConversationDocument(
     };
   }
   const [storedBranches, rawEvents, interventions] = await Promise.all([
-    loadStoredConversationBranches(runId, conversationId),
+    loadStoredConversationBranchSummaries(runId, conversationId),
     loadRawEvents(runId, conversationId),
     loadInterventions(runId, conversationId),
   ]);
   const active = storedBranches.find((branch) => branch.active) ?? storedBranches.at(-1) ?? null;
-  const seedBlocks = active ? compactConversationBlocks(sliceBranchDocumentSeed(active.documentText)) : [];
+  const activeDocument = active
+    ? await loadConversationBranchDocument(runId, conversationId, active.forkId)
+    : null;
+  const seedBlocks = activeDocument ? compactConversationBlocks(sliceBranchDocumentSeed(activeDocument)) : [];
   const { eventWindow, interventionWindow } = active
     ? eventsInWindow(rawEvents, interventions, active.createdAt, active.nextCreatedAt)
     : { eventWindow: rawEvents, interventionWindow: interventions };
@@ -282,7 +280,7 @@ export async function readAgentConversationDocument(
     blocks: [...seedBlocks, ...windowed.blocks],
     source: active?.mode ? `${active.mode} raw events` : "agent raw events",
     totalLines:
-      (active?.documentText.split("\n").length ?? 0) +
+      (activeDocument?.split("\n").length ?? 0) +
       dedupedEventBlocks.reduce((sum, block) => sum + block.content.split("\n").length, 0),
     totalEvents: seedEventCount + windowed.totalEvents,
     shownEvents: seedEventCount + windowed.shownEvents,

@@ -1,8 +1,12 @@
 import type { ConversationBlock } from "@/lib/conversation";
 import { findConversationId } from "@/lib/agentConversationData.server";
 import { runDir } from "@/lib/paths";
-import { loadStoredConversationBranches } from "@/lib/agentConversationStore.server";
+import {
+  loadConversationBranchDocument,
+  loadStoredConversationBranchSummaries,
+} from "@/lib/agentConversationStore.server";
 import type { AgentConversationBranch } from "@/lib/types";
+import fs from "fs/promises";
 
 export interface SessionMetadata {
   conversationId: string | null;
@@ -31,7 +35,7 @@ async function loadActiveBranchDocument(runId: string): Promise<{
   const conversationId = await findConversationId(runId);
   if (!conversationId) return null;
   try {
-    const storedBranches = await loadStoredConversationBranches(runId, conversationId);
+    const storedBranches = await loadStoredConversationBranchSummaries(runId, conversationId);
     const activeBranch =
       storedBranches.find((branch) => branch.active) ??
       storedBranches.find((branch) => branch.head) ??
@@ -42,7 +46,7 @@ async function loadActiveBranchDocument(runId: string): Promise<{
       conversationId,
       forkId: activeBranch.forkId,
       mode: activeBranch.mode,
-      documentText: activeBranch.documentText,
+      documentText: await loadConversationBranchDocument(runId, conversationId, activeBranch.forkId),
     };
   } catch {
     return null;
