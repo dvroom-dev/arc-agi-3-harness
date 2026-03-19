@@ -7,7 +7,7 @@ runtime_defaults:
   agent_model: claude-opus-4-6
   agent_model_reasoning_effort: medium
   supervisor_provider: codex
-  supervisor_model: gpt-5.3-codex
+  supervisor_model: gpt-5.4
   supervisor_model_reasoning_effort: high
 
 context_management_strategy: aggressive
@@ -94,10 +94,12 @@ prompt_parts:
         - `python3 model.py compare_sequences ... ; print(...)`
         - `python3 -c '...'`
         - `awk '...' level_current/current_state.hex`
+        - `python3 inspect_grid_slice.py level_current/current_state.hex --rows 36:55 --cols 29:38`
         - `python3 model.py exec_file --game-id "${vars.game_id}" /abs/path/to/play.py`
         Do not use shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null`.
         If you parse JSON from a CLI, parse stdout only. Never pipe `2>&1` into `json.load`, `jq`, or another JSON parser.
         `inspect_grid_slice.py` accepts START:END ranges with END normally inclusive; for whole-grid spans you may use END equal to the grid size (for example `--rows 0:64 --cols 0:65` on a 64x65 grid).
+        `inspect_grid_slice.py` and `inspect_grid_values.py` require `--file`; pass the target path explicitly every time.
         Prefer existing helper scripts such as `inspect_sequence.py`, `inspect_components.py`, `inspect_grid_slice.py`, and `inspect_grid_values.py`.
         If `code_model` truly needs custom analysis, add a small read-only helper script in the workspace and run it directly; do not improvise `python3 -c` snippets.
         Use `python3 inspect_components.py --coverage --level LEVEL` to verify that exact component geometry covers every seen state for the current level.
@@ -160,6 +162,7 @@ supervisor:
       - "If the latest probe resolved or falsified all live explanations for the active question, require theory to brainstorm 2-3 fresh explanations for the remaining unexplained evidence before choosing the next step."
       - "If the newest supervisor-approved handoff already narrows the next probe more tightly than the existing theory.md plan, preserve that narrower handoff. Do not let an older plan in theory.md override the latest approved one."
       - "On level 2+, do not route frontier solution attempts through explore_only or theory. Use explore_only only to investigate one newly introduced visible component or one newly changed visible component state. Use solve_model for every frontier solution attempt."
+      - "On level 2+, do not treat model-only behavior, dry-run success, or vacuous compare-clean with zero real frontier sequences as proof of a newly introduced mechanic, completion rule, or branch suffix. Newly introduced visible-component semantics still require action-linked real-game evidence on that level."
       - "On level 2+, treat earlier proven rules within the same game as the inherited baseline unless current evidence contradicts them. Frontier real-game probes must target the new level-specific delta, not re-prove inherited behavior."
       - "If an agent switch_mode request is accepted or redirected, carry forward only the supervisor-approved handoff needed for the next mode. Do not forward the agent's full latest assistant message verbatim when it contains extra action-sequence planning or mixed objectives."
       - "Review components.py and model_lib.py when recent evidence or parity artifacts point to a concrete detector/mechanics bug. Do not spend early level-1 passes on speculative code review when the main issue is choosing the right next probe."
@@ -168,7 +171,7 @@ supervisor:
       - "If current_compare.md shows divergence before the first level is completed, treat it as evidence to fold back into theory, not a reason to enter code_model. After level 1 is solved or on later levels, treat compare divergence as a major control signal and route to code_model when parity repair is the blocker."
       - "If a keepalive interrupt injected KEEPALIVE_RETURN_MODE=<mode>, treat the next normal supervisor review as a return checkpoint: once the required one real-game action is evidenced, resume_mode_head back to that prior mode; if the interrupt action is still not evidenced, keep the run in the temporary real-game mode and re-issue only the minimal keepalive guidance."
       - "When a solved-level compare pin is active, keep all visible state, compare work, and model work targeted to the pinned solved level until the supervisor explicitly certifies wrap-up complete. While pinned, only theory and code_model are valid next modes, frontier-level reasoning is forbidden, and if pinned compare is clean the supervisor must either certify wrap-up complete or name one exact pinned-level blocker."
-      - "Coverage helpers and compare helpers provide evidence only; they do not certify solved-level wrap-up on their own. Wrap-up certification is explicit, not implied: set supervisor transition_payload.wrapup_certified=true and transition_payload.wrapup_level=<pinned level>, then independently choose the frontier mode and conversation disposition."
+      - "Coverage helpers and compare helpers provide evidence only; they do not certify solved-level wrap-up on their own. Wrap-up certification is explicit, not implied: call `certify_wrapup` with the pinned level and rationale; the supervisor must then accept or reject certification and choose the post-wrap-up mode."
       - "For rule enforcement decisions, cite concrete evidence pointers (turn/tool/output/file). When a tool interception marker is present, prioritize handling it immediately."
   tool_interception:
     rules:
@@ -389,6 +392,7 @@ modes:
         - write_file
         - list_dir
         - check_supervisor
+        - certify_wrapup
         - paginate_tool_response
         - switch_mode
       shell_invocation_policy:
@@ -422,6 +426,15 @@ modes:
             pattern: '^python3 (\./)?inspect_grid_(slice|values)\.py(\s|$)'
             case_sensitive: true
       provider_builtin_tools:
+        codex:
+          allow:
+            - Bash
+            - Glob
+            - Grep
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
         claude:
           allow:
             - Bash
@@ -441,6 +454,12 @@ modes:
             - MultiEdit
             - Write
       provider_filesystem:
+        codex:
+          allow_new_files: false
+          write:
+            allow:
+              - theory.md
+              - components.py
         claude:
           allow_new_files: false
           write:
@@ -492,6 +511,7 @@ modes:
             When evidence is still weak, explicitly record at least two plausible alternative theories before committing the next probe, and make that probe discriminate between them.
             If a later level shows another instance or changed state of a previously known interaction family, do not rule that instance out from static reasoning alone. Keep it live until action-linked evidence on that specific instance rules it out or confirms its role.
             Once a completion theory or trigger path is falsified, do not revisit it without new action-linked evidence.
+            If a bounded probe changes a different visible region than the currently targeted one, treat the changed region as the leading action-responsive candidate and mark the old target falsified or downgraded unless direct evidence still supports it.
             If you can already name the smallest next step, switch modes promptly instead of continuing broad analysis.
         - prompt_part: artifact_read_path
         - prompt_part: component_model_runtime
@@ -539,6 +559,7 @@ modes:
             - prefer the shortest discriminating probe that can change the theory over authoring a long action sequence while core action or interaction mechanics are still uncertain;
             - if the next probe is already one action, hand off exactly that one action; do not expand it back into an older longer action sequence;
             - while a solved-level compare pin is active and compare is clean, either prepare final pinned-level certification or name one exact pinned-level blocker; do not write frontier-level plans;
+            - while already in `theory` on a solved-level wrap-up checkpoint with pinned compare clean and no pinned-level blocker, call `certify_wrapup` instead of `switch_mode`; the supervisor will decide whether to release the pin and which mode should run next;
             - while a solved-level compare pin is active and compare is not clean, stay strictly on pinned-level replay/parity work; do not inspect or summarize frontier start-state artifacts even if the terminal pinned state visually resembles the next frontier state;
             - on level 2+, do not write a frontier real-game solve action sequence in theory mode;
             - on level 2+, start from prior levels' proven rules as the inherited baseline unless current evidence contradicts them;
@@ -657,6 +678,13 @@ modes:
             pattern: '^arc_repl (exec|reset_level)(\s|$)'
             case_sensitive: true
       provider_builtin_tools:
+        codex:
+          allow:
+            - Bash
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
         claude:
           allow:
             - Bash
@@ -672,6 +700,14 @@ modes:
             - MultiEdit
             - Write
       provider_filesystem:
+        codex:
+          allow_new_files: false
+          read:
+            allow:
+              - theory.md
+          write:
+            allow:
+              - theory.md
         claude:
           allow_new_files: false
           read:
@@ -774,6 +810,13 @@ modes:
             pattern: '^arc_repl (exec|reset_level)(\s|$)'
             case_sensitive: true
       provider_builtin_tools:
+        codex:
+          allow:
+            - Bash
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
         claude:
           allow:
             - Bash
@@ -789,6 +832,14 @@ modes:
             - MultiEdit
             - Write
       provider_filesystem:
+        codex:
+          allow_new_files: false
+          read:
+            allow:
+              - theory.md
+          write:
+            allow:
+              - theory.md
         claude:
           allow_new_files: false
           read:
@@ -833,6 +884,7 @@ modes:
             If the current `# Explore Plan` is a bounded action sequence, do not bounce back to theory after each expected repeated action; keep going until completion, a novel event, the explicit stop condition, or a blocker.
             The bootstrap turn should stay tiny: one or two distinct actions maximum, only enough to identify first-order action effects and which visible features respond to them.
             Once a bounded action sequence is deterministic and directly tests the current handed-off completion theory or reaches the handed-off target, keep executing it until the explicit stop condition instead of turning repeated actions into fresh micro-plans or short sequence prefixes.
+            If the probe changes a different visible region than the handoff named, report that changed region as the actual action-linked result and treat the original target as falsified or weakened instead of pretending the named target was tested successfully.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
             For actionful probes, inspect the returned `artifacts.after_state_hex` first before reopening on-disk turn artifacts.
             Do not use read-only `arc_repl` calls as inspection tools.
@@ -886,6 +938,7 @@ modes:
         - write_file
         - list_dir
         - check_supervisor
+        - certify_wrapup
         - paginate_tool_response
         - switch_mode
       shell_invocation_policy:
@@ -916,6 +969,15 @@ modes:
             pattern: '^python3 (\./)?inspect_grid_(slice|values)\.py(\s|$)'
             case_sensitive: true
       provider_builtin_tools:
+        codex:
+          allow:
+            - Bash
+            - Glob
+            - Grep
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
         claude:
           allow:
             - Bash
@@ -935,6 +997,31 @@ modes:
             - MultiEdit
             - Write
       provider_filesystem:
+        codex:
+          allow_new_files: false
+          read:
+            allow:
+              - theory.md
+              - model.py
+              - components.py
+              - model_lib.py
+              - play.py
+              - play_lib.py
+              - inspect_sequence.py
+              - inspect_components.py
+              - inspect_grid_slice.py
+              - inspect_grid_values.py
+              - component_coverage.json
+              - component_coverage.md
+              - current_compare.json
+              - current_compare.md
+              - level_current/sequence_compare
+          write:
+            allow:
+              - theory.md
+              - components.py
+              - model_lib.py
+              - play_lib.py
         claude:
           allow_new_files: false
           read:
@@ -1013,6 +1100,8 @@ modes:
             - do not assume scratch stderr redirection, shell output redirection, or temp files are available.
             On level 2+, do not treat this mode as a generic readiness review. Either patch the frontier mechanics/play branch needed for model proof, or identify one exact missing real-game observation that theory must resolve next.
             Do not do open-ended action-sequence planning here; write only the smallest deterministic frontier branch that current evidence supports.
+            Do not mark a newly introduced current-level mechanic as proven from model-only behavior, dry runs, or clean compare on previously explored prefixes alone. Compare only validates explored real-game sequences; it does not certify unseen branch suffixes or newly introduced component semantics.
+            If the active frontier level has zero real-game sequences, compare-clean is vacuous for that level. Use model proof only as a hypothesis check, not as proof that a new frontier branch or new mechanic is correct in the real game.
             Use `theory.md`, `components.py`, `component_coverage.*`, `current_compare.*`, and `level_current/sequence_compare/*.md` as the primary evidence surface here.
             If a solved-level compare pin is active, stay scoped to the pinned solved level and ignore frontier-level artifacts until the pin clears.
             Do not read raw `.hex` state files or sequence metadata directly in this mode. Use compare report markdown and sampled diff cells instead.
@@ -1020,6 +1109,7 @@ modes:
             Runtime/harness internals are out of scope: do not read or edit any file under `/config/tools/`.
             Treat `current_compare.json`, `current_compare.md`, and `level_current/sequence_compare/*.md` as the authoritative parity artifacts in this mode.
             If they disagree or look broken, report the exact contradiction from workspace artifacts and stay in `code_model`; do not inspect runtime/tooling source.
+            Avoid oversized `Read` calls in this mode. Prefer `Read` with `offset`/`limit`, `rg -n`, or the sanctioned grid helpers over loading huge files into the transcript when a targeted slice or one section is enough.
             When compare is red, reduce the problem to one exact named mismatch before doing broader reasoning. Name the specific sequence, action index, and mismatch class (for example `after_state_mismatch`, `state_transition_mismatch`, `level_complete_after`, `game_over_after`, or one exact component delta) and treat that as the only active repair target until it is either fixed or replaced by a newer exact mismatch from fresh compare output.
             If compare has already narrowed to one late transition mismatch, do not restart broad branch analysis, re-derive the whole level theory, or speculate about unrelated earlier mechanics. Patch or disprove that one transition first.
             If compare is red and you have one exact blocker, stay in `code_model` and report that blocker precisely; do not bounce back to `theory` while parity remains red.
@@ -1038,7 +1128,8 @@ modes:
             Required loop:
             1) inspect `theory.md`, `components.py`, `current_compare.md`, and the referenced `level_current/sequence_compare/*.md` report;
             2) if needed, run `python3 inspect_sequence.py --current-mismatch` to print the first mismatching compare report target and step;
-               for sanctioned grid inspection, use `python3 inspect_grid_slice.py ...` or `python3 inspect_grid_values.py ...` instead of `awk` or `python3 -c`;
+               for sanctioned grid inspection, use `python3 inspect_grid_slice.py --file ... --rows ... --cols ...` or `python3 inspect_grid_values.py --file ... --value ...` instead of `awk` or `python3 -c`;
+               when reading large files, prefer bounded `Read` with `offset`/`limit` or `rg -n` over full-file reads that will be offloaded as persisted output;
             3) reduce compare to one exact active repair target: sequence id, action index, and mismatch class; if the mismatch is a transition mismatch, name the exact field(s) (`state_*`, `levels_completed_*`, `level_complete_*`, `game_over_*`) before continuing;
             4) name the exact mismatching sampled diff cells or transition fields, match them to `theory.md`, and patch the missing mechanics, completion transitions, frontier branch logic, or component detectors/names needed in `model_lib.py`/`play_lib.py`/`components.py`;
                if a needed visible entity already has a detector in `components.py`, use that detector from `model_lib.py`/`play_lib.py` instead of re-deriving it from raw value scans there;
@@ -1047,7 +1138,7 @@ modes:
             6) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes;
             7) if compare is clean across all explored current-level sequences:
                - if a solved-level compare pin is active, switch_mode to `theory` so the supervisor can certify solved-level wrap-up complete;
-               - switch_mode to `solve_model` if a concrete current-level branch now exists in `play_lib.py` and is ready to run through `play.py`;
+               - switch_mode to `solve_model` if a concrete current-level branch now exists in `play_lib.py`, any newly introduced current-level mechanics used by that branch are backed by action-linked real-game evidence rather than model-only inference, and the branch is ready to run through `play.py`;
                - otherwise switch_mode to `theory` only if there is one exact missing real-game observation that blocks the next branch patch;
             8) if compare is still red and a repair is blocked, stay in `code_model` and produce a precise blocker report with exact file/line evidence and the smallest required fix; do not switch out of `code_model` while parity remains red.
             9) if there is one exact blocker preventing parity repair, ask the supervisor to escalate or resolve that blocker from `code_model`; do not switch back to `theory` until compare is clean.
@@ -1150,6 +1241,15 @@ modes:
             pattern: '^arc_repl exec_file(\s|$)'
             case_sensitive: true
       provider_builtin_tools:
+        codex:
+          allow:
+            - Bash
+            - Glob
+            - Grep
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
         claude:
           allow:
             - Bash
@@ -1169,6 +1269,30 @@ modes:
             - MultiEdit
             - Write
       provider_filesystem:
+        codex:
+          allow_new_files: false
+          read:
+            allow:
+              - theory.md
+              - model.py
+              - components.py
+              - model_lib.py
+              - play.py
+              - play_lib.py
+              - inspect_sequence.py
+              - inspect_components.py
+              - inspect_grid_slice.py
+              - inspect_grid_values.py
+              - component_coverage.json
+              - component_coverage.md
+              - current_compare.json
+              - current_compare.md
+              - level_current/sequence_compare
+          write:
+            allow:
+              - theory.md
+              - play.py
+              - play_lib.py
         claude:
           allow_new_files: false
           read:
@@ -1229,6 +1353,8 @@ modes:
             `play.py` is a harness-owned static dispatcher. Do not edit it in this mode; put level-specific solve branches in `play_lib.py`.
             Treat compare report metadata and current runtime state as different things. A compare report's `end_reason` describes how that historical compared sequence ended; it does NOT by itself mean the current model session or current real game is in that state now.
             For live state in this mode, trust only the current `python3 model.py status` payload, the current `python3 model.py exec_file ...` payload, `arc_repl` replay output, and current supervisor/ARC state artifacts.
+            Clean compare on zero explored frontier sequences is vacuous. Do not treat it as validation of newly introduced frontier mechanics or unseen branch suffixes.
+            A model-side proof only shows that the current model and branch are internally consistent. It does not prove a newly introduced frontier mechanic unless that mechanic is already backed by action-linked real-game evidence on the current level.
             If `python3 model.py exec_file ...` errors while trying to initialize the next unseen level, count that as proof of completion only when the current status fields still explicitly show the just-finished level completed (for example `last_step_level_complete=true` or `last_completed_level=<LEVEL>`). If those fields do not show completion, the proof failed.
         - prompt_part: model_runtime
         - prompt_part: arc_repl_playback_runtime
@@ -1239,7 +1365,6 @@ modes:
             Active game: `${vars.game_id}`.
             Required sequence in this mode:
             - determine `LEVEL` with `arc_level`;
-            - `python3 model.py set_level --game-id "${vars.game_id}" "$LEVEL"`;
             - `python3 model.py exec_file --reset-level-first --game-id "${vars.game_id}" ./play.py`;
             - `python3 model.py status --game-id "${vars.game_id}"`;
             - interpret success/failure from the current exec/status fields, not from `current_compare.json.reports[*].end_reason`;
@@ -1266,9 +1391,11 @@ modes:
       requirements:
         - "When model proof succeeds, mark the level SOLVED in `theory.md` with concise evidence."
         - "Do not enter or remain in solve_model while a solved-level compare pin is active."
+        - "Do not call `python3 model.py set_level ...` in solve_model. The active visible level must come from the current runtime state after wrap-up release or reset-level-first replay."
         - "Run both model and real `exec_file` replays with `--reset-level-first`; do not put reset logic inside `play.py`."
         - "Treat `play.py` as a static harness-owned dispatcher and keep level-specific solve logic in `play_lib.py`."
         - "Do not treat compare `reports[*].end_reason` as the current game/model state in solve_model; it is historical sequence metadata only."
+        - "Do not claim a newly introduced frontier mechanic is proven from model proof alone. If the real replay fails, treat the branch assumption as unsupported until action-linked real-game evidence confirms it."
         - "If model exec errors while trying to initialize a missing next level, only count that as completion if current status fields explicitly record completion of the just-finished level."
       violations:
         - "Using shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null` in solve_model."
@@ -1308,6 +1435,13 @@ modes:
             pattern: '^arc_repl (exec_file|reset_level)(\s|$)'
             case_sensitive: true
       provider_builtin_tools:
+        codex:
+          allow:
+            - Bash
+            - Read
+            - Edit
+            - MultiEdit
+            - Write
         claude:
           allow:
             - Bash
@@ -1323,6 +1457,16 @@ modes:
             - MultiEdit
             - Write
       provider_filesystem:
+        codex:
+          allow_new_files: false
+          read:
+            allow:
+              - theory.md
+              - play.py
+              - play_lib.py
+          write:
+            allow:
+              - theory.md
         claude:
           allow_new_files: false
           read:
