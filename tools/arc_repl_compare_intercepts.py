@@ -190,15 +190,25 @@ def _write_current_compare_artifacts(
     level_dir = artifacts_dir / f"level_{int(target_level)}"
     canonical_md = level_dir / "sequence_compare" / "current_compare.md"
     canonical_json = level_dir / "sequence_compare" / "current_compare.json"
-    _write_compare_artifact(canonical_md, report_text)
-    _write_compare_artifact(canonical_json, json_text)
-
     _write_compare_artifact(cwd / "current_compare.md", report_text)
     _write_compare_artifact(cwd / "current_compare.json", json_text)
 
     level_current_dir = cwd / "level_current" / "sequence_compare"
     _write_compare_artifact(level_current_dir / "current_compare.md", report_text)
     _write_compare_artifact(level_current_dir / "current_compare.json", json_text)
+
+    try:
+        _write_compare_artifact(canonical_md, report_text)
+        _write_compare_artifact(canonical_json, json_text)
+    except PermissionError:
+        # Agent-facing compare artifacts are already written under the workspace.
+        # Do not convert a successful real-game step into a failed exec result
+        # just because the control-plane mirror path is not writable.
+        return
+    except OSError as exc:
+        if getattr(exc, "errno", None) == 13:
+            return
+        raise
 
 
 def run_exec_compare_intercept(cwd: Path, result: object) -> str | None:

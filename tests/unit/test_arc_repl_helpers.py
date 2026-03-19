@@ -47,8 +47,22 @@ def test_ipc_paths_resolve_under_session_dir(tmp_path, monkeypatch: pytest.Monke
     cwd.mkdir(parents=True, exist_ok=True)
     monkeypatch.setenv("ARC_STATE_DIR", str(tmp_path / "state"))
     req, resp = arc_repl._ipc_paths(cwd, "conv-1")
-    assert str(req).endswith("/repl-sessions/conv-1/ipc/requests")
-    assert str(resp).endswith("/repl-sessions/conv-1/ipc/responses")
+    assert str(req).endswith("/agent/.arc_repl_ipc/conv-1/requests")
+    assert str(resp).endswith("/agent/.arc_repl_ipc/conv-1/responses")
+
+
+def test_ipc_paths_reuse_session_workspace_root_from_meta(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    cwd = tmp_path / "agent"
+    subdir = cwd / "level_current"
+    subdir.mkdir(parents=True, exist_ok=True)
+    arc_dir = tmp_path / "state"
+    monkeypatch.setenv("ARC_STATE_DIR", str(arc_dir))
+    meta = arc_dir / "repl-sessions" / "conv-1" / "session.json"
+    meta.parent.mkdir(parents=True, exist_ok=True)
+    meta.write_text('{"workspace_root": "' + str(cwd.resolve()) + '"}\n', encoding="utf-8")
+    req, resp = arc_repl._ipc_paths(subdir, "conv-1")
+    assert str(req).endswith("/agent/.arc_repl_ipc/conv-1/requests")
+    assert str(resp).endswith("/agent/.arc_repl_ipc/conv-1/responses")
 
 
 def test_grid_from_hex_rows_and_chunk() -> None:

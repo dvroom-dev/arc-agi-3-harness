@@ -71,20 +71,39 @@ def lifecycle_path(arc_dir: Path, conversation_id: str) -> Path:
     return session_dir(arc_dir, conversation_id) / "daemon.lifecycle.jsonl"
 
 
-def ipc_paths(arc_dir: Path, conversation_id: str) -> tuple[Path, Path]:
-    sdir = session_dir(arc_dir, conversation_id)
-    ipc_dir = sdir / "ipc"
+def _session_workspace_root(arc_dir: Path, conversation_id: str, cwd: Path) -> Path:
+    root = cwd.resolve()
+    meta = meta_path(arc_dir, conversation_id)
+    if not meta.exists():
+        return root
+    try:
+        payload = json.loads(meta.read_text(encoding="utf-8"))
+    except Exception:
+        return root
+    if isinstance(payload, dict):
+        raw = str(payload.get("workspace_root") or payload.get("cwd") or "").strip()
+        if raw:
+            try:
+                return Path(raw).expanduser().resolve()
+            except Exception:
+                return Path(raw).expanduser()
+    return root
+
+
+def ipc_paths(arc_dir: Path, conversation_id: str, cwd: Path) -> tuple[Path, Path]:
+    ipc_dir = _session_workspace_root(arc_dir, conversation_id, cwd) / ".arc_repl_ipc" / conversation_id
     return ipc_dir / "requests", ipc_dir / "responses"
 
 
 def send_ipc_request(
     *,
     arc_dir: Path,
+    cwd: Path,
     conversation_id: str,
     request: dict,
     timeout_s: float,
 ) -> dict:
-    requests_dir, responses_dir = ipc_paths(arc_dir, conversation_id)
+    requests_dir, responses_dir = ipc_paths(arc_dir, conversation_id, cwd)
     requests_dir.mkdir(parents=True, exist_ok=True)
     responses_dir.mkdir(parents=True, exist_ok=True)
 
@@ -111,4 +130,3 @@ def send_ipc_request(
             return payload
         time.sleep(0.05)
     raise RuntimeError(f"arc_repl daemon response timeout after {timeout_s}s")
-

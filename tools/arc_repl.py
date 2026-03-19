@@ -88,8 +88,8 @@ _pid_path = lambda cwd, conversation_id: pid_path(_arc_dir(cwd), conversation_id
 _meta_path = lambda cwd, conversation_id: meta_path(_arc_dir(cwd), conversation_id)
 _daemon_log_path = lambda cwd, conversation_id: daemon_log_path(_arc_dir(cwd), conversation_id)
 _lifecycle_path = lambda cwd, conversation_id: lifecycle_path(_arc_dir(cwd), conversation_id)
-_ipc_paths = lambda cwd, conversation_id: ipc_paths(_arc_dir(cwd), conversation_id)
-_send_ipc_request = lambda cwd, conversation_id, request, timeout_s: send_ipc_request(arc_dir=_arc_dir(cwd), conversation_id=conversation_id, request=request, timeout_s=timeout_s)
+_ipc_paths = lambda cwd, conversation_id: ipc_paths(_arc_dir(cwd), conversation_id, cwd)
+_send_ipc_request = lambda cwd, conversation_id, request, timeout_s: send_ipc_request(arc_dir=_arc_dir(cwd), cwd=cwd, conversation_id=conversation_id, request=request, timeout_s=timeout_s)
 def _append_lifecycle_event(cwd: Path, conversation_id: str, event: str, **fields: object) -> None:
     try:
         session_dir = _session_dir(cwd, conversation_id)
@@ -294,6 +294,8 @@ def _daemon_main(
         requested_game_id=requested_game_id,
         socket_path=socket_path,
         meta_path=_meta_path(cwd, conversation_id),
+        requests_dir=_ipc_paths(cwd, conversation_id)[0],
+        responses_dir=_ipc_paths(cwd, conversation_id)[1],
         make_session=lambda: ReplSession(
             cwd=cwd,
             conversation_id=conversation_id,

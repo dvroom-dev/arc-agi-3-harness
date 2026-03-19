@@ -36,6 +36,8 @@ def test_daemon_stops_when_parent_exits(monkeypatch, tmp_path: Path) -> None:
         requested_game_id="ls20",
         socket_path=tmp_path / "daemon.ready",
         meta_path=tmp_path / "session.json",
+        requests_dir=tmp_path / "ipc" / "requests",
+        responses_dir=tmp_path / "ipc" / "responses",
         make_session=lambda: FakeSession(),
         append_lifecycle_event=_append_event,
         error_payload=lambda **kwargs: kwargs,

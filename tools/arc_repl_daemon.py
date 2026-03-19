@@ -42,6 +42,8 @@ def run_daemon(
     requested_game_id: str,
     socket_path: Path,
     meta_path: Path,
+    requests_dir: Path,
+    responses_dir: Path,
     make_session: Callable[[], object],
     append_lifecycle_event: Callable[..., None],
     error_payload: Callable[..., dict],
@@ -80,6 +82,7 @@ def run_daemon(
                 "game_id": session.game_id,
                 "transport": "file",
                 "socket_path": str(socket_path),
+                "workspace_root": str(cwd.resolve()),
                 "pid": os.getpid(),
                 "started_at_unix": started_at_unix,
                 "status": "running",
@@ -98,9 +101,6 @@ def run_daemon(
         socket_path=str(socket_path),
     )
 
-    ipc_dir = meta_path.parent / "ipc"
-    requests_dir = ipc_dir / "requests"
-    responses_dir = ipc_dir / "responses"
     requests_dir.mkdir(parents=True, exist_ok=True)
     responses_dir.mkdir(parents=True, exist_ok=True)
     socket_path.write_text("file-ipc\n", encoding="utf-8")
