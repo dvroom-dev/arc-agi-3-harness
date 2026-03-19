@@ -21,6 +21,57 @@ except Exception:
     )
 
 
+def _read_hex_rows_if_exists(path: Path) -> list[str] | None:
+    if not path.exists():
+        return None
+    rows = [line.strip().upper() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return rows or None
+
+
+def ensure_level_initial_state(
+    *,
+    session,
+    level: int,
+    grid: np.ndarray,
+    source: str,
+    source_action_index: int | None = None,
+    source_action_name: str | None = None,
+    source_recorded_at_utc: str | None = None,
+    reset_verified: bool = False,
+) -> Path:
+    artifacts_game_dir = _canonical_game_artifacts_dir(session)
+    level_dir = artifacts_game_dir / f"level_{int(level)}"
+    level_dir.mkdir(parents=True, exist_ok=True)
+    rows = ["".join(f"{int(v):X}" for v in row) for row in np.asarray(grid, dtype=np.int8)]
+    initial_state_path = level_dir / "initial_state.hex"
+    existing_rows = _read_hex_rows_if_exists(initial_state_path)
+    if existing_rows is not None and existing_rows != rows:
+        raise RuntimeError(
+            f"canonical initial_state mismatch for level {int(level)}: "
+            f"existing artifact differs from {str(source)}"
+        )
+    if existing_rows is None:
+        write_hex_grid(initial_state_path, np.asarray(grid, dtype=np.int8))
+    meta = {
+        "schema_version": "arc_repl.level_initial_state.v1",
+        "game_id": str(session.game_id),
+        "level": int(level),
+        "rows": int(np.asarray(grid, dtype=np.int8).shape[0]),
+        "cols": int(np.asarray(grid, dtype=np.int8).shape[1]) if np.asarray(grid, dtype=np.int8).ndim == 2 else 0,
+        "initial_state_source": str(source),
+        "provisional": False,
+        "reset_verified": bool(reset_verified),
+    }
+    if source_action_index is not None:
+        meta["source_action_index"] = int(source_action_index)
+    if source_action_name:
+        meta["source_action_name"] = str(source_action_name)
+    if source_recorded_at_utc:
+        meta["source_recorded_at_utc"] = str(source_recorded_at_utc)
+    (level_dir / "initial_state.meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
+    return level_dir
+
+
 def steps_since_level_start(events: list[dict]) -> int:
     steps_in_level = 0
     current_levels = 0

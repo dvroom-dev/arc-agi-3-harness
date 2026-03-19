@@ -88,6 +88,27 @@ def test_sync_workspace_level_view_drops_stale_compare_when_released_to_frontier
         )
         + "\n"
     )
+    (game_dir / "current_compare.json").write_text(
+        json.dumps(
+            {
+                "level": 1,
+                "all_match": True,
+                "compare_payload": {
+                    "analysis_level_pinned": True,
+                    "analysis_level_pin": {"level": 1, "phase": "pending_theory"},
+                },
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    (game_dir / "current_compare.md").write_text("# stale pinned compare\n", encoding="utf-8")
+    stale_visible_compare = game_dir / "level_current" / "sequence_compare"
+    stale_visible_compare.mkdir(parents=True, exist_ok=True)
+    (stale_visible_compare / "current_compare.json").write_text(
+        json.dumps({"level": 1, "all_match": True}, indent=2) + "\n"
+    )
+    (stale_visible_compare / "current_compare.md").write_text("# stale visible compare\n", encoding="utf-8")
 
     arc_state_dir = tmp_path / "arc"
     artifacts_root = arc_state_dir / "game_artifacts" / "game_ls20"
@@ -113,3 +134,11 @@ def test_sync_workspace_level_view_drops_stale_compare_when_released_to_frontier
     assert rewritten["state"]["levels_completed"] == 1
     assert rewritten["state"]["available_model_levels"] == [1]
     assert "compare" not in rewritten
+    compare_payload = json.loads((game_dir / "current_compare.json").read_text())
+    assert compare_payload["status"] == "no_sequences_yet"
+    assert compare_payload["level"] == 2
+    visible_compare_payload = json.loads(
+        (game_dir / "level_current" / "sequence_compare" / "current_compare.json").read_text()
+    )
+    assert visible_compare_payload["status"] == "no_sequences_yet"
+    assert visible_compare_payload["level"] == 2

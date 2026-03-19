@@ -7,6 +7,12 @@ from pathlib import Path
 
 import numpy as np
 
+CANONICAL_INITIAL_STATE_SOURCES = {
+    "session_bootstrap_reset",
+    "level_transition_after_state",
+    "reset_level_after_state",
+}
+
 
 def grid_from_hex_rows(rows: list[str]) -> np.ndarray:
     if not rows:
@@ -24,6 +30,70 @@ def _safe_action_slug(name: str) -> str:
     raw = str(name or "").strip().lower()
     safe = re.sub(r"[^a-z0-9_.-]+", "_", raw).strip("._")
     return safe or "action"
+
+
+def _state_rows_equal(left: list[str] | None, right: list[str] | None) -> bool:
+    return list(left or []) == list(right or [])
+
+
+def _candidate_for_level(*, level: int, rows: list[str], rec: dict, source: str) -> dict:
+    return {
+        "level": int(level),
+        "rows": list(rows),
+        "source": str(source),
+        "source_action_index": int(rec.get("action_index", 0) or 0),
+        "source_action_name": str(rec.get("action_name", "")),
+        "source_recorded_at_utc": str(rec.get("recorded_at_utc", "")),
+    }
+
+
+def _assert_matching_candidates(*, level: int, candidates: list[dict], message_prefix: str) -> None:
+    normalized = [candidate for candidate in candidates if isinstance(candidate, dict)]
+    if len(normalized) < 2:
+        return
+    first = normalized[0]
+    for other in normalized[1:]:
+        if _state_rows_equal(first.get("rows"), other.get("rows")):
+            continue
+        raise RuntimeError(
+            f"{message_prefix} for level {int(level)}: "
+            f"{first.get('source')}@{first.get('source_action_index')} "
+            f"!= {other.get('source')}@{other.get('source_action_index')}"
+        )
+
+
+def _load_existing_canonical_candidates(game_dir: Path) -> dict[int, dict]:
+    candidates: dict[int, dict] = {}
+    for level_dir in sorted(game_dir.glob("level_*")):
+        if not level_dir.is_dir():
+            continue
+        try:
+            level = int(level_dir.name.split("_", 1)[1])
+        except Exception:
+            continue
+        init_path = level_dir / "initial_state.hex"
+        meta_path = level_dir / "initial_state.meta.json"
+        if not init_path.exists() or not meta_path.exists():
+            continue
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        source = str(meta.get("initial_state_source") or meta.get("source") or "").strip()
+        if source not in CANONICAL_INITIAL_STATE_SOURCES:
+            continue
+        rows = [line.strip().upper() for line in init_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        if not rows:
+            continue
+        candidates[level] = {
+            "level": int(level),
+            "rows": rows,
+            "source": source,
+            "source_action_index": int(meta.get("source_action_index", 0) or 0),
+            "source_action_name": str(meta.get("source_action_name", "")),
+            "source_recorded_at_utc": str(meta.get("source_recorded_at_utc", "")),
+        }
+    return candidates
 
 
 def sync_level_sequences(*, session, game_dir: Path) -> None:
@@ -47,7 +117,10 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
     sequences: list[dict] = []
     active: dict | None = None
     next_seq_number_by_level: dict[int, int] = {}
-    first_before_rows_by_level: dict[int, list[str]] = {}
+    existing_canonical_by_level = _load_existing_canonical_candidates(levels_root)
+    reset_after_rows_by_level: dict[int, dict] = {}
+    transition_after_rows_by_level: dict[int, dict] = {}
+    observed_levels: set[int] = set(existing_canonical_by_level)
 
     def start_sequence(rec: dict) -> dict:
         level = int(rec.get("level_before", 1) or 1)
@@ -93,7 +166,25 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
         state_after = str(rec.get("state_after", {}).get("state", "")).strip().upper()
         state_before_rows = list(rec.get("state_before", {}).get("grid_hex_rows", []) or [])
         state_after_rows = list(rec.get("state_after", {}).get("grid_hex_rows", []) or [])
+        observed_levels.add(level_before)
+        observed_levels.add(level_after)
 
+        if action_name == "RESET_LEVEL" and state_after_rows:
+            candidate = _candidate_for_level(
+                level=level_before,
+                rows=state_after_rows,
+                rec=rec,
+                source="reset_level_after_state",
+            )
+            existing = reset_after_rows_by_level.get(level_before)
+            if existing is None:
+                reset_after_rows_by_level[level_before] = candidate
+            else:
+                _assert_matching_candidates(
+                    level=level_before,
+                    candidates=[existing, candidate],
+                    message_prefix="inconsistent RESET_LEVEL start state",
+                )
         if action_name == "RESET_LEVEL":
             close_active(rec=rec, reason="reset_level")
             continue
@@ -102,14 +193,22 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
             close_active(rec=rec, reason="level_change")
             active = start_sequence(rec)
 
-        if level_before not in first_before_rows_by_level and state_before_rows:
-            first_before_rows_by_level[level_before] = state_before_rows
-        if (
-            level_after != level_before
-            and level_after not in first_before_rows_by_level
-            and state_after_rows
-        ):
-            first_before_rows_by_level[level_after] = state_after_rows
+        if level_after != level_before and state_after_rows:
+            candidate = _candidate_for_level(
+                level=level_after,
+                rows=state_after_rows,
+                rec=rec,
+                source="level_transition_after_state",
+            )
+            existing = transition_after_rows_by_level.get(level_after)
+            if existing is None:
+                transition_after_rows_by_level[level_after] = candidate
+            else:
+                _assert_matching_candidates(
+                    level=level_after,
+                    candidates=[existing, candidate],
+                    message_prefix="inconsistent level-transition start state",
+                )
 
         local_step = len(active["actions"]) + 1
         active["actions"].append(
@@ -148,10 +247,37 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
 
     close_active(rec=None, reason="open")
 
-    for level, rows in first_before_rows_by_level.items():
+    for level in sorted(observed_levels):
+        existing_observed = existing_canonical_by_level.get(level)
+        reset_observed = reset_after_rows_by_level.get(level)
+        transition_observed = transition_after_rows_by_level.get(level)
+        if existing_observed is not None and transition_observed is not None:
+            _assert_matching_candidates(
+                level=level,
+                candidates=[existing_observed, transition_observed],
+                message_prefix="existing canonical state does not match transition start",
+            )
+        if existing_observed is not None and reset_observed is not None:
+            _assert_matching_candidates(
+                level=level,
+                candidates=[existing_observed, reset_observed],
+                message_prefix="existing canonical state does not match reset start",
+            )
+        if transition_observed is not None and reset_observed is not None:
+            _assert_matching_candidates(
+                level=level,
+                candidates=[transition_observed, reset_observed],
+                message_prefix="reset state does not match canonical level start",
+            )
+        canonical = transition_observed or reset_observed or existing_observed
+        if canonical is None:
+            raise RuntimeError(
+                f"missing canonical initial state for level {int(level)}: "
+                "no session bootstrap, level transition, or reset snapshot was captured"
+            )
         level_dir = levels_root / f"level_{int(level)}"
         level_dir.mkdir(parents=True, exist_ok=True)
-        initial_state = grid_from_hex_rows(rows)
+        initial_state = grid_from_hex_rows(list(canonical.get("rows", []) or []))
         write_hex_grid(level_dir / "initial_state.hex", initial_state)
         init_meta = {
             "schema_version": "arc_repl.level_initial_state.v1",
@@ -159,8 +285,21 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
             "level": int(level),
             "rows": int(initial_state.shape[0]),
             "cols": int(initial_state.shape[1]) if initial_state.ndim == 2 else 0,
-            "source": "action_history_first_before_state",
+            "initial_state_source": str(canonical.get("source", "")),
+            "source_action_index": int(canonical.get("source_action_index", 0) or 0),
+            "source_action_name": str(canonical.get("source_action_name", "")),
+            "source_recorded_at_utc": str(canonical.get("source_recorded_at_utc", "")),
+            "provisional": False,
+            "reset_verified": reset_observed is not None,
         }
+        if transition_observed is not None:
+            init_meta["transition_source_action_index"] = int(
+                transition_observed.get("source_action_index", 0) or 0
+            )
+        if reset_observed is not None:
+            init_meta["reset_source_action_index"] = int(
+                reset_observed.get("source_action_index", 0) or 0
+            )
         (level_dir / "initial_state.meta.json").write_text(json.dumps(init_meta, indent=2) + "\n")
 
     for seq in sequences:

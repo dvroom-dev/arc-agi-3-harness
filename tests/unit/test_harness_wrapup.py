@@ -124,8 +124,20 @@ def test_wrapup_transition_clears_pin_and_restores_frontier_view_when_ready(tmp_
     )
     (game_dir / "component_coverage.json").write_text(json.dumps({"status": "pass"}, indent=2) + "\n")
     (game_dir / "current_compare.json").write_text(
-        json.dumps({"all_match": True, "level": 1}, indent=2) + "\n"
+        json.dumps(
+            {
+                "all_match": True,
+                "level": 1,
+                "compare_payload": {
+                    "analysis_level_pinned": True,
+                    "analysis_level_pin": {"level": 1, "phase": "pending_theory"},
+                },
+            },
+            indent=2,
+        )
+        + "\n"
     )
+    (game_dir / "current_compare.md").write_text("# stale pinned compare\n", encoding="utf-8")
     _write_level_current_surface(game_dir, level=1, pinned=True, initial_rows="0000\n")
     (game_dir / "model_status.json").write_text(
         json.dumps(
@@ -151,6 +163,9 @@ def test_wrapup_transition_clears_pin_and_restores_frontier_view_when_ready(tmp_
     meta = json.loads((game_dir / "level_current" / "meta.json").read_text())
     assert meta["level"] == 2
     assert meta["analysis_level_pinned"] is False
+    compare_after = json.loads((game_dir / "current_compare.json").read_text())
+    assert compare_after["status"] == "no_sequences_yet"
+    assert compare_after["level"] == 2
     assert refreshed == ["yes"]
 
 

@@ -25,6 +25,26 @@ def test_level_transition_end_to_end_release_path(tmp_path: Path) -> None:
     arc_state_dir.mkdir(parents=True, exist_ok=True)
     super_dir.mkdir(parents=True, exist_ok=True)
     (agent_game_dir / "play_lib.py").write_text("# stub\n")
+    bootstrap_level = arc_state_dir / "game_artifacts" / "game_ls20" / "level_1"
+    bootstrap_level.mkdir(parents=True, exist_ok=True)
+    (bootstrap_level / "initial_state.hex").write_text("0000\n0000\n", encoding="utf-8")
+    (bootstrap_level / "initial_state.meta.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "arc_repl.level_initial_state.v1",
+                "game_id": "ls20",
+                "level": 1,
+                "rows": 2,
+                "cols": 4,
+                "initial_state_source": "session_bootstrap_reset",
+                "provisional": False,
+                "reset_verified": False,
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     before_grid = np.array([[0, 0, 0, 0], [0, 0, 0, 0]], dtype=np.int8)
     after_grid = np.array([[2, 2, 2, 2], [2, 2, 2, 2]], dtype=np.int8)
@@ -109,6 +129,12 @@ def test_level_transition_end_to_end_release_path(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (agent_game_dir / "current_compare.json").write_text(
+        json.dumps({"all_match": True, "level": 1}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    visible_compare_dir = agent_game_dir / "level_current" / "sequence_compare"
+    visible_compare_dir.mkdir(parents=True, exist_ok=True)
+    (visible_compare_dir / "current_compare.json").write_text(
         json.dumps({"all_match": True, "level": 1}, indent=2) + "\n",
         encoding="utf-8",
     )

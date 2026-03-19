@@ -457,6 +457,10 @@ def test_repl_writes_level_turn_files(monkeypatch, tmp_path: Path) -> None:
     init_meta = json.loads((level_dir / "initial_state.meta.json").read_text())
     assert init_meta["schema_version"] == "arc_repl.level_initial_state.v1"
     assert init_meta["level"] == 1
+    assert init_meta["initial_state_source"] == "session_bootstrap_reset"
+    assert init_meta.get("source") is None
+    assert init_meta["provisional"] is False
+    assert init_meta["reset_verified"] is False
 
     level_current = game_dir / "level_current"
     assert level_current.exists()

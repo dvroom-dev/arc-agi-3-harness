@@ -397,6 +397,28 @@ def certify_or_block_wrapup_transition_impl(runtime) -> None:
             "failed to release solved-level wrap-up pin to frontier level: "
             f"expected_frontier={status['frontier_level']} visible_level={visible_level}"
         )
+
+    released_compare = _read_json_if_exists(runtime.active_agent_dir() / "current_compare.json")
+    if isinstance(released_compare, dict):
+        compare_status = str(released_compare.get("status") or "").strip()
+        compare_level = _int_or_none(released_compare.get("level"))
+        compare_payload = (
+            released_compare.get("compare_payload")
+            if isinstance(released_compare.get("compare_payload"), dict)
+            else {}
+        )
+        leaked_pin = bool(compare_payload.get("analysis_level_pinned"))
+        if compare_status != "no_sequences_yet" and compare_level != int(status["frontier_level"]):
+            raise RuntimeError(
+                "stale current_compare remained after solved-level wrap-up release: "
+                f"compare_level={compare_level} frontier_level={status['frontier_level']} "
+                f"status={compare_status or 'unknown'}"
+            )
+        if leaked_pin:
+            raise RuntimeError(
+                "stale pinned compare payload remained after solved-level wrap-up release: "
+                f"frontier_level={status['frontier_level']}"
+            )
     runtime.refresh_dynamic_super_env()
     runtime.log(
         "[harness] supervisor certified solved-level wrap-up complete: "

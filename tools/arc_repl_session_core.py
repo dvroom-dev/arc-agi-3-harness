@@ -6,34 +6,19 @@ import numpy as np
 from arcengine import GameAction
 try:
     from arc_repl_action_history import ActionHistoryStore
-    from arc_repl_session_compat import (
-        build_frame_snapshot,
-        install_env_compat_bindings,
-    )
-    from arc_repl_session_artifacts import steps_since_level_start, write_state_artifacts
+    from arc_repl_session_compat import build_frame_snapshot, install_env_compat_bindings
+    from arc_repl_session_artifacts import ensure_level_initial_state, steps_since_level_start, write_state_artifacts
     from arc_repl_session_exec import execute_exec_turn  # noqa: F401
-    from arc_repl_session_grid import (
-        _chunk_for_bbox,
-        _coerce_grid,
-        _grid_from_hex_rows,  # noqa: F401
-        _same_game_lineage,
-    )
+    from arc_repl_session_grid import _chunk_for_bbox, _coerce_grid, _grid_from_hex_rows, _same_game_lineage  # noqa: F401
     from arc_repl_session_restore import restore_session_from_history
 except Exception:
     from tools.arc_repl_action_history import ActionHistoryStore
-    from tools.arc_repl_session_compat import (
-        build_frame_snapshot,
-        install_env_compat_bindings,
-    )
-    from tools.arc_repl_session_artifacts import steps_since_level_start, write_state_artifacts
+    from tools.arc_repl_session_compat import build_frame_snapshot, install_env_compat_bindings
+    from tools.arc_repl_session_artifacts import ensure_level_initial_state, steps_since_level_start, write_state_artifacts
     from tools.arc_repl_session_exec import execute_exec_turn  # noqa: F401
-    from tools.arc_repl_session_grid import (
-        _chunk_for_bbox,
-        _coerce_grid,
-        _grid_from_hex_rows,  # noqa: F401
-        _same_game_lineage,
-    )
+    from tools.arc_repl_session_grid import _chunk_for_bbox, _coerce_grid, _grid_from_hex_rows, _same_game_lineage  # noqa: F401
     from tools.arc_repl_session_restore import restore_session_from_history
+
 class BaseReplSession:
     def __init__(
         self,
@@ -71,6 +56,12 @@ class BaseReplSession:
             self.events = restore_session_from_history(self, self.events)
         self.game_id = str(getattr(self.frame, "game_id", "")).strip() or game_id
         self.history["game_id"] = self.game_id
+        ensure_level_initial_state(
+            session=self,
+            level=int(self.frame.levels_completed) + 1,
+            grid=np.array(self.pixels, copy=True),
+            source="session_bootstrap_reset",
+        )
         self.action_history = ActionHistoryStore(
             path=self.arc_dir / "action-history.json",
             game_id=self.game_id,
