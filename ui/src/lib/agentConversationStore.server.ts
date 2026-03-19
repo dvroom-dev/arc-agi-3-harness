@@ -320,21 +320,45 @@ export async function loadStoredConversationBranchSummaries(
       : Array.isArray(index.headIds) && typeof index.headIds[0] === "string"
         ? index.headIds[0]
         : null;
+  const payloadMemo = new Map<string, ForkFile>();
+  const textMemo = new Map<string, string>();
 
-  return forks.map((fork, idx) => {
+  return Promise.all(forks.map(async (fork, idx) => {
     const history = historyByForkId.get(fork.id);
+    const documentText =
+      typeof history?.mode === "string" &&
+      history.mode.trim() &&
+      typeof history?.initialUserPreview === "string" &&
+      history.initialUserPreview.trim()
+        ? null
+        : await reconstructForkDocumentFromDisk(
+            runId,
+            conversationId,
+            fork.id,
+            payloadMemo,
+            textMemo
+          );
     return {
       key: fork.id,
       conversationId,
       forkId: fork.id,
       parentId: typeof fork.parentId === "string" ? fork.parentId : null,
       createdAt: fork.createdAt,
-      mode: typeof history?.mode === "string" ? history.mode : null,
+      mode:
+        typeof history?.mode === "string" && history.mode.trim()
+          ? history.mode
+          : documentText
+            ? frontmatterValue(documentText, "mode")
+            : null,
       active: fork.id === activeForkId,
       head: headForkIds.has(fork.id),
       actionSummary: typeof fork.actionSummary === "string" ? fork.actionSummary : null,
       initialUserPreview:
-        typeof history?.initialUserPreview === "string" ? history.initialUserPreview : null,
+        typeof history?.initialUserPreview === "string" && history.initialUserPreview.trim()
+          ? history.initialUserPreview
+          : documentText
+            ? firstUserPreview(documentText)
+            : null,
       lastAssistantPreview:
         typeof history?.lastAssistantPreview === "string" ? history.lastAssistantPreview : null,
       nextCreatedAt: forks[idx + 1]?.createdAt ?? null,
@@ -342,7 +366,7 @@ export async function loadStoredConversationBranchSummaries(
       toolCallCount: Number.isFinite(history?.toolCallCount) ? Number(history?.toolCallCount) : 0,
       toolResultCount: Number.isFinite(history?.toolResultCount) ? Number(history?.toolResultCount) : 0,
     } satisfies StoredConversationBranchSummary;
-  });
+  }));
 }
 
 export async function loadConversationBranchDocument(

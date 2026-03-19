@@ -1,5 +1,5 @@
 import { listAgentConversationBranches } from "@/lib/agentConversation.server";
-import { preferredConversationId } from "@/lib/agentConversationData.server";
+import { findConversationId } from "@/lib/agentConversationData.server";
 import { readLogFeed } from "@/lib/logFeed.server";
 import { runDir } from "@/lib/paths";
 import fs from "fs/promises";
@@ -21,7 +21,7 @@ async function readSupervisorSummary(runId: string): Promise<{
   runtime: RunActivitySummary["runtime"];
   status: RunActivitySummary["supervisor"]["status"];
 }> {
-  const conversationId = await preferredConversationId(runId);
+  const conversationId = await findConversationId(runId);
   if (!conversationId) {
     return {
       runtime: {
