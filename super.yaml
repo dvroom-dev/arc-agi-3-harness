@@ -2,6 +2,8 @@ vars:
   game_id: ${env.ARC_PROMPT_GAME_ID}
   game_slug: ${env.ARC_PROMPT_GAME_SLUG}
 
+schema_version: 2
+
 runtime_defaults:
   agent_provider: claude
   agent_model: claude-opus-4-6
@@ -9,6 +11,117 @@ runtime_defaults:
   supervisor_provider: codex
   supervisor_model: gpt-5.4
   supervisor_model_reasoning_effort: high
+
+models:
+  frontier_reasoner:
+    provider: claude
+    model: claude-opus-4-6
+    reasoning_effort: high
+  fast_reader:
+    provider: codex
+    model: gpt-5.4-mini
+    reasoning_effort: low
+  code_repair:
+    provider: codex
+    model: gpt-5.4
+    reasoning_effort: high
+
+validators:
+  model_compare_clean:
+    description: current compare must be clean on explored sequences
+    command: |
+      python3 model.py compare_sequences --game-id "${vars.game_id}"
+    parse_as: json
+    success:
+      type: json_field_truthy
+      field: all_match
+
+task_profiles:
+  action_vocabulary:
+    mode: explore_and_solve
+    description: establish basic action semantics with minimal real-game probes
+    preferred_models: [frontier_reasoner]
+    context_rules:
+      - Prioritize identifying the controllable actor and the minimum action vocabulary needed to continue.
+      - Do not overfit a long route before basic movement semantics are action-linked.
+  spatial_analysis:
+    mode: theory
+    description: enumerate visible features and frontier deltas
+    preferred_models: [frontier_reasoner]
+    context_rules:
+      - Newly introduced frontier features, colors, or values are mandatory investigation targets until proven decorative by action-linked evidence.
+      - Do not rule out a newly introduced feature by static reasoning alone.
+  mechanic_probing:
+    mode: explore_only
+    description: run bounded discriminating real-game probes
+    preferred_models: [frontier_reasoner]
+    context_rules:
+      - Use the smallest real-game probe that can discriminate between live explanations.
+      - If a probe changes a different region than expected, elevate the changed region and downgrade the old target.
+  model_repair:
+    mode: code_model
+    description: repair model parity and deterministic branches
+    preferred_models: [code_repair]
+    validators: [model_compare_clean]
+    context_rules:
+      - Compare-clean only validates explored real-game sequences; it does not prove unseen suffixes or newly introduced mechanics.
+      - Do not certify a frontier branch that depends on a new unevidenced mechanic.
+  solution_synthesis:
+    mode: solve_model
+    description: generate and validate concrete solution branches
+    preferred_models: [frontier_reasoner]
+    context_rules:
+      - Build branches only from evidenced mechanics or explicitly flagged hypotheses.
+      - Treat model proof as a hypothesis check, not real-game certification of a new frontier mechanic.
+  recovery:
+    mode: recover
+    description: restore the live run to a known frontier state
+    preferred_models: [code_repair]
+    context_rules:
+      - Replay only certified branches during recovery.
+      - Do not improvise new mechanics during recovery.
+
+process:
+  initial_stage: action_vocabulary
+  global_rules:
+    - A newly introduced frontier-level component cannot be ruled out as non-gating without action-linked evidence on that level.
+    - A newly introduced frontier-level color or value is a mandatory investigation target until proven decorative.
+    - Compare-clean validates explored real-game sequences only; it never proves unseen suffixes or new mechanics.
+    - Model proof is a hypothesis check, not certification of real-game correctness for unseen frontier mechanics.
+    - Any real-game contradiction against a resolved mechanic automatically reopens that mechanic.
+    - A prior-level completion schema cannot become the leading frontier theory until all new frontier deltas are incorporated or ruled out with evidence.
+  stages:
+    action_vocabulary:
+      description: establish basic action vocabulary and controllable-actor semantics
+      objective: get enough action-linked evidence to identify movement/control semantics
+      profile: action_vocabulary
+      allowed_next_profiles: [spatial_analysis]
+    feature_inventory:
+      description: enumerate and define visible features and frontier deltas
+      objective: name all visible features and explicitly tag which are new on the current frontier level
+      profile: spatial_analysis
+      allowed_next_profiles: [mechanic_probing, model_repair]
+    frontier_delta_investigation:
+      description: resolve newly introduced frontier features before inherited schemas dominate
+      objective: get discriminating probes on new frontier-level features, colors, and values
+      profile: mechanic_probing
+      allowed_next_profiles: [spatial_analysis, model_repair]
+    model_parity:
+      description: repair parity and branch logic against explored evidence
+      objective: make compare pass on explored sequences and keep branch logic bounded to evidenced mechanics
+      profile: model_repair
+      validators: [model_compare_clean]
+      allowed_next_profiles: [solution_synthesis, frontier_delta_investigation]
+    solution_candidate:
+      description: synthesize and test efficient solution candidates
+      objective: produce a deterministic branch grounded in evidenced mechanics and evaluate it
+      profile: solution_synthesis
+      allowed_next_profiles: [recovery, spatial_analysis, model_repair]
+    recovery:
+      description: restore the live run to a known frontier state using certified branches
+      objective: recover from GAME_OVER or resets without inventing new mechanics
+      profile: recovery
+      allowed_next_profiles: [feature_inventory, frontier_delta_investigation, solution_candidate]
 
 context_management_strategy: aggressive
 
