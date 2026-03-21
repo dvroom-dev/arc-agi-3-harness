@@ -221,7 +221,17 @@ prompt_parts:
     - prompt_part: component_model_runtime
   switch_mode_usage:
     - literal: |
-        To leave a mode, run the `switch_mode` CLI as a shell command. There is no direct provider tool named `switch_mode`.
+        On `schema_version: 2` runs, workflow progression is supervisor-owned.
+        If the run frontmatter includes `process_stage` or `task_profile`, do not use `switch_mode`.
+        Use the builtin tool `report_process_result` instead.
+
+        Example:
+        ```tool_call name=report_process_result
+        {"outcome":"complete","summary":"basic action vocabulary established","evidence":"ACTION1 moves the controllable actor up; ACTION4 moves it right","requested_profile":"spatial_analysis","user_message":"Inventory all visible frontier-level features and identify newly introduced components before more probing."}
+        ```
+
+        `switch_mode` is legacy-only.
+        For legacy/non-v2 flows, to leave a mode, run the `switch_mode` CLI as a shell command. There is no direct provider tool named `switch_mode`.
         Use Bash `switch_mode ...` only. Do not try to call a provider tool named `switch_mode`, and do not simulate a mode switch with `echo`, placeholder commands, or plain prose.
 
         Required flags:
@@ -505,6 +515,7 @@ modes:
         - write_file
         - list_dir
         - check_supervisor
+        - report_process_result
         - certify_wrapup
         - paginate_tool_response
         - switch_mode
@@ -773,6 +784,7 @@ modes:
         - read_file
         - write_file
         - check_supervisor
+        - report_process_result
         - paginate_tool_response
         - switch_mode
       shell_invocation_policy:
@@ -905,6 +917,7 @@ modes:
         - read_file
         - write_file
         - check_supervisor
+        - report_process_result
         - paginate_tool_response
         - switch_mode
       shell_invocation_policy:
@@ -1051,6 +1064,7 @@ modes:
         - write_file
         - list_dir
         - check_supervisor
+        - report_process_result
         - certify_wrapup
         - paginate_tool_response
         - switch_mode
@@ -1321,6 +1335,7 @@ modes:
         - write_file
         - list_dir
         - check_supervisor
+        - report_process_result
         - paginate_tool_response
         - switch_mode
       shell_invocation_policy:
@@ -1530,6 +1545,7 @@ modes:
         - read_file
         - write_file
         - check_supervisor
+        - report_process_result
         - paginate_tool_response
         - switch_mode
       shell_invocation_policy:
@@ -1648,5 +1664,6 @@ tools:
     - write_file
     - list_dir
     - check_supervisor
+    - report_process_result
     - paginate_tool_response
     - switch_mode
