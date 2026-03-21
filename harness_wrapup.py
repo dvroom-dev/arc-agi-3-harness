@@ -343,38 +343,18 @@ def certify_or_block_wrapup_transition_impl(runtime) -> None:
     if not target_mode:
         return
 
-    transition_payload = load_super_active_transition_payload_impl(runtime)
-    certified = str(transition_payload.get("wrapup_certified") or "").strip().lower() == "true"
-    certified_level = _int_or_none(transition_payload.get("wrapup_level"))
-    if not certified:
-        if target_mode in {"theory", "code_model"}:
-            return
-        raise RuntimeError(
-            "cannot leave solved-level wrap-up without explicit supervisor certification: "
-            f"target_mode={target_mode} "
-            f"wrapup_certified={transition_payload.get('wrapup_certified')} "
-            f"wrapup_level={transition_payload.get('wrapup_level')} "
-            f"expected_level={status['pinned_level']}"
-        )
+    if target_mode == "code_model" and not bool(status["ready_to_certify"]):
+        return
 
     if not bool(status["ready_to_certify"]):
         raise RuntimeError(
-            "cannot leave solved-level wrap-up while pin is active: "
+            "cannot leave solved-level wrap-up before pinned-level evidence is accounted for by the model: "
             f"target_mode={target_mode} "
             f"pinned_level={status['pinned_level']} "
             f"frontier_level={status['frontier_level']} "
             f"coverage_passed={status['coverage_passed']} "
             f"compare_clean={status['compare_clean']} "
             f"compare_level={status['compare_level']}"
-        )
-
-    if certified_level != int(status["pinned_level"]):
-        raise RuntimeError(
-            "cannot leave solved-level wrap-up without explicit supervisor certification: "
-            f"target_mode={target_mode} "
-            f"wrapup_certified={transition_payload.get('wrapup_certified')} "
-            f"wrapup_level={transition_payload.get('wrapup_level')} "
-            f"expected_level={status['pinned_level']}"
         )
 
     prior_arc_state_dir = os.environ.get("ARC_STATE_DIR")
@@ -421,7 +401,7 @@ def certify_or_block_wrapup_transition_impl(runtime) -> None:
             )
     runtime.refresh_dynamic_super_env()
     runtime.log(
-        "[harness] supervisor certified solved-level wrap-up complete: "
+        "[harness] solved-level wrap-up released after pinned-level evidence accounting: "
         f"pinned_level={status['pinned_level']} frontier_level={status['frontier_level']} "
         f"target_mode={target_mode}"
     )

@@ -153,14 +153,7 @@ def test_level_transition_end_to_end_release_path(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (super_dir / "state.json").write_text(
-        json.dumps(
-            {
-                "activeMode": "theory",
-                "activeTransitionPayload": {"wrapup_certified": "true", "wrapup_level": "1"},
-            },
-            indent=2,
-        )
-        + "\n",
+        json.dumps({"activeMode": "theory"}, indent=2) + "\n",
         encoding="utf-8",
     )
 

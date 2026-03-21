@@ -109,16 +109,7 @@ def test_wrapup_transition_clears_pin_and_restores_frontier_view_when_ready(tmp_
     (level1 / "initial_state.hex").write_text("0000\n")
     (level2 / "initial_state.hex").write_text("1111\n")
     (arc_state_dir / "state.json").write_text(json.dumps({"current_level": 2}, indent=2) + "\n")
-    (super_dir / "state.json").write_text(
-        json.dumps(
-            {
-                "activeMode": "solve_model",
-                "activeTransitionPayload": {"wrapup_certified": "true", "wrapup_level": "1"},
-            },
-            indent=2,
-        )
-        + "\n"
-    )
+    (super_dir / "state.json").write_text(json.dumps({"activeMode": "solve_model"}, indent=2) + "\n")
     (game_dir / ".analysis_level_pin.json").write_text(
         json.dumps({"level": 1, "phase": "pending_theory"}, indent=2) + "\n"
     )
@@ -169,7 +160,7 @@ def test_wrapup_transition_clears_pin_and_restores_frontier_view_when_ready(tmp_
     assert refreshed == ["yes"]
 
 
-def test_wrapup_transition_can_release_directly_into_theory_when_certified(tmp_path: Path) -> None:
+def test_wrapup_transition_can_release_directly_into_theory_when_ready(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "wrapup-certify-theory"
     game_dir = run_dir / "agent" / "game_ls20"
     arc_state_dir = run_dir / "supervisor" / "arc"
@@ -184,16 +175,7 @@ def test_wrapup_transition_can_release_directly_into_theory_when_certified(tmp_p
     (level1 / "initial_state.hex").write_text("0000\n")
     (level2 / "initial_state.hex").write_text("1111\n")
     (arc_state_dir / "state.json").write_text(json.dumps({"current_level": 2}, indent=2) + "\n")
-    (super_dir / "state.json").write_text(
-        json.dumps(
-            {
-                "activeMode": "theory",
-                "activeTransitionPayload": {"wrapup_certified": "true", "wrapup_level": "1"},
-            },
-            indent=2,
-        )
-        + "\n"
-    )
+    (super_dir / "state.json").write_text(json.dumps({"activeMode": "theory"}, indent=2) + "\n")
     (game_dir / ".analysis_level_pin.json").write_text(
         json.dumps({"level": 1, "phase": "pending_theory"}, indent=2) + "\n"
     )
@@ -238,16 +220,7 @@ def test_wrapup_transition_blocks_when_compare_level_does_not_match_pin(tmp_path
     arc_state_dir.mkdir(parents=True, exist_ok=True)
     super_dir.mkdir(parents=True, exist_ok=True)
     (arc_state_dir / "state.json").write_text(json.dumps({"current_level": 2}, indent=2) + "\n")
-    (super_dir / "state.json").write_text(
-        json.dumps(
-            {
-                "activeMode": "solve_model",
-                "activeTransitionPayload": {"wrapup_certified": "true", "wrapup_level": "2"},
-            },
-            indent=2,
-        )
-        + "\n"
-    )
+    (super_dir / "state.json").write_text(json.dumps({"activeMode": "solve_model"}, indent=2) + "\n")
     (game_dir / ".analysis_level_pin.json").write_text(
         json.dumps({"level": 1, "phase": "pending_theory"}, indent=2) + "\n"
     )
@@ -430,7 +403,7 @@ def test_wrapup_surface_validation_rejects_stale_visible_compare_surface(tmp_pat
         harness_wrapup.validate_wrapup_surfaces_impl(runtime)
 
 
-def test_wrapup_transition_requires_explicit_supervisor_certification(tmp_path: Path) -> None:
+def test_wrapup_transition_releases_frontier_when_pinned_evidence_is_accounted_for(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "wrapup-certify-missing-payload"
     game_dir = run_dir / "agent" / "game_ls20"
     arc_state_dir = run_dir / "supervisor" / "arc"
@@ -470,5 +443,9 @@ def test_wrapup_transition_requires_explicit_supervisor_certification(tmp_path: 
 
     runtime = _make_runtime(run_dir, arc_state_dir, game_dir)
 
-    with pytest.raises(RuntimeError, match="explicit supervisor certification"):
-        harness_wrapup.certify_or_block_wrapup_transition_impl(runtime)
+    harness_wrapup.certify_or_block_wrapup_transition_impl(runtime)
+
+    assert not (game_dir / ".analysis_level_pin.json").exists()
+    meta = json.loads((game_dir / "level_current" / "meta.json").read_text())
+    assert meta["level"] == 2
+    assert meta["analysis_level_pinned"] is False

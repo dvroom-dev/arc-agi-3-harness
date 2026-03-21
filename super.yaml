@@ -233,7 +233,6 @@ prompt_parts:
         Use the run-local CLI wrappers instead:
         - `report_process_result --outcome ... --summary ...`
         - `check_supervisor --mode hard|soft`
-        - `certify_wrapup --wrapup-level ... --reason ...`
         If any older mode text elsewhere still says a builtin tool call, treat that text as legacy and use the CLI wrapper instead.
 
         Example:
@@ -309,7 +308,7 @@ supervisor:
       - "If current_compare.md shows divergence before the first level is completed, treat it as evidence to fold back into theory, not a reason to enter code_model. After level 1 is solved or on later levels, treat compare divergence as a major control signal and route to code_model when parity repair is the blocker."
       - "If a keepalive interrupt injected KEEPALIVE_RETURN_MODE=<mode>, treat the next normal supervisor review as a return checkpoint: once the required one real-game action is evidenced, resume_mode_head back to that prior mode; if the interrupt action is still not evidenced, keep the run in the temporary real-game mode and re-issue only the minimal keepalive guidance."
       - "When a solved-level compare pin is active, keep all visible state, compare work, and model work targeted to the pinned solved level until the supervisor explicitly certifies wrap-up complete. While pinned, only theory and code_model are valid next modes, frontier-level reasoning is forbidden, and if pinned compare is clean the supervisor must either certify wrap-up complete or name one exact pinned-level blocker."
-      - "Coverage helpers and compare helpers provide evidence only; they do not certify solved-level wrap-up on their own. Wrap-up certification is explicit, not implied: call `certify_wrapup` with the pinned level and rationale; the supervisor must then accept or reject certification and choose the post-wrap-up mode."
+      - "Coverage helpers and compare helpers provide evidence only; the supervisor must decide whether pinned-level action-sequence evidence is fully accounted for by the model before releasing solved-level wrap-up. Do not rely on magic certification flags."
       - "For rule enforcement decisions, cite concrete evidence pointers (turn/tool/output/file). When a tool interception marker is present, prioritize handling it immediately."
   tool_interception:
     rules:
@@ -694,7 +693,7 @@ modes:
             - prefer the shortest discriminating probe that can change the theory over authoring a long action sequence while core action or interaction mechanics are still uncertain;
             - if the next probe is already one action, hand off exactly that one action; do not expand it back into an older longer action sequence;
             - while a solved-level compare pin is active and compare is clean, either prepare final pinned-level certification or name one exact pinned-level blocker; do not write frontier-level plans;
-            - while already in `theory` on a solved-level wrap-up checkpoint with pinned compare clean and no pinned-level blocker, call `certify_wrapup` instead of `switch_mode`; the supervisor will decide whether to release the pin and which mode should run next;
+            - while already in `theory` on a solved-level wrap-up checkpoint with pinned compare clean and no pinned-level blocker, report that pinned-level evidence accounting is complete; the supervisor will decide whether to release the pin and which mode should run next;
             - while a solved-level compare pin is active and compare is not clean, stay strictly on pinned-level replay/parity work; do not inspect or summarize frontier start-state artifacts even if the terminal pinned state visually resembles the next frontier state;
             - on level 2+, do not write a frontier real-game solve action sequence in theory mode;
             - on level 2+, start from prior levels' proven rules as the inherited baseline unless current evidence contradicts them;
