@@ -13,6 +13,10 @@ export interface RunSummary {
   canImportParams: boolean;
   canContinue: boolean;
   modifiedAt: number; // unix ms
+  activeMode?: string | null;
+  activeProcessStage?: string | null;
+  activeTaskProfile?: string | null;
+  supervisorInitialized?: boolean;
 }
 
 export type RunStatusCategory =

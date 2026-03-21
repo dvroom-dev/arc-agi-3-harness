@@ -116,6 +116,15 @@ export function RunList({
                     </span>
                   )}
                 </div>
+                {(run.activeTaskProfile || run.activeProcessStage || run.supervisorInitialized) && (
+                  <div className="mt-1 text-[11px] text-zinc-500">
+                    {run.activeTaskProfile
+                      ? `profile: ${run.activeTaskProfile}`
+                      : run.activeProcessStage
+                        ? `stage: ${run.activeProcessStage}`
+                        : "supervisor initialized"}
+                  </div>
+                )}
               </button>
               <div className="shrink-0 flex flex-col gap-1">
                 <button

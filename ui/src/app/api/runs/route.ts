@@ -13,6 +13,12 @@ import { readRunStateListSnapshot } from "@/lib/runStateSnapshot.server";
 
 export const dynamic = "force-dynamic";
 
+interface SuperStateSummary {
+  activeMode?: unknown;
+  activeProcessStage?: unknown;
+  activeTaskProfile?: unknown;
+}
+
 export async function GET(request: Request) {
   try {
     const requestUrl = new URL(request.url);
@@ -47,6 +53,10 @@ export async function GET(request: Request) {
           readRunStateListSnapshot(runId),
           readRecordedRunParams(runId),
         ]);
+        const superState = (await fs
+          .readFile(path.join(RUNS_DIR, runId, "super", "state.json"), "utf-8")
+          .then((raw) => JSON.parse(raw) as SuperStateSummary)
+          .catch(() => null));
         const hasLog = logFileNames.has(`${runId}.log`);
         const lookupIds = runProcessLookupIdsFromStoredRunParams(runId, recordedRunParams);
         const displayedState = await inferDisplayedRunState({
@@ -70,6 +80,17 @@ export async function GET(request: Request) {
             ["STOPPED", "FAILED", "GAME_OVER", "LOSS"].includes(displayedState.toUpperCase())
             && (hasLog || recordedRunParams !== null),
           modifiedAt,
+          activeMode:
+            typeof superState?.activeMode === "string" ? String(superState.activeMode) : null,
+          activeProcessStage:
+            typeof superState?.activeProcessStage === "string"
+              ? String(superState.activeProcessStage)
+              : null,
+          activeTaskProfile:
+            typeof superState?.activeTaskProfile === "string"
+              ? String(superState.activeTaskProfile)
+              : null,
+          supervisorInitialized: Boolean(superState),
         };
       })
     );
