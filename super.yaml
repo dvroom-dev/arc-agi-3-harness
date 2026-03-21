@@ -230,17 +230,24 @@ prompt_parts:
     - literal: |
         On `schema_version: 2` runs, workflow progression is supervisor-owned.
         If the run frontmatter includes `process_stage` or `task_profile`, do not use `switch_mode`.
-        Use the builtin tool `report_process_result` instead.
-        If any older mode text elsewhere still says `switch_mode`, treat that text as legacy and follow this rule instead.
+        Use the run-local CLI wrappers instead:
+        - `report_process_result --outcome ... --summary ...`
+        - `check_supervisor --mode hard|soft`
+        - `certify_wrapup --wrapup-level ... --reason ...`
+        If any older mode text elsewhere still says a builtin tool call, treat that text as legacy and use the CLI wrapper instead.
 
         Example:
-        ```tool_call name=report_process_result
-        {"outcome":"complete","summary":"basic action vocabulary established","evidence":"ACTION1 moves the controllable actor up; ACTION4 moves it right","requested_profile":"spatial_analysis","user_message":"Inventory all visible frontier-level features and identify newly introduced components before more probing."}
+        ```bash
+        report_process_result \
+          --outcome complete \
+          --summary "basic action vocabulary established" \
+          --evidence "ACTION1 moves the controllable actor up; ACTION4 moves it right" \
+          --requested-profile spatial_analysis \
+          --user-message "Inventory all visible frontier-level features and identify newly introduced components before more probing."
         ```
 
-        `switch_mode` is legacy-only.
-        For legacy/non-v2 flows, to leave a mode, run the `switch_mode` CLI as a shell command. There is no direct provider tool named `switch_mode`.
-        Use Bash `switch_mode ...` only. Do not try to call a provider tool named `switch_mode`, and do not simulate a mode switch with `echo`, placeholder commands, or plain prose.
+        For legacy/non-v2 flows, mode changes are still shell commands.
+        There is no direct provider tool for supervisor/runtime control. Use Bash commands only.
 
         Required flags:
         - `--target-mode <mode>`: destination mode name
@@ -522,9 +529,6 @@ modes:
         - read_file
         - write_file
         - list_dir
-        - check_supervisor
-        - report_process_result
-        - certify_wrapup
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -543,6 +547,9 @@ modes:
         allow:
           - match_type: exact_match
             pattern: pwd
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^(switch_mode|check_supervisor|report_process_result|certify_wrapup)(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^python3 (\./)?inspect_components\.py(\s|$)'
@@ -787,8 +794,6 @@ modes:
         - shell
         - read_file
         - write_file
-        - check_supervisor
-        - report_process_result
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -798,6 +803,9 @@ modes:
         allow:
           - match_type: exact_match
             pattern: pwd
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^(switch_mode|check_supervisor|report_process_result|certify_wrapup)(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^arc_repl (exec|reset_level)(\s|$)'
@@ -916,8 +924,6 @@ modes:
         - shell
         - read_file
         - write_file
-        - check_supervisor
-        - report_process_result
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -927,6 +933,9 @@ modes:
         allow:
           - match_type: exact_match
             pattern: pwd
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^(switch_mode|check_supervisor|report_process_result|certify_wrapup)(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^arc_repl (exec|reset_level)(\s|$)'
@@ -1059,9 +1068,6 @@ modes:
         - read_file
         - write_file
         - list_dir
-        - check_supervisor
-        - report_process_result
-        - certify_wrapup
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -1071,6 +1077,9 @@ modes:
         allow:
           - match_type: exact_match
             pattern: pwd
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^(switch_mode|check_supervisor|report_process_result|certify_wrapup)(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^(ls|find|rg|grep|wc|jq|arc_level)(\s|$)'
@@ -1326,8 +1335,6 @@ modes:
         - read_file
         - write_file
         - list_dir
-        - check_supervisor
-        - report_process_result
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -1337,6 +1344,9 @@ modes:
         allow:
           - match_type: exact_match
             pattern: pwd
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^(switch_mode|check_supervisor|report_process_result|certify_wrapup)(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^(ls|find|rg|grep|wc|jq|arc_level)(\s|$)'
@@ -1532,8 +1542,6 @@ modes:
         - shell
         - read_file
         - write_file
-        - check_supervisor
-        - report_process_result
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -1543,6 +1551,9 @@ modes:
         allow:
           - match_type: exact_match
             pattern: pwd
+            case_sensitive: true
+          - match_type: regex
+            pattern: '^(switch_mode|check_supervisor|report_process_result|certify_wrapup)(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^arc_repl (exec_file|reset_level)(\s|$)'
@@ -1647,6 +1658,4 @@ tools:
     - read_file
     - write_file
     - list_dir
-    - check_supervisor
-    - report_process_result
     - paginate_tool_response

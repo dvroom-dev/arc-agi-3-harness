@@ -6,7 +6,17 @@ import re
 import shutil
 from pathlib import Path
 
-
+def _json_cli_wrapper(tool_name: str) -> str:
+    return f"""#!/usr/bin/env bash
+set -euo pipefail
+printf '{{"ok":true,"tool":"{tool_name}","argv":'
+python3 - <<'PY' "$@"
+import json
+import sys
+print(json.dumps(sys.argv[1:]))
+PY
+printf '}}\\n'
+"""
 def parse_args_impl() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="ARC-AGI-3 supervisor harness")
     parser.add_argument("--game-id", default="ls20", help="Game ID to load")
@@ -391,19 +401,25 @@ exec \"{py}\" \"${{CONFIG_DIR}}/tools/arc_level.py\" \"$@\"
     arc_level_path.write_text(arc_level_wrapper)
     arc_level_path.chmod(0o755)
 
-    switch_mode_wrapper = """#!/usr/bin/env bash
-set -euo pipefail
-printf '{"ok":true,"tool":"switch_mode","argv":'
-python3 - <<'PY' "$@"
-import json
-import sys
-print(json.dumps(sys.argv[1:]))
-PY
-printf '}\n'
-"""
+    switch_mode_wrapper = _json_cli_wrapper("switch_mode")
     switch_mode_path = bin_dir / "switch_mode"
     switch_mode_path.write_text(switch_mode_wrapper)
     switch_mode_path.chmod(0o755)
+
+    check_supervisor_wrapper = _json_cli_wrapper("check_supervisor")
+    check_supervisor_path = bin_dir / "check_supervisor"
+    check_supervisor_path.write_text(check_supervisor_wrapper)
+    check_supervisor_path.chmod(0o755)
+
+    report_process_result_wrapper = _json_cli_wrapper("report_process_result")
+    report_process_result_path = bin_dir / "report_process_result"
+    report_process_result_path.write_text(report_process_result_wrapper)
+    report_process_result_path.chmod(0o755)
+
+    certify_wrapup_wrapper = _json_cli_wrapper("certify_wrapup")
+    certify_wrapup_path = bin_dir / "certify_wrapup"
+    certify_wrapup_path.write_text(certify_wrapup_wrapper)
+    certify_wrapup_path.chmod(0o755)
 
     src_prompts_dir = project_root / "prompts"
     if not src_prompts_dir.exists():
