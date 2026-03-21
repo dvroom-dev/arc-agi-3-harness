@@ -272,13 +272,10 @@ async function inferParamsForRun(runId: string): Promise<StoredRunParams | null>
 export async function readRecentRunParams(): Promise<RunLaunchParams> {
   const stored = await readJsonFile<{ schemaVersion?: string; params?: RunLaunchParams }>(RECENT_PARAMS_PATH);
   const normalized = normalizeRunLaunchParams(stored?.params ?? DEFAULT_RUN_LAUNCH_PARAMS);
-  if (stored?.schemaVersion !== RECENT_PARAMS_SCHEMA_VERSION) {
-    return normalizeRunLaunchParams({
-      ...normalized,
-      sessionName: "",
-    });
-  }
-  return normalized;
+  return normalizeRunLaunchParams({
+    ...normalized,
+    sessionName: "",
+  });
 }
 
 export async function readStoredRunParams(runId: string): Promise<StoredRunParams | null> {
@@ -306,10 +303,14 @@ async function writeStoredRunParams(record: StoredRunParams) {
 }
 
 async function writeRecentRunParams(params: RunLaunchParams) {
+  const normalized = normalizeRunLaunchParams({
+    ...params,
+    sessionName: "",
+  });
   await writeJsonFile(RECENT_PARAMS_PATH, {
     schemaVersion: RECENT_PARAMS_SCHEMA_VERSION,
     savedAt: new Date().toISOString(),
-    params,
+    params: normalized,
   });
 }
 
@@ -439,7 +440,6 @@ export async function continueRun(runId: string): Promise<{
   await ensureDir(LOGS_DIR);
   await ensureDir(CTXS_DIR);
   await ensureDir(RUNS_DIR);
-  await writeRecentRunParams(requestedParams);
 
   const logFile = `${runId}.log`;
   const logPath = path.join(LOGS_DIR, logFile);
