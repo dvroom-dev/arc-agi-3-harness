@@ -528,6 +528,9 @@ modes:
         - read_file
         - write_file
         - list_dir
+        - check_supervisor
+        - report_process_result
+        - certify_wrapup
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -793,6 +796,9 @@ modes:
         - shell
         - read_file
         - write_file
+        - check_supervisor
+        - report_process_result
+        - certify_wrapup
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -923,6 +929,9 @@ modes:
         - shell
         - read_file
         - write_file
+        - check_supervisor
+        - report_process_result
+        - certify_wrapup
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -1067,6 +1076,9 @@ modes:
         - read_file
         - write_file
         - list_dir
+        - check_supervisor
+        - report_process_result
+        - certify_wrapup
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -1334,6 +1346,9 @@ modes:
         - read_file
         - write_file
         - list_dir
+        - check_supervisor
+        - report_process_result
+        - certify_wrapup
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -1541,6 +1556,9 @@ modes:
         - shell
         - read_file
         - write_file
+        - check_supervisor
+        - report_process_result
+        - certify_wrapup
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -1657,4 +1675,7 @@ tools:
     - read_file
     - write_file
     - list_dir
+    - check_supervisor
+    - report_process_result
+    - certify_wrapup
     - paginate_tool_response
