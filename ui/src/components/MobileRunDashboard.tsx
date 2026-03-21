@@ -79,9 +79,9 @@ export function MobileRunDashboard({
           label: "Running",
           className: "border-sky-800 bg-sky-950/60 text-sky-300",
         }
-      : activity.supervisor.status === "idle"
+      : activity.supervisor.status === "idle" && activity.runtime.supervisorInitialized
         ? {
-            label: "Idle",
+            label: "Ready",
             className: "border-zinc-700 bg-zinc-900 text-zinc-400",
           }
         : {
@@ -125,6 +125,7 @@ export function MobileRunDashboard({
             <div className="mt-2 space-y-1 text-xs text-zinc-500">
               <div>{formatAgentRuntimeLine(activity.runtime.agentProvider, activity.runtime.agentModel)}</div>
               <div>{formatSupervisorRuntimeLine(activity.runtime.supervisorProvider, activity.runtime.supervisorModel)}</div>
+              <div>{formatProcessRuntimeLine(activity.runtime.activeProcessStage, activity.runtime.activeTaskProfile, activity.runtime.activeMode)}</div>
             </div>
             {actionMessage ? (
               <div className="mt-1 text-xs text-zinc-500">{actionMessage}</div>
@@ -265,6 +266,20 @@ function formatSupervisorRuntimeLine(provider: string | null, model: string | nu
     return `Supervisor: ${provider} / ${model}`;
   }
   return `Supervisor: ${model || "unknown model"}`;
+}
+
+function formatProcessRuntimeLine(
+  stage: string | null,
+  profile: string | null,
+  mode: string | null
+) {
+  if (stage && profile) {
+    return `Process: ${stage} / ${profile} (mode: ${mode || "unknown"})`;
+  }
+  if (mode) {
+    return `Mode: ${mode}`;
+  }
+  return "Process: not initialized";
 }
 
 function mobileStatusBadgeTone(runStatus: RunStatusSummary) {

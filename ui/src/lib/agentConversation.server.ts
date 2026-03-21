@@ -106,7 +106,9 @@ export async function listAgentConversationBranches(
     return {
       key: fork.key,
       mode: fork.mode ?? null,
-      label: fork.mode ?? "agent",
+      processStage: fork.processStage ?? null,
+      taskProfile: fork.taskProfile ?? null,
+      label: fork.taskProfile ?? fork.mode ?? "agent",
       conversationId: fork.conversationId,
       forkId: fork.forkId,
       parentId: fork.parentId,
@@ -157,6 +159,8 @@ async function readAgentBranchSkeletonDocument(
       return {
         key: fork.key,
         mode: fork.mode ?? null,
+        processStage: fork.processStage ?? null,
+        taskProfile: fork.taskProfile ?? null,
         active: fork.active,
         head: fork.head,
         conversationId: fork.conversationId,

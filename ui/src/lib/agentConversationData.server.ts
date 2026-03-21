@@ -8,6 +8,8 @@ export interface RunHistoryForkSummaryFile {
   forkId?: string;
   createdAt?: string;
   mode?: string;
+  processStage?: string;
+  taskProfile?: string;
   initialUserPreview?: string;
   lastAssistantPreview?: string;
   skeletonPath?: string;

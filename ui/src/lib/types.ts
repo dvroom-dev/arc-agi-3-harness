@@ -266,6 +266,8 @@ export interface SuperTimelinePayload {
 export interface AgentConversationBranch {
   key: string;
   mode: string | null;
+  processStage?: string | null;
+  taskProfile?: string | null;
   label: string;
   conversationId: string;
   forkId: string | null;
@@ -311,6 +313,10 @@ export interface RunActivitySummary {
     agentModel: string | null;
     supervisorProvider: string | null;
     supervisorModel: string | null;
+    activeMode: string | null;
+    activeProcessStage: string | null;
+    activeTaskProfile: string | null;
+    supervisorInitialized: boolean;
   };
   supervisor: {
     status: "running" | "idle" | "disabled";

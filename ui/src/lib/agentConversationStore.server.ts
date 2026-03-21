@@ -56,6 +56,8 @@ export interface StoredConversationBranchSummary {
   parentId: string | null;
   createdAt: string;
   mode: string | null;
+  processStage: string | null;
+  taskProfile: string | null;
   active: boolean;
   head: boolean;
   actionSummary: string | null;
@@ -328,6 +330,10 @@ export async function loadStoredConversationBranchSummaries(
     const documentText =
       typeof history?.mode === "string" &&
       history.mode.trim() &&
+      typeof history?.processStage === "string" &&
+      history.processStage.trim() &&
+      typeof history?.taskProfile === "string" &&
+      history.taskProfile.trim() &&
       typeof history?.initialUserPreview === "string" &&
       history.initialUserPreview.trim()
         ? null
@@ -350,6 +356,8 @@ export async function loadStoredConversationBranchSummaries(
           : documentText
             ? frontmatterValue(documentText, "mode")
             : null,
+      processStage: documentText ? frontmatterValue(documentText, "process_stage") : null,
+      taskProfile: documentText ? frontmatterValue(documentText, "task_profile") : null,
       active: fork.id === activeForkId,
       head: headForkIds.has(fork.id),
       actionSummary: typeof fork.actionSummary === "string" ? fork.actionSummary : null,

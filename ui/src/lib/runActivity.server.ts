@@ -17,11 +17,21 @@ interface ConversationIndexForkRecord {
   supervisorModel?: unknown;
 }
 
+interface SuperStateFile {
+  activeMode?: unknown;
+  activeProcessStage?: unknown;
+  activeTaskProfile?: unknown;
+}
+
 async function readSupervisorSummary(runId: string): Promise<{
   runtime: RunActivitySummary["runtime"];
   status: RunActivitySummary["supervisor"]["status"];
 }> {
   const conversationId = await findConversationId(runId);
+  const superStatePath = path.join(runDir(runId), "super", "state.json");
+  const superState = JSON.parse(
+    (await fs.readFile(superStatePath, "utf-8").catch(() => "null"))
+  ) as SuperStateFile | null;
   if (!conversationId) {
     return {
       runtime: {
@@ -29,8 +39,19 @@ async function readSupervisorSummary(runId: string): Promise<{
         agentModel: null,
         supervisorProvider: null,
         supervisorModel: null,
+        activeMode:
+          typeof superState?.activeMode === "string" ? String(superState.activeMode) : null,
+        activeProcessStage:
+          typeof superState?.activeProcessStage === "string"
+            ? String(superState.activeProcessStage)
+            : null,
+        activeTaskProfile:
+          typeof superState?.activeTaskProfile === "string"
+            ? String(superState.activeTaskProfile)
+            : null,
+        supervisorInitialized: Boolean(superState),
       },
-      status: "disabled",
+      status: superState ? "idle" : "disabled",
     };
   }
 
@@ -84,6 +105,17 @@ async function readSupervisorSummary(runId: string): Promise<{
         typeof latestSupervisorFork?.supervisorModel === "string"
           ? latestSupervisorFork.supervisorModel
           : null,
+      activeMode:
+        typeof superState?.activeMode === "string" ? String(superState.activeMode) : null,
+      activeProcessStage:
+        typeof superState?.activeProcessStage === "string"
+          ? String(superState.activeProcessStage)
+          : null,
+      activeTaskProfile:
+        typeof superState?.activeTaskProfile === "string"
+          ? String(superState.activeTaskProfile)
+          : null,
+      supervisorInitialized: Boolean(superState),
     },
     status: hasPendingReview ? "running" : "idle",
   };
@@ -100,6 +132,10 @@ export async function readRunActivitySummary(
     agentModel: null,
     supervisorProvider: null,
     supervisorModel: null,
+    activeMode: null,
+    activeProcessStage: null,
+    activeTaskProfile: null,
+    supervisorInitialized: false,
   };
 
   try {

@@ -16,6 +16,10 @@ const EMPTY_ACTIVITY_SUMMARY: RunActivitySummary = {
     agentModel: null,
     supervisorProvider: null,
     supervisorModel: null,
+    activeMode: null,
+    activeProcessStage: null,
+    activeTaskProfile: null,
+    supervisorInitialized: false,
   },
   supervisor: {
     status: "disabled",

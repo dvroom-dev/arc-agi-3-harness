@@ -36,9 +36,9 @@ export function ActivityPane({ runId }: ActivityPaneProps) {
           label: "Running",
           className: "border-sky-800 bg-sky-950/60 text-sky-300",
         }
-      : activity.supervisor.status === "idle"
+      : activity.supervisor.status === "idle" && activity.runtime.supervisorInitialized
         ? {
-            label: "Idle",
+            label: "Ready",
             className: "border-zinc-700 bg-zinc-900 text-zinc-400",
           }
         : {
