@@ -41,6 +41,7 @@ task_profiles:
     mode: explore_and_solve
     description: establish basic action semantics with minimal real-game probes
     preferred_models: [frontier_reasoner]
+    resume_strategy: fork_fresh
     context_rules:
       - Prioritize identifying the controllable actor and the minimum action vocabulary needed to continue.
       - Do not overfit a long route before basic movement semantics are action-linked.
@@ -48,6 +49,7 @@ task_profiles:
     mode: theory
     description: enumerate visible features and frontier deltas
     preferred_models: [frontier_reasoner]
+    resume_strategy: fork_fresh
     context_rules:
       - Newly introduced frontier features, colors, or values are mandatory investigation targets until proven decorative by action-linked evidence.
       - Do not rule out a newly introduced feature by static reasoning alone.
@@ -55,6 +57,7 @@ task_profiles:
     mode: explore_only
     description: run bounded discriminating real-game probes
     preferred_models: [frontier_reasoner]
+    resume_strategy: fork_fresh
     context_rules:
       - Use the smallest real-game probe that can discriminate between live explanations.
       - If a probe changes a different region than expected, elevate the changed region and downgrade the old target.
@@ -63,6 +66,7 @@ task_profiles:
     description: repair model parity and deterministic branches
     preferred_models: [code_repair]
     validators: [model_compare_clean]
+    resume_strategy: fork_fresh
     context_rules:
       - Compare-clean only validates explored real-game sequences; it does not prove unseen suffixes or newly introduced mechanics.
       - Do not certify a frontier branch that depends on a new unevidenced mechanic.
@@ -70,6 +74,7 @@ task_profiles:
     mode: solve_model
     description: generate and validate concrete solution branches
     preferred_models: [frontier_reasoner]
+    resume_strategy: fork_fresh
     context_rules:
       - Build branches only from evidenced mechanics or explicitly flagged hypotheses.
       - Treat model proof as a hypothesis check, not real-game certification of a new frontier mechanic.
@@ -77,12 +82,14 @@ task_profiles:
     mode: recover
     description: restore the live run to a known frontier state
     preferred_models: [code_repair]
+    resume_strategy: fork_fresh
     context_rules:
       - Replay only certified branches during recovery.
       - Do not improvise new mechanics during recovery.
 
 process:
   initial_stage: action_vocabulary
+  ledger_path: super/process_ledger.json
   global_rules:
     - A newly introduced frontier-level component cannot be ruled out as non-gating without action-linked evidence on that level.
     - A newly introduced frontier-level color or value is a mandatory investigation target until proven decorative.
@@ -224,6 +231,7 @@ prompt_parts:
         On `schema_version: 2` runs, workflow progression is supervisor-owned.
         If the run frontmatter includes `process_stage` or `task_profile`, do not use `switch_mode`.
         Use the builtin tool `report_process_result` instead.
+        If any older mode text elsewhere still says `switch_mode`, treat that text as legacy and follow this rule instead.
 
         Example:
         ```tool_call name=report_process_result
@@ -518,7 +526,6 @@ modes:
         - report_process_result
         - certify_wrapup
         - paginate_tool_response
-        - switch_mode
       shell_invocation_policy:
         disallow:
           - match_type: regex
@@ -536,9 +543,6 @@ modes:
         allow:
           - match_type: exact_match
             pattern: pwd
-            case_sensitive: true
-          - match_type: regex
-            pattern: '^switch_mode(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^python3 (\./)?inspect_components\.py(\s|$)'
@@ -786,7 +790,6 @@ modes:
         - check_supervisor
         - report_process_result
         - paginate_tool_response
-        - switch_mode
       shell_invocation_policy:
         disallow:
           - match_type: regex
@@ -795,9 +798,6 @@ modes:
         allow:
           - match_type: exact_match
             pattern: pwd
-            case_sensitive: true
-          - match_type: regex
-            pattern: '^switch_mode(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^arc_repl (exec|reset_level)(\s|$)'
@@ -919,7 +919,6 @@ modes:
         - check_supervisor
         - report_process_result
         - paginate_tool_response
-        - switch_mode
       shell_invocation_policy:
         disallow:
           - match_type: regex
@@ -928,9 +927,6 @@ modes:
         allow:
           - match_type: exact_match
             pattern: pwd
-            case_sensitive: true
-          - match_type: regex
-            pattern: '^switch_mode(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^arc_repl (exec|reset_level)(\s|$)'
@@ -1067,7 +1063,6 @@ modes:
         - report_process_result
         - certify_wrapup
         - paginate_tool_response
-        - switch_mode
       shell_invocation_policy:
         disallow:
           - match_type: regex
@@ -1076,9 +1071,6 @@ modes:
         allow:
           - match_type: exact_match
             pattern: pwd
-            case_sensitive: true
-          - match_type: regex
-            pattern: '^switch_mode(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^(ls|find|rg|grep|wc|jq|arc_level)(\s|$)'
@@ -1337,7 +1329,6 @@ modes:
         - check_supervisor
         - report_process_result
         - paginate_tool_response
-        - switch_mode
       shell_invocation_policy:
         disallow:
           - match_type: regex
@@ -1346,9 +1337,6 @@ modes:
         allow:
           - match_type: exact_match
             pattern: pwd
-            case_sensitive: true
-          - match_type: regex
-            pattern: '^switch_mode(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^(ls|find|rg|grep|wc|jq|arc_level)(\s|$)'
@@ -1547,7 +1535,6 @@ modes:
         - check_supervisor
         - report_process_result
         - paginate_tool_response
-        - switch_mode
       shell_invocation_policy:
         disallow:
           - match_type: regex
@@ -1556,9 +1543,6 @@ modes:
         allow:
           - match_type: exact_match
             pattern: pwd
-            case_sensitive: true
-          - match_type: regex
-            pattern: '^switch_mode(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^arc_repl (exec_file|reset_level)(\s|$)'
@@ -1666,4 +1650,3 @@ tools:
     - check_supervisor
     - report_process_result
     - paginate_tool_response
-    - switch_mode
