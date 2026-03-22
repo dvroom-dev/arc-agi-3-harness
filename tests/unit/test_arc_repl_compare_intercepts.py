@@ -285,6 +285,7 @@ def test_run_exec_compare_intercept_returns_clean_marker_on_level_gain(monkeypat
     assert marker is not None
     assert "__ARC_INTERCEPT_COMPARE_CLEAN__" in marker
     assert "level=2" in marker
+    assert not (cwd / ".analysis_level_pin.json").exists()
 
 
 def test_run_exec_compare_intercept_returns_none_when_clean_without_level_gain(

@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from arc_model_runtime.utils import sync_workspace_level_view, write_analysis_level_pin
+from arc_model_runtime.utils import sync_workspace_level_view
 
 LEVEL_COMPLETE_MODEL_MISMATCH_MARKER = "__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__"
 COMPARE_CLEAN_INTERCEPT_MARKER = "__ARC_INTERCEPT_COMPARE_CLEAN__"
@@ -318,12 +318,6 @@ def run_exec_compare_intercept(cwd: Path, result: object) -> str | None:
     except Exception:
         levels_completed = 0
     if levels_gained > 0:
-        write_analysis_level_pin(
-            cwd,
-            level=int(target_level),
-            phase="pending_theory",
-            reason="level_complete",
-        )
         current_level = _current_level_from_result(result)
         if current_level is not None:
             sync_workspace_level_view(

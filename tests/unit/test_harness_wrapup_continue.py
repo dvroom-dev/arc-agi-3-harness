@@ -43,7 +43,7 @@ def _make_runtime(run_dir: Path, arc_state_dir: Path, game_dir: Path):
     )
 
 
-def test_repair_stale_wrapup_mode_rewrites_pre_pin_frontier_mode(tmp_path: Path) -> None:
+def test_repair_stale_wrapup_mode_is_noop(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "wrapup-repair"
     game_dir = run_dir / "agent" / "game_ls20"
     arc_state_dir = run_dir / "supervisor" / "arc"
@@ -96,8 +96,8 @@ def test_repair_stale_wrapup_mode_rewrites_pre_pin_frontier_mode(tmp_path: Path)
 
     repaired = harness_wrapup.repair_stale_wrapup_mode_impl(runtime)
 
-    assert repaired == "explore_and_solve"
+    assert repaired is None
     repaired_state = json.loads((super_dir / "state.json").read_text())
-    assert repaired_state["activeMode"] == "theory"
-    assert repaired_state["activeModePayload"] == {}
+    assert repaired_state["activeMode"] == "explore_and_solve"
+    assert repaired_state["activeModePayload"] == {"user_message": "old frontier probe"}
     assert repaired_state["activeTransitionPayload"] == {}

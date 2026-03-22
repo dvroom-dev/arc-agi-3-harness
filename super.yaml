@@ -304,11 +304,11 @@ supervisor:
       - "If an agent switch_mode request is accepted or redirected, carry forward only the supervisor-approved handoff needed for the next mode. Do not forward the agent's full latest assistant message verbatim when it contains extra action-sequence planning or mixed objectives."
       - "Review components.py and model_lib.py when recent evidence or parity artifacts point to a concrete detector/mechanics bug. Do not spend early level-1 passes on speculative code review when the main issue is choosing the right next probe."
       - "If model-file bugs are found, require the agent to fix them before further solve progression. When those bugs are found outside code_model, route to code_model with explicit fix targets only if the active level is later than level 1 or the run is already inside solved-level wrap-up. Do not allow solve_model progression while unresolved model-file bugs are known."
-      - "After any frontier level completes and the game continues, keep the run inside solved-level wrap-up until parity is complete. While pinned compare is red or missing, do not ask theory to inspect frontier state or draft frontier follow-up plans; keep the next step pinned-level-only and route to code_model once the concrete replay/parity patch target is known."
+      - "After any frontier level completes and the game continues, keep the run inside solved-level wrap-up until the supervisor is satisfied that the solved level's action-sequence evidence is accounted for by the model. While wrap-up is active and parity is still red or missing, do not ask theory to inspect frontier state or draft frontier follow-up plans; keep the next step focused on the solved level and route to code_model once the concrete replay/parity patch target is known."
       - "If current_compare.md shows divergence before the first level is completed, treat it as evidence to fold back into theory, not a reason to enter code_model. After level 1 is solved or on later levels, treat compare divergence as a major control signal and route to code_model when parity repair is the blocker."
       - "If a keepalive interrupt injected KEEPALIVE_RETURN_MODE=<mode>, treat the next normal supervisor review as a return checkpoint: once the required one real-game action is evidenced, resume_mode_head back to that prior mode; if the interrupt action is still not evidenced, keep the run in the temporary real-game mode and re-issue only the minimal keepalive guidance."
-      - "When a solved-level compare pin is active, keep all visible state, compare work, and model work targeted to the pinned solved level until the supervisor explicitly certifies wrap-up complete. While pinned, only theory and code_model are valid next modes, frontier-level reasoning is forbidden, and if pinned compare is clean the supervisor must either certify wrap-up complete or name one exact pinned-level blocker."
-      - "Coverage helpers and compare helpers provide evidence only; the supervisor must decide whether pinned-level action-sequence evidence is fully accounted for by the model before releasing solved-level wrap-up. Do not rely on magic certification flags."
+      - "When solved-level wrap-up is active, keep all visible-state analysis, compare work, and model work focused on that solved level until the supervisor explicitly routes out of wrap-up. Treat helper outputs as evidence only; do not rely on hidden runtime certification gates or magic flags."
+      - "Coverage helpers and compare helpers provide evidence only; the supervisor must decide whether the solved level's action-sequence evidence is fully accounted for by the model before moving on."
       - "For rule enforcement decisions, cite concrete evidence pointers (turn/tool/output/file). When a tool interception marker is present, prioritize handling it immediately."
   tool_interception:
     rules:
@@ -386,10 +386,10 @@ supervisor:
                  - Require theory to convert that evidence into the next concrete level-1 handoff instead of routing to `code_model`.
                  - After level 1 is solved or on later levels, treat the mismatch marker as an immediate `code_model` routing signal.
               3) If marker is `__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__`:
-                 - Route to `theory` first with a handoff that the solved level is pinned for cleanup.
+                 - Route to `theory` first with a handoff that the solved level needs post-completion cleanup.
                  - Require fresh component coverage on the solved level before any `code_model` turn.
-                 - After theory passes, route to `code_model` and keep compare focused on the pinned solved level until it is clean.
-                 - Once theory coverage passes and pinned-level compare is clean, the supervisor must explicitly certify solved-level wrap-up complete by routing out of the wrap-up envelope; helper scripts do not clear the pin by themselves.
+                 - After theory passes, route to `code_model` and keep compare focused on the solved level until it is clean.
+                 - Once the supervisor judges that solved-level evidence accounting is complete, route out of the wrap-up envelope directly; helper scripts must not gate that decision.
               4) If marker is `__ARC_INTERCEPT_COMPARE_CLEAN__`:
                  - Treat compare-clean as a mandatory supervisor checkpoint after a covered real-game action or compare refresh.
                  - If current mode is `solve_model`, do not treat compare-clean alone as sufficient. Stay in `solve_model` unless the model-side `play.py` proof actually solves the level; otherwise route to `theory` only when the agent can name the missing evidence that blocks solution search.
@@ -530,7 +530,6 @@ modes:
         - list_dir
         - check_supervisor
         - report_process_result
-        - certify_wrapup
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -551,7 +550,7 @@ modes:
             pattern: pwd
             case_sensitive: true
           - match_type: regex
-            pattern: '^(switch_mode|check_supervisor|report_process_result|certify_wrapup)(\s|$)'
+            pattern: '^(switch_mode|check_supervisor|report_process_result)(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^python3 (\./)?inspect_components\.py(\s|$)'
@@ -632,7 +631,7 @@ modes:
             Use neutral feature names until evidence proves a stronger role.
             In `components.py`, keep detector names and component kinds neutral and structural; record semantic meaning only in `theory.md`.
             `theory` and `code_model` co-own `components.py`, but with different edit authority. In theory mode, you may create new detectors and edit detector code or names that theory previously introduced. Do not rename or rewrite detector implementations last introduced by `code_model`; if one of those seems wrong, record the exact issue in `theory.md` and hand it back to `code_model`.
-            If a solved-level compare pin is active, stay strictly scoped to that pinned level. Do not record frontier-level observations, components, or hypotheses until the pin is cleared.
+            If solved-level wrap-up is active, stay strictly scoped to that solved level. Do not record frontier-level observations, components, or hypotheses until the supervisor routes out of wrap-up.
             Do not exhaustively restate stable geometry. After one initial survey, only reopen a file if it answers a specific open question or verifies a concrete handoff.
             After a completed bounded probe, theory is delta-only: record what changed, state which prior hypothesis was strengthened or falsified, keep the remaining alternatives live, and select the smallest next discriminating probe.
             For a bounded real-game probe against a new or changed component, inspect the exact contact step first: compare the final step's `before_state` and `after_state` (or the first overlap step if earlier contact is proven) before inferring the component's effect from whole-sequence start/end state alone.
@@ -674,8 +673,8 @@ modes:
             - read `current_compare.md` first whenever compare matters; only then open the single referenced `level_current/sequence_compare/*.md` report if needed;
             - use `current_compare.*`, the referenced compare report, and `turn_index.jsonl` to decide whether sequence artifacts exist before looking for `level_current/sequences/**`;
             - record the available non-RESET actions from the prompt or existing artifacts; do not propose read-only action-discovery probes;
-            - if a solved-level compare pin is active, keep `theory.md` and `components.py` scoped to the pinned solved level only;
-            - while a solved-level compare pin is active, do not use or request `arc_repl`; theory remains read-only and mutations belong only in real-game modes after the pin clears;
+            - if solved-level wrap-up is active, keep `theory.md` and `components.py` scoped to that solved level only;
+            - while solved-level wrap-up is active, do not use or request `arc_repl`; theory remains read-only and mutations belong only in real-game modes after the supervisor routes out of wrap-up;
             - on level 1 before the first completion, speculate as needed from the visible state, but mark speculation clearly in `theory.md` and turn it into exactly one target class in `# Explore Plan`;
             - on level 1, develop a completion theory in `theory.md`, and hand off to `explore_and_solve` only through the single current `# Explore Plan` target class;
             - after the first survey, stop expanding static geometry coverage once the main action-responsive features, any visible state-display changes, and the smallest set of unresolved non-static interactables are named;
@@ -695,9 +694,9 @@ modes:
             - if the latest probe resolved or falsified all live explanations for the active question, write 2-3 fresh plausible explanations for the remaining unexplained evidence before choosing the next step;
             - prefer the shortest discriminating probe that can change the theory over authoring a long action sequence while core action or interaction mechanics are still uncertain;
             - if the next probe is already one action, hand off exactly that one action; do not expand it back into an older longer action sequence;
-            - while a solved-level compare pin is active and compare is clean, either prepare final pinned-level certification or name one exact pinned-level blocker; do not write frontier-level plans;
-            - while already in `theory` on a solved-level wrap-up checkpoint with pinned compare clean and no pinned-level blocker, report that pinned-level evidence accounting is complete; the supervisor will decide whether to release the pin and which mode should run next;
-            - while a solved-level compare pin is active and compare is not clean, stay strictly on pinned-level replay/parity work; do not inspect or summarize frontier start-state artifacts even if the terminal pinned state visually resembles the next frontier state;
+            - while solved-level wrap-up is active and compare is clean, either report that solved-level evidence accounting looks complete or name one exact solved-level blocker; do not write frontier-level plans;
+            - while already in `theory` on a solved-level wrap-up checkpoint with clean compare and no solved-level blocker, report that solved-level evidence accounting is complete; the supervisor will decide whether to stay in wrap-up or move on;
+            - while solved-level wrap-up is active and compare is not clean, stay strictly on solved-level replay/parity work; do not inspect or summarize frontier start-state artifacts even if the terminal solved state visually resembles the next frontier state;
             - on level 2+, do not write a frontier real-game solve action sequence in theory mode;
             - on level 2+, start from prior levels' proven rules as the inherited baseline unless current evidence contradicts them;
             - on level 2+, run coverage and compare the current visible component set against prior levels before proposing a real-game probe;
@@ -763,7 +762,6 @@ modes:
         - "On level 2+, do not hand off a frontier real-game solve action sequence from theory. Once a frontier branch is ready, route to `solve_model` for solution testing."
         - "On level 2+, do not request a real-game probe whose purpose is to re-prove inherited baseline behavior without contradictory evidence."
         - "On level 2+, do not route to `solve_model` while a newly introduced visible component or newly changed visible component state still has zero action-linked evidence and could plausibly affect completion, unless current evidence explicitly rules that component out as non-gating."
-        - "While a solved-level wrap-up pin is active, do not include wrap-up certification flags on theory -> code_model or theory -> theory handoffs. Those flags are reserved for the final certified release out of wrap-up."
         - "When leaving this mode, run the `switch_mode` CLI directly; do not use placeholders or prose-only switch requests."
       violations:
         - "Repeatedly rereading full-grid or stable artifact files in theory mode without a new specific question."
@@ -780,7 +778,7 @@ modes:
         - "Handing off `explore_only` on level 2+ without naming a specific newly introduced visible component or newly changed visible component state."
         - "Using `# Evidence Gap` on level 2+ to re-prove inherited baseline behavior rather than explore the new level-specific delta."
         - "Writing any file other than `theory.md` or `components.py` in theory mode."
-        - "Planning frontier-level work or recording frontier-level observations while a solved-level compare pin is active."
+        - "Planning frontier-level work or recording frontier-level observations while solved-level wrap-up is active."
 
   explore_only:
     description: "Level-2+-only bounded real-game evidence gathering for one newly introduced visible component or newly changed visible component state."
@@ -798,7 +796,6 @@ modes:
         - write_file
         - check_supervisor
         - report_process_result
-        - certify_wrapup
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -810,7 +807,7 @@ modes:
             pattern: pwd
             case_sensitive: true
           - match_type: regex
-            pattern: '^(switch_mode|check_supervisor|report_process_result|certify_wrapup)(\s|$)'
+            pattern: '^(switch_mode|check_supervisor|report_process_result)(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^arc_repl (exec|reset_level)(\s|$)'
@@ -931,7 +928,6 @@ modes:
         - write_file
         - check_supervisor
         - report_process_result
-        - certify_wrapup
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -943,7 +939,7 @@ modes:
             pattern: pwd
             case_sensitive: true
           - match_type: regex
-            pattern: '^(switch_mode|check_supervisor|report_process_result|certify_wrapup)(\s|$)'
+            pattern: '^(switch_mode|check_supervisor|report_process_result)(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^arc_repl (exec|reset_level)(\s|$)'
@@ -1064,9 +1060,9 @@ modes:
     start_when:
       - "Explore or intercept evidence shows model-vs-game mismatch."
       - "Theory identifies concrete model changes from existing evidence."
-      - "A solved-level compare pin is active and solved-level parity must be repaired before advancing."
+      - "Solved-level wrap-up is active and solved-level parity must be repaired before advancing."
     stop_when:
-      - "If a solved-level compare pin is active and compare is clean for the pinned solved level, switch_mode to theory so the supervisor can certify solved-level wrap-up complete and only then release the run to the frontier level."
+      - "If solved-level wrap-up is active and compare is clean for the solved level, switch_mode to theory so the supervisor can decide whether evidence accounting is complete or more solved-level work is needed."
       - "On level 1 before the first completion, if compare is clean across all explored current-level sequences, switch_mode to theory."
       - "On level 2+, if compare is clean across all explored current-level sequences and `play_lib.py` now contains a concrete current-level branch to test through the static `play.py` entrypoint, switch_mode to solve_model."
       - "On level 2+, if compare is clean but one exact real-game observation is still missing before a frontier branch can be written, switch_mode to theory with that exact evidence gap."
@@ -1078,7 +1074,6 @@ modes:
         - list_dir
         - check_supervisor
         - report_process_result
-        - certify_wrapup
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -1090,7 +1085,7 @@ modes:
             pattern: pwd
             case_sensitive: true
           - match_type: regex
-            pattern: '^(switch_mode|check_supervisor|report_process_result|certify_wrapup)(\s|$)'
+            pattern: '^(switch_mode|check_supervisor|report_process_result)(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^(ls|find|rg|grep|wc|jq|arc_level)(\s|$)'
@@ -1242,7 +1237,7 @@ modes:
             Do not mark a newly introduced current-level mechanic as proven from model-only behavior, dry runs, or clean compare on previously explored prefixes alone. Compare only validates explored real-game sequences; it does not certify unseen branch suffixes or newly introduced component semantics.
             If the active frontier level has zero real-game sequences, compare-clean is vacuous for that level. Use model proof only as a hypothesis check, not as proof that a new frontier branch or new mechanic is correct in the real game.
             Use `theory.md`, `components.py`, `component_coverage.*`, `current_compare.*`, and `level_current/sequence_compare/*.md` as the primary evidence surface here.
-            If a solved-level compare pin is active, stay scoped to the pinned solved level and ignore frontier-level artifacts until the pin clears.
+            If solved-level wrap-up is active, stay scoped to that solved level and ignore frontier-level artifacts until the supervisor routes out of wrap-up.
             Do not read raw `.hex` state files or sequence metadata directly in this mode. Use compare report markdown and sampled diff cells instead.
             Exception: if compare is already clean for the active frontier level and the remaining blocker is writing a deterministic frontier branch, you may inspect visible `level_current/initial_state.hex` or `level_current/current_state.hex` structure with the sanctioned helpers `inspect_grid_slice.py` and `inspect_grid_values.py`. Do not hand branch construction back to theory just because you have not yet inspected the visible state structure yourself.
             Runtime/harness internals are out of scope: do not read or edit any file under `/config/tools/`.
@@ -1273,10 +1268,10 @@ modes:
             4) name the exact mismatching sampled diff cells or transition fields, match them to `theory.md`, and patch the missing mechanics, completion transitions, frontier branch logic, or component detectors/names needed in `model_lib.py`/`play_lib.py`/`components.py`;
                if a needed visible entity already has a detector in `components.py`, use that detector from `model_lib.py`/`play_lib.py` instead of re-deriving it from raw value scans there;
                on later levels, patch by adding or overriding the current level's hook(s) rather than re-copying earlier mechanics;
-            5) run `python3 model.py compare_sequences` with no explicit level so the runtime can honor any solved-level compare pin and keep work focused on the pinned solved level while wrap-up is active;
+            5) run `python3 model.py compare_sequences` with no explicit level so compare stays aligned with the current solved-level wrap-up or frontier state;
             6) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes;
             7) if compare is clean across all explored current-level sequences:
-               - if a solved-level compare pin is active, switch_mode to `theory` so the supervisor can certify solved-level wrap-up complete;
+               - if solved-level wrap-up is active, switch_mode to `theory` so the supervisor can decide whether solved-level evidence accounting is complete;
                - switch_mode to `solve_model` if a concrete current-level branch now exists in `play_lib.py`, any newly introduced current-level mechanics used by that branch are backed by action-linked real-game evidence rather than model-only inference, and the branch is ready to run through `play.py`;
                - otherwise switch_mode to `theory` only if there is one exact missing real-game observation that blocks the next branch patch;
             8) if compare is still red and a repair is blocked, stay in `code_model` and produce a precise blocker report with exact file/line evidence and the smallest required fix; do not switch out of `code_model` while parity remains red.
@@ -1299,9 +1294,8 @@ modes:
     agent_rules:
       operation: append
       requirements:
-        - "Do not leave code_model while compare is still red for the active level or pinned solved level."
-        - "If a solved-level compare pin is active, stay scoped to the pinned solved level and do not attempt frontier-level planning or solving."
-        - "While a solved-level wrap-up pin is active, do not include wrap-up certification flags on code_model -> theory or code_model -> code_model handoffs. Those flags are reserved for the final certified release out of wrap-up."
+        - "Do not leave code_model while compare is still red for the active level or solved-level wrap-up target."
+        - "If solved-level wrap-up is active, stay scoped to that solved level and do not attempt frontier-level planning or solving."
         - "End each code_model turn with model-file edits, theory updates, or a `switch_mode` CLI call."
         - "If compare is red and a single exact blocker remains, stay in code_model and report the blocker instead of switching back to theory."
         - "When compare is red, reduce it to one exact active repair target: sequence id, action index, and mismatch class before broader reasoning."
@@ -1334,7 +1328,7 @@ modes:
     description: "For level 2+, test frontier solution branches in the model, then replay the same solution once in the real game."
     start_when:
       - "Model parity is sufficient for current level execution planning."
-      - "No solved-level compare pin is active; solved-level wrap-up must already be supervisor-certified complete."
+      - "Solved-level wrap-up is not active; if a just-solved level still needs parity/accounting work, stay out of solve_model until the supervisor routes forward."
     stop_when:
       - "The model proof succeeds and the same `play.py` replay completes the level in the real game; switch_mode to theory for post-completion cleanup if the game continues."
       - "Model proof or real-game replay exposes a model bug or parity failure; switch_mode to code_model with evidence."
@@ -1348,7 +1342,6 @@ modes:
         - list_dir
         - check_supervisor
         - report_process_result
-        - certify_wrapup
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -1360,7 +1353,7 @@ modes:
             pattern: pwd
             case_sensitive: true
           - match_type: regex
-            pattern: '^(switch_mode|check_supervisor|report_process_result|certify_wrapup)(\s|$)'
+            pattern: '^(switch_mode|check_supervisor|report_process_result)(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^(ls|find|rg|grep|wc|jq|arc_level)(\s|$)'
@@ -1487,7 +1480,7 @@ modes:
         - literal: |
             Mode: solve_model.
             Goal: on level 2+, use the current `play_lib.py` frontier branch through the static `play.py` entrypoint to solve the level from start in the model, then replay that same plan once in the real game.
-            Never enter this mode while a solved-level compare pin is active; solved-level wrap-up must be supervisor-certified complete first.
+            Never enter this mode while solved-level wrap-up is still active for the prior solved level.
             Do not read raw `.hex` state files or sequence metadata directly in this mode.
             Solve_model is the only level-2+ solution-attempt mode. If a model-side branch is not ready yet, leave that work to code_model or theory.
             `play.py` is a harness-owned static dispatcher. Do not edit it in this mode; put level-specific solve branches in `play_lib.py`.
@@ -1530,7 +1523,7 @@ modes:
       operation: append
       requirements:
         - "When model proof succeeds, mark the level SOLVED in `theory.md` with concise evidence."
-        - "Do not enter or remain in solve_model while a solved-level compare pin is active."
+        - "Do not enter or remain in solve_model while solved-level wrap-up is still active for the prior solved level."
         - "Do not call `python3 model.py set_level ...` in solve_model. The active visible level must come from the current runtime state after wrap-up release or reset-level-first replay."
         - "Run both model and real `exec_file` replays with `--reset-level-first`; do not put reset logic inside `play.py`."
         - "Treat `play.py` as a static harness-owned dispatcher and keep level-specific solve logic in `play_lib.py`."
@@ -1558,7 +1551,6 @@ modes:
         - write_file
         - check_supervisor
         - report_process_result
-        - certify_wrapup
         - paginate_tool_response
       shell_invocation_policy:
         disallow:
@@ -1570,7 +1562,7 @@ modes:
             pattern: pwd
             case_sensitive: true
           - match_type: regex
-            pattern: '^(switch_mode|check_supervisor|report_process_result|certify_wrapup)(\s|$)'
+            pattern: '^(switch_mode|check_supervisor|report_process_result)(\s|$)'
             case_sensitive: true
           - match_type: regex
             pattern: '^arc_repl (exec_file|reset_level)(\s|$)'
@@ -1677,5 +1669,4 @@ tools:
     - list_dir
     - check_supervisor
     - report_process_result
-    - certify_wrapup
     - paginate_tool_response

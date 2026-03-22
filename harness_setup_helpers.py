@@ -416,11 +416,6 @@ exec \"{py}\" \"${{CONFIG_DIR}}/tools/arc_level.py\" \"$@\"
     report_process_result_path.write_text(report_process_result_wrapper)
     report_process_result_path.chmod(0o755)
 
-    certify_wrapup_wrapper = _json_cli_wrapper("certify_wrapup")
-    certify_wrapup_path = bin_dir / "certify_wrapup"
-    certify_wrapup_path.write_text(certify_wrapup_wrapper)
-    certify_wrapup_path.chmod(0o755)
-
     src_prompts_dir = project_root / "prompts"
     if not src_prompts_dir.exists():
         raise RuntimeError(f"missing prompts directory: {src_prompts_dir}")
