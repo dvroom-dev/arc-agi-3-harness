@@ -309,6 +309,18 @@ def _persist_current_compare(session, payload: dict[str, Any]) -> None:
         report_text = report_md(report)
         _write_text_atomic(level_current / f"{sequence_id}.md", report_text)
 
+    analysis_level_dir = session.game_dir / "analysis_level" / "sequence_compare"
+    if int(payload.get("level", session.env.current_level)) != int(session.env.current_level):
+        _write_text_atomic(analysis_level_dir / "current_compare.json", json_text)
+        _write_text_atomic(analysis_level_dir / "current_compare.md", md_text)
+        for report in reports:
+            if not isinstance(report, dict):
+                continue
+            sequence_id = str(report.get("sequence_id") or "").strip()
+            if not sequence_id:
+                continue
+            _write_text_atomic(analysis_level_dir / f"{sequence_id}.md", report_md(report))
+
     level_compare = resolve_level_dir(session.game_dir, int(payload.get("level", session.env.current_level)))
     if level_compare is not None:
         compare_dir = level_compare / "sequence_compare"
@@ -440,7 +452,12 @@ def compare_sequences(
         report["end_reason"] = str(payload.get("end_reason", "") or "")
         report_file = compare_root / f"{report['sequence_id']}.md"
         report_file.write_text(report_md(report))
-        report["report_file"] = f"level_current/sequence_compare/{report['sequence_id']}.md"
+        report_surface_dir = (
+            "level_current/sequence_compare"
+            if int(target_level) == int(session.env.current_level)
+            else "analysis_level/sequence_compare"
+        )
+        report["report_file"] = f"{report_surface_dir}/{report['sequence_id']}.md"
         reports.append(report)
         if not bool(report.get("matched", False)):
             diverged += 1

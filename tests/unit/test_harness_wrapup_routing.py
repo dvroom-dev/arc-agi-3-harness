@@ -7,38 +7,6 @@ from types import SimpleNamespace
 import harness_wrapup
 
 
-def _write_level_current_surface(
-    game_dir: Path,
-    *,
-    level: int,
-    pinned: bool,
-    initial_rows: str | None = None,
-) -> None:
-    level_current = game_dir / "level_current"
-    level_current.mkdir(parents=True, exist_ok=True)
-    (level_current / "meta.json").write_text(
-        json.dumps({"level": level, "analysis_level_pinned": pinned}, indent=2) + "\n"
-    )
-    if initial_rows is not None:
-        (level_current / "initial_state.hex").write_text(initial_rows)
-    if pinned:
-        (level_current / "analysis_level_status.json").write_text(
-            json.dumps(
-                {
-                    "visible_level": level,
-                    "analysis_level_pinned": True,
-                    "frontier_hidden_by_pin": True,
-                    "next_allowed_operation": "finalize_pinned_level",
-                },
-                indent=2,
-            )
-            + "\n"
-        )
-        (level_current / "level_transition.json").write_text(
-            json.dumps({"analysis_level_boundary_redacted": True}, indent=2) + "\n"
-        )
-
-
 def _make_runtime(run_dir: Path, arc_state_dir: Path, game_dir: Path):
     return SimpleNamespace(
         run_dir=run_dir,
@@ -52,14 +20,39 @@ def _make_runtime(run_dir: Path, arc_state_dir: Path, game_dir: Path):
     )
 
 
-def test_wrapup_transition_stays_pinned_while_supervisor_keeps_wrapup_active(tmp_path: Path) -> None:
+def _write_level_artifacts(level_dir: Path, *, rows: str, compare_level: int | None = None) -> None:
+    level_dir.mkdir(parents=True, exist_ok=True)
+    (level_dir / "initial_state.hex").write_text(rows, encoding="utf-8")
+    (level_dir / "current_state.hex").write_text(rows, encoding="utf-8")
+    if compare_level is not None:
+        compare_dir = level_dir / "sequence_compare"
+        compare_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": "arc.compare.current.v1",
+            "status": "ok",
+            "level": int(compare_level),
+            "all_match": False,
+            "compared_sequences": 1,
+            "diverged_sequences": 1,
+            "reports": [{"sequence_id": "seq_0001", "matched": False, "report_file": "analysis_level/sequence_compare/seq_0001.md"}],
+        }
+        (compare_dir / "current_compare.json").write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        (compare_dir / "current_compare.md").write_text("# Current Compare\n", encoding="utf-8")
+        (compare_dir / "seq_0001.md").write_text("# seq_0001\n", encoding="utf-8")
+
+
+def test_wrapup_transition_materializes_explicit_analysis_level_surface(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "wrapup-hold"
     game_dir = run_dir / "agent" / "game_ls20"
     arc_state_dir = run_dir / "supervisor" / "arc"
     super_dir = run_dir / "super"
+    level1 = arc_state_dir / "game_artifacts" / "game_ls20" / "level_1"
+    level2 = arc_state_dir / "game_artifacts" / "game_ls20" / "level_2"
     game_dir.mkdir(parents=True, exist_ok=True)
     arc_state_dir.mkdir(parents=True, exist_ok=True)
     super_dir.mkdir(parents=True, exist_ok=True)
+    _write_level_artifacts(level1, rows="0000\n", compare_level=1)
+    _write_level_artifacts(level2, rows="1111\n")
     (arc_state_dir / "state.json").write_text(json.dumps({"current_level": 2}, indent=2) + "\n")
     (super_dir / "state.json").write_text(
         json.dumps(
@@ -67,25 +60,11 @@ def test_wrapup_transition_stays_pinned_while_supervisor_keeps_wrapup_active(tmp
                 "activeMode": "theory",
                 "activeProcessStage": "post_completion_cleanup",
                 "activeTaskProfile": "level_1_wrapup",
-            },
-            indent=2,
-        )
-        + "\n"
-    )
-    (game_dir / ".analysis_level_pin.json").write_text(
-        json.dumps({"level": 1, "phase": "pending_theory"}, indent=2) + "\n"
-    )
-    (game_dir / "component_coverage.json").write_text(json.dumps({"status": "fail"}, indent=2) + "\n")
-    (game_dir / "current_compare.json").write_text(json.dumps({"all_match": False, "level": 1}, indent=2) + "\n")
-    _write_level_current_surface(game_dir, level=1, pinned=True)
-    (game_dir / "model_status.json").write_text(
-        json.dumps(
-            {
-                "state": {
-                    "current_level": 1,
-                    "levels_completed": 0,
-                    "available_model_levels": [1],
-                }
+                "activeTransitionPayload": {
+                    "analysis_scope": "wrapup",
+                    "analysis_level": "1",
+                    "frontier_level": "2",
+                },
             },
             indent=2,
         )
@@ -96,13 +75,19 @@ def test_wrapup_transition_stays_pinned_while_supervisor_keeps_wrapup_active(tmp
 
     harness_wrapup.certify_or_block_wrapup_transition_impl(runtime)
 
-    assert (game_dir / ".analysis_level_pin.json").exists()
-    meta = json.loads((game_dir / "level_current" / "meta.json").read_text())
-    assert meta["level"] == 1
-    assert meta["analysis_level_pinned"] is True
+    analysis_state = json.loads((game_dir / "analysis_state.json").read_text())
+    assert analysis_state["analysis_scope"] == "wrapup"
+    assert analysis_state["analysis_level"] == 1
+    assert analysis_state["frontier_level"] == 2
+    level_current_meta = json.loads((game_dir / "level_current" / "meta.json").read_text())
+    assert level_current_meta["level"] == 2
+    analysis_meta = json.loads((game_dir / "analysis_level" / "meta.json").read_text())
+    assert analysis_meta["level"] == 1
+    root_compare = json.loads((game_dir / "current_compare.json").read_text())
+    assert root_compare["level"] == 1
 
 
-def test_wrapup_transition_releases_when_supervisor_routes_out_even_if_compare_is_red(
+def test_wrapup_transition_clears_explicit_analysis_level_surface_when_supervisor_routes_out(
     tmp_path: Path,
 ) -> None:
     run_dir = tmp_path / "runs" / "wrapup-release-on-route"
@@ -114,42 +99,33 @@ def test_wrapup_transition_releases_when_supervisor_routes_out_even_if_compare_i
     game_dir.mkdir(parents=True, exist_ok=True)
     arc_state_dir.mkdir(parents=True, exist_ok=True)
     super_dir.mkdir(parents=True, exist_ok=True)
-    level1.mkdir(parents=True, exist_ok=True)
-    level2.mkdir(parents=True, exist_ok=True)
-    (level1 / "initial_state.hex").write_text("0000\n")
-    (level2 / "initial_state.hex").write_text("1111\n")
+    _write_level_artifacts(level1, rows="0000\n", compare_level=1)
+    _write_level_artifacts(level2, rows="1111\n")
     (arc_state_dir / "state.json").write_text(json.dumps({"current_level": 2}, indent=2) + "\n")
     (super_dir / "state.json").write_text(
-        json.dumps({"activeMode": "explore_only", "activeProcessStage": "frontier_probe"}, indent=2)
-        + "\n"
-    )
-    (game_dir / ".analysis_level_pin.json").write_text(
-        json.dumps({"level": 1, "phase": "pending_theory"}, indent=2) + "\n"
-    )
-    (game_dir / "component_coverage.json").write_text(json.dumps({"status": "pass"}, indent=2) + "\n")
-    (game_dir / "current_compare.json").write_text(
-        json.dumps({"all_match": False, "level": 1}, indent=2) + "\n"
-    )
-    _write_level_current_surface(game_dir, level=1, pinned=True, initial_rows="0000\n")
-    (game_dir / "model_status.json").write_text(
         json.dumps(
             {
-                "state": {
-                    "current_level": 1,
-                    "levels_completed": 0,
-                    "available_model_levels": [1],
-                }
+                "activeMode": "explore_only",
+                "activeProcessStage": "frontier_probe",
+                "activeTransitionPayload": {
+                    "analysis_scope": "frontier",
+                    "analysis_level": "2",
+                    "frontier_level": "2",
+                },
             },
             indent=2,
         )
         + "\n"
     )
+    (game_dir / ".analysis_level_pin.json").write_text(json.dumps({"level": 1}, indent=2) + "\n")
 
     runtime = _make_runtime(run_dir, arc_state_dir, game_dir)
 
     harness_wrapup.certify_or_block_wrapup_transition_impl(runtime)
 
+    analysis_state = json.loads((game_dir / "analysis_state.json").read_text())
+    assert analysis_state["analysis_level"] == 2
     assert not (game_dir / ".analysis_level_pin.json").exists()
-    meta = json.loads((game_dir / "level_current" / "meta.json").read_text())
-    assert meta["level"] == 2
-    assert meta["analysis_level_pinned"] is False
+    assert not (game_dir / "analysis_level").exists()
+    level_current_meta = json.loads((game_dir / "level_current" / "meta.json").read_text())
+    assert level_current_meta["level"] == 2

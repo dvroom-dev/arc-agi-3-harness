@@ -288,6 +288,9 @@ supervisor:
       - "If evidence is ambiguous, request one minimal discriminating check instead of broad re-analysis. When the agent proposes a target, compare it against the highest-salience unresolved evidence from the latest real-game turn; if it ignores a more decisive clue, redirect it."
       - "When switching to theory, explore_and_solve, or explore_only, prefer resume_mode_head over fork_new_conversation so cross-mode context is preserved. Level completion alone is not a reason to fork; only fork after a real discontinuity such as reset_level, game_complete, or game_over, or when a fresh start is explicitly justified."
       - "When choosing continue, resume_mode_head, or fork_new_conversation, always include a concrete handoff message: what was learned, why the mode is changing, and the exact next action or verification target."
+      - "On schema_version 2 runs, every supervisor-owned routing decision must set explicit level state in `transition_payload`: `analysis_scope`, `analysis_level`, and `frontier_level`. Do not rely on hidden runtime level inference."
+      - "Use `analysis_scope=frontier` with `analysis_level=<frontier_level>` for normal frontier work. Use `analysis_scope=wrapup` with `analysis_level=<solved_level>` and `frontier_level=<next live level>` for solved-level post-completion cleanup."
+      - "Preserve those explicit level-state fields across theory/code_model wrap-up turns until the supervisor intentionally routes back to frontier work."
       - "Any handoff into explore_and_solve must include exactly one target class: either one concrete feature target to probe, one concrete completion theory to test, or one bounded multi-action sequence that directly tests a single completion theory or one concrete interaction/state-change hypothesis."
       - "A bounded explore_and_solve sequence is allowed only when the required action semantics and visible state structure are already evidenced, and it must include an explicit stop condition: completion, novel event, sequence exhausted, blocked execution, or budget boundary."
       - "Any handoff into explore_only must include exactly one newly introduced visible component or one newly changed visible component state, one bounded real-game probe or bounded action sequence that tests it, and one explicit stop condition. Explore_only is evidence gathering only; it must not attempt to solve the level."
@@ -387,6 +390,7 @@ supervisor:
                  - After level 1 is solved or on later levels, treat the mismatch marker as an immediate `code_model` routing signal.
               3) If marker is `__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__`:
                  - Route to `theory` first with a handoff that the solved level needs post-completion cleanup.
+                 - Set `transition_payload.analysis_scope=wrapup`, `transition_payload.analysis_level=<just-solved level>`, and `transition_payload.frontier_level=<current live level>`.
                  - Require fresh component coverage on the solved level before any `code_model` turn.
                  - After theory passes, route to `code_model` and keep compare focused on the solved level until it is clean.
                  - Once the supervisor judges that solved-level evidence accounting is complete, route out of the wrap-up envelope directly; helper scripts must not gate that decision.
@@ -631,6 +635,9 @@ modes:
             Use neutral feature names until evidence proves a stronger role.
             In `components.py`, keep detector names and component kinds neutral and structural; record semantic meaning only in `theory.md`.
             `theory` and `code_model` co-own `components.py`, but with different edit authority. In theory mode, you may create new detectors and edit detector code or names that theory previously introduced. Do not rename or rewrite detector implementations last introduced by `code_model`; if one of those seems wrong, record the exact issue in `theory.md` and hand it back to `code_model`.
+            Read `analysis_state.json` first whenever level scope matters.
+            `level_current/` always represents the live frontier-visible level.
+            If `analysis_state.json` says `analysis_level != frontier_level`, then the current task is explicitly focused on a non-frontier level. In that case, use `analysis_level/` for that level's static/compare artifacts and explicit `--level <analysis_level>` arguments for coverage/compare work. Do not infer scope from the visible frontier state.
             If solved-level wrap-up is active, stay strictly scoped to that solved level. Do not record frontier-level observations, components, or hypotheses until the supervisor routes out of wrap-up.
             Do not exhaustively restate stable geometry. After one initial survey, only reopen a file if it answers a specific open question or verifies a concrete handoff.
             After a completed bounded probe, theory is delta-only: record what changed, state which prior hypothesis was strengthened or falsified, keep the remaining alternatives live, and select the smallest next discriminating probe.
@@ -670,10 +677,12 @@ modes:
             - use `python3 inspect_grid_slice.py --file ... --rows START:END --cols START:END` for sanctioned row/column extraction instead of `awk`, shell loops, or `python3 -c`; END is normally inclusive, but for a whole-grid span you may use END equal to the grid size;
             - use `python3 inspect_grid_values.py --file ... --value X [--value Y ...]` for sanctioned value counts and bounding boxes instead of ad hoc Python snippets;
             - use `component_coverage.*` as the canonical source for observed grid shapes; do not count rendered `Read` line numbers to infer dimensions;
+            - read `analysis_state.json` before deciding which level an artifact or compare task should target;
             - read `current_compare.md` first whenever compare matters; only then open the single referenced `level_current/sequence_compare/*.md` report if needed;
+            - if `analysis_state.json` says `analysis_level != frontier_level`, treat `current_compare.*` as the compare surface for `analysis_level` and use `analysis_level/sequence_compare/*.md` for detailed reports instead of `level_current/sequence_compare/*.md`;
             - use `current_compare.*`, the referenced compare report, and `turn_index.jsonl` to decide whether sequence artifacts exist before looking for `level_current/sequences/**`;
             - record the available non-RESET actions from the prompt or existing artifacts; do not propose read-only action-discovery probes;
-            - if solved-level wrap-up is active, keep `theory.md` and `components.py` scoped to that solved level only;
+            - if solved-level wrap-up is active, keep `theory.md` and `components.py` scoped to that solved level only, and inspect solved-level artifacts under `analysis_level/` rather than `level_current/`;
             - while solved-level wrap-up is active, do not use or request `arc_repl`; theory remains read-only and mutations belong only in real-game modes after the supervisor routes out of wrap-up;
             - on level 1 before the first completion, speculate as needed from the visible state, but mark speculation clearly in `theory.md` and turn it into exactly one target class in `# Explore Plan`;
             - on level 1, develop a completion theory in `theory.md`, and hand off to `explore_and_solve` only through the single current `# Explore Plan` target class;
@@ -1147,8 +1156,10 @@ modes:
               - inspect_grid_values.py
               - component_coverage.json
               - component_coverage.md
+              - analysis_state.json
               - current_compare.json
               - current_compare.md
+              - analysis_level
               - level_current/sequence_compare
           write:
             allow:
@@ -1172,8 +1183,10 @@ modes:
               - inspect_grid_values.py
               - component_coverage.json
               - component_coverage.md
+              - analysis_state.json
               - current_compare.json
               - current_compare.md
+              - analysis_level
               - level_current/sequence_compare
           write:
             allow:
@@ -1197,8 +1210,10 @@ modes:
               - inspect_grid_values.py
               - component_coverage.json
               - component_coverage.md
+              - analysis_state.json
               - current_compare.json
               - current_compare.md
+              - analysis_level
               - level_current/sequence_compare
           write:
             allow:
@@ -1237,6 +1252,9 @@ modes:
             Do not mark a newly introduced current-level mechanic as proven from model-only behavior, dry runs, or clean compare on previously explored prefixes alone. Compare only validates explored real-game sequences; it does not certify unseen branch suffixes or newly introduced component semantics.
             If the active frontier level has zero real-game sequences, compare-clean is vacuous for that level. Use model proof only as a hypothesis check, not as proof that a new frontier branch or new mechanic is correct in the real game.
             Use `theory.md`, `components.py`, `component_coverage.*`, `current_compare.*`, and `level_current/sequence_compare/*.md` as the primary evidence surface here.
+            Read `analysis_state.json` first whenever level scope matters.
+            `level_current/` always represents the live frontier-visible level.
+            If `analysis_state.json` says `analysis_level != frontier_level`, then the current task is explicitly focused on a non-frontier level. In that case, use `analysis_level/` for that level's static/compare artifacts and explicit `--level <analysis_level>` arguments for model compare/coverage work. Do not infer scope from the visible frontier state.
             If solved-level wrap-up is active, stay scoped to that solved level and ignore frontier-level artifacts until the supervisor routes out of wrap-up.
             Do not read raw `.hex` state files or sequence metadata directly in this mode. Use compare report markdown and sampled diff cells instead.
             Exception: if compare is already clean for the active frontier level and the remaining blocker is writing a deterministic frontier branch, you may inspect visible `level_current/initial_state.hex` or `level_current/current_state.hex` structure with the sanctioned helpers `inspect_grid_slice.py` and `inspect_grid_values.py`. Do not hand branch construction back to theory just because you have not yet inspected the visible state structure yourself.
@@ -1248,7 +1266,7 @@ modes:
             If compare has already narrowed to one late transition mismatch, do not restart broad branch analysis, re-derive the whole level theory, or speculate about unrelated earlier mechanics. Patch or disprove that one transition first.
             If compare is red and you have one exact blocker, stay in `code_model` and report that blocker precisely; do not bounce back to `theory` while parity remains red.
             Use relative workspace paths only. Do not synthesize absolute run/repo paths or derive `game_<id>` directories from `${vars.game_id}`.
-            Read `current_compare.md` first, then open only the referenced `level_current/sequence_compare/*.md` report if deeper detail is needed.
+            Read `current_compare.md` first. If `analysis_state.json` says `analysis_level != frontier_level`, open only the referenced `analysis_level/sequence_compare/*.md` report if deeper detail is needed; otherwise use `level_current/sequence_compare/*.md`.
             Edit the existing workspace files in place. Do not create scratch scripts, temporary debug programs, or alternate copies of model/play files.
             Do not write outside the workspace or under `/tmp`. If a temporary diagnostics file is absolutely necessary, keep it relative to `.` and remove it before leaving the turn.
             Do not use shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null`.
@@ -1260,6 +1278,7 @@ modes:
         - literal: |
             Active game: `${vars.game_id}`.
             Required loop:
+            0) read `analysis_state.json` and determine whether this task targets the frontier level or an explicit non-frontier `analysis_level`;
             1) inspect `theory.md`, `components.py`, `current_compare.md`, and the referenced `level_current/sequence_compare/*.md` report;
             2) if needed, run `python3 inspect_sequence.py --current-mismatch` to print the first mismatching compare report target and step;
                for sanctioned grid inspection, use `python3 inspect_grid_slice.py --file ... --rows ... --cols ...` or `python3 inspect_grid_values.py --file ... --value ...` instead of `awk` or `python3 -c`;
@@ -1268,7 +1287,7 @@ modes:
             4) name the exact mismatching sampled diff cells or transition fields, match them to `theory.md`, and patch the missing mechanics, completion transitions, frontier branch logic, or component detectors/names needed in `model_lib.py`/`play_lib.py`/`components.py`;
                if a needed visible entity already has a detector in `components.py`, use that detector from `model_lib.py`/`play_lib.py` instead of re-deriving it from raw value scans there;
                on later levels, patch by adding or overriding the current level's hook(s) rather than re-copying earlier mechanics;
-            5) run `python3 model.py compare_sequences` with no explicit level so compare stays aligned with the current solved-level wrap-up or frontier state;
+            5) if `analysis_state.json` says `analysis_level != frontier_level`, run `python3 model.py compare_sequences --level <analysis_level>` and use `analysis_level/sequence_compare/*.md` for detailed reports; otherwise run `python3 model.py compare_sequences` with no explicit level;
             6) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes;
             7) if compare is clean across all explored current-level sequences:
                - if solved-level wrap-up is active, switch_mode to `theory` so the supervisor can decide whether solved-level evidence accounting is complete;
@@ -1278,6 +1297,7 @@ modes:
             9) if there is one exact blocker preventing parity repair, ask the supervisor to escalate or resolve that blocker from `code_model`; do not switch back to `theory` until compare is clean.
             10) if compare is already clean and the only missing piece is a deterministic frontier branch, inspect visible `level_current/initial_state.hex` or `level_current/current_state.hex` yourself with the sanctioned grid helpers and write the branch in `play_lib.py`; do not hand off to theory merely because you have not yet inspected the visible state structure.
             Read these agent-workspace files as needed; prefer component summaries over raw grid artifacts:
+            - `analysis_state.json`
             - `theory.md`
             - `components.py`
             - `model_lib.py`
@@ -1288,6 +1308,7 @@ modes:
             - `component_coverage.md`
             - `current_compare.md`
             - `level_current/sequence_compare/current_compare.md`
+            - `analysis_level/sequence_compare/current_compare.md`
         - prompt_part: current_theory_file
         - prompt_part: supervisor_context_block
         - prompt_part: switch_mode_usage
@@ -1418,6 +1439,7 @@ modes:
               - inspect_grid_values.py
               - component_coverage.json
               - component_coverage.md
+              - analysis_state.json
               - current_compare.json
               - current_compare.md
               - level_current/sequence_compare
@@ -1442,6 +1464,7 @@ modes:
               - inspect_grid_values.py
               - component_coverage.json
               - component_coverage.md
+              - analysis_state.json
               - current_compare.json
               - current_compare.md
               - level_current/sequence_compare
@@ -1466,6 +1489,7 @@ modes:
               - inspect_grid_values.py
               - component_coverage.json
               - component_coverage.md
+              - analysis_state.json
               - current_compare.json
               - current_compare.md
               - level_current/sequence_compare
@@ -1481,6 +1505,7 @@ modes:
             Mode: solve_model.
             Goal: on level 2+, use the current `play_lib.py` frontier branch through the static `play.py` entrypoint to solve the level from start in the model, then replay that same plan once in the real game.
             Never enter this mode while solved-level wrap-up is still active for the prior solved level.
+            Read `analysis_state.json` first. Solve_model requires explicit frontier scope: `analysis_level == frontier_level`.
             Do not read raw `.hex` state files or sequence metadata directly in this mode.
             Solve_model is the only level-2+ solution-attempt mode. If a model-side branch is not ready yet, leave that work to code_model or theory.
             `play.py` is a harness-owned static dispatcher. Do not edit it in this mode; put level-specific solve branches in `play_lib.py`.
@@ -1497,6 +1522,7 @@ modes:
         - literal: |
             Active game: `${vars.game_id}`.
             Required sequence in this mode:
+            - read `analysis_state.json` and confirm `analysis_level == frontier_level` before any solve attempt;
             - determine `LEVEL` with `arc_level`;
             - `python3 model.py exec_file --reset-level-first --game-id "${vars.game_id}" ./play.py`;
             - `python3 model.py status --game-id "${vars.game_id}"`;
@@ -1506,6 +1532,7 @@ modes:
             Do not use shell output redirection such as `>`, `>>`, `2>`, `2>/dev/null`, or `>/dev/null` in this mode.
             Stay in solve_model until the model-side proof plus one real replay succeeds, exposes a model bug, or clearly proves that one exact missing real-game observation must go back to `theory`.
             Read these agent-workspace files as needed:
+            - `analysis_state.json`
             - `theory.md`
             - `model.py`
             - `components.py`
@@ -1524,6 +1551,7 @@ modes:
       requirements:
         - "When model proof succeeds, mark the level SOLVED in `theory.md` with concise evidence."
         - "Do not enter or remain in solve_model while solved-level wrap-up is still active for the prior solved level."
+        - "Read `analysis_state.json` first and refuse solve_model work if it does not explicitly target the frontier level."
         - "Do not call `python3 model.py set_level ...` in solve_model. The active visible level must come from the current runtime state after wrap-up release or reset-level-first replay."
         - "Run both model and real `exec_file` replays with `--reset-level-first`; do not put reset logic inside `play.py`."
         - "Treat `play.py` as a static harness-owned dispatcher and keep level-specific solve logic in `play_lib.py`."
