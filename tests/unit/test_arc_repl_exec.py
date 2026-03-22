@@ -79,3 +79,4 @@ def test_execute_script_runs_steps_and_stops_on_terminal() -> None:
     assert len(step_snapshots) == 2
     assert len(executed_events) == 2
     assert step_results[-1]["is_terminal"] is True
+    assert step_results[0]["frame_count"] == 1

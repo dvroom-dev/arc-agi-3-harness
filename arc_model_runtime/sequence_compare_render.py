@@ -49,6 +49,10 @@ def report_md(report: dict[str, Any]) -> str:
     if report.get("divergence_step") is not None:
         lines.append(f"- divergence_step: {int(report['divergence_step'])}")
         lines.append(f"- divergence_reason: {str(report.get('divergence_reason', ''))}")
+    if report.get("frame_count_game") is not None:
+        lines.append(f"- frame_count_game: {int(report.get('frame_count_game', 0) or 0)}")
+    if report.get("frame_count_model") is not None:
+        lines.append(f"- frame_count_model: {int(report.get('frame_count_model', 0) or 0)}")
     if str(report.get("comparison_stop_reason") or "") == "post_level_complete_state_diff_excluded":
         lines.extend(
             [
@@ -74,6 +78,15 @@ def report_md(report: dict[str, Any]) -> str:
     _append_diff_summary(lines, "Game Step Diff", report.get("game_step_diff"))
     _append_diff_summary(lines, "Model Step Diff", report.get("model_step_diff"))
     _append_diff_summary(lines, "State Diff (Game After vs Model After)", report.get("state_diff"))
+    frame_diffs = report.get("frame_diffs")
+    if isinstance(frame_diffs, list):
+        for frame_diff in frame_diffs:
+            if not isinstance(frame_diff, dict):
+                continue
+            lines.extend(["", f"## Intermediate Frame {int(frame_diff.get('frame_index', 0) or 0)}"])
+            _append_diff_summary(lines, "Game Frame Diff", frame_diff.get("game_frame_diff"))
+            _append_diff_summary(lines, "Model Frame Diff", frame_diff.get("model_frame_diff"))
+            _append_diff_summary(lines, "Frame State Diff (Game vs Model)", frame_diff.get("state_diff"))
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -129,6 +142,10 @@ def current_compare_markdown(summary_payload: dict[str, Any]) -> str:
             reason = str(report.get("divergence_reason", "") or "").strip()
             if reason:
                 lines.append(f"- divergence_reason: {reason}")
+            if report.get("frame_count_game") is not None:
+                lines.append(f"- frame_count_game: {int(report.get('frame_count_game', 0) or 0)}")
+            if report.get("frame_count_model") is not None:
+                lines.append(f"- frame_count_model: {int(report.get('frame_count_model', 0) or 0)}")
             if report.get("report_file"):
                 lines.append(f"- report_file: {report['report_file']}")
             if str(report.get("comparison_stop_reason") or "") == "post_level_complete_state_diff_excluded":

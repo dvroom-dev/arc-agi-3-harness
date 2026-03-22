@@ -136,10 +136,17 @@ class BaseReplSession:
         before_pixels: np.ndarray,
         after_frame,
         after_pixels: np.ndarray,
+        frame_sequence: list[np.ndarray] | None = None,
     ) -> None:
         before_state = self._state_payload_for(before_frame, before_pixels)
         after_state = self._state_payload_for(after_frame, after_pixels)
         diff_payload = self.diff(before_state, after_state, output="json")
+        frame_sequence_rows = None
+        if isinstance(frame_sequence, list):
+            frame_sequence_rows = [
+                ["".join(f"{int(v):X}" for v in row) for row in np.asarray(grid, dtype=np.int8)]
+                for grid in frame_sequence
+            ]
         self.action_history.append(
             call_action=call_action,
             action_name=action_name,
@@ -150,6 +157,7 @@ class BaseReplSession:
             state_before=before_state,
             state_after=after_state,
             diff_payload=diff_payload,
+            frame_sequence_rows=frame_sequence_rows,
         )
     def get_action_record(self, action_index: int) -> dict | None:
         return self.action_history.get_record(action_index)

@@ -116,7 +116,8 @@ def execute_exec_turn(
             detail_text = json.dumps(failure, ensure_ascii=True)
             raise RuntimeError(f"env.step() returned None; diagnostics={detail_text}")
         session.frame = frame
-        current_pixels = session.deps._get_pixels(session.env, frame)
+        frame_sequence = session.deps._get_frame_sequence(frame)
+        current_pixels = np.array(frame_sequence[-1], copy=True)
         changes = session.deps._iter_cell_changes(session.pixels, current_pixels)
         levels_gained = int(frame.levels_completed) - prev_levels
         step_index = len(step_results) + 1
@@ -152,6 +153,7 @@ def execute_exec_turn(
             "guid": getattr(frame, "guid", None),
             "available_actions": [int(a) for a in getattr(frame, "available_actions", [])],
             "full_reset": bool(getattr(frame, "full_reset", False)),
+            "frame_count": int(len(frame_sequence)),
         }
         if levels_gained > 0:
             step_record["suppressed_cross_level_diff"] = True
@@ -182,6 +184,7 @@ def execute_exec_turn(
                 before_pixels=before_pixels,
                 after_frame=frame,
                 after_pixels=np.array(current_pixels, copy=True),
+                frame_sequence=frame_sequence,
             )
             event_record = {
                 "kind": "step",
@@ -216,6 +219,7 @@ def execute_exec_turn(
             before_pixels=before_pixels,
             after_frame=frame,
             after_pixels=np.array(current_pixels, copy=True),
+            frame_sequence=frame_sequence,
         )
         event_record = {
             "kind": "step",

@@ -80,6 +80,7 @@ class ActionHistoryStore:
         state_before: dict,
         state_after: dict,
         diff_payload: dict,
+        frame_sequence_rows: list[list[str]] | None = None,
     ) -> None:
         state_before_name = str(state_before.get("state", "")).strip().upper()
         state_after_name = str(state_after.get("state", "")).strip().upper()
@@ -127,6 +128,8 @@ class ActionHistoryStore:
             "state_after": deepcopy(state_after),
             "diff": final_diff_payload,
         }
+        if isinstance(frame_sequence_rows, list):
+            record["frame_sequence_rows"] = deepcopy(frame_sequence_rows)
         self.records.append(record)
         self.next_action_index += 1
         self._save()

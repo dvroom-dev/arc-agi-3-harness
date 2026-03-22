@@ -203,3 +203,15 @@ def test_write_state_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert state_payload["current_attempt_steps"] == 0
     assert state_payload["total_resets"] == 1
     assert (tmp_path / "arc" / "game-state.md").exists()
+
+
+def test_get_frame_sequence_returns_all_rendered_frames() -> None:
+    first = np.zeros((2, 2), dtype=np.int8)
+    second = np.ones((2, 2), dtype=np.int8)
+    frame = _frame(frame=[first, second])
+    seq = arc_repl_env._get_frame_sequence(frame)
+    assert len(seq) == 2
+    assert np.array_equal(seq[0], first)
+    assert np.array_equal(seq[1], second)
+    assert seq[0] is not first
+    assert seq[1] is not second

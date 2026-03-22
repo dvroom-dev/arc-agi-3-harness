@@ -197,6 +197,17 @@ def _get_pixels(env, frame: FrameDataRaw | None = None) -> np.ndarray:
     )
 
 
+def _get_frame_sequence(frame: FrameDataRaw | None) -> list[np.ndarray]:
+    if frame is None:
+        return []
+    data = getattr(frame, "frame", None)
+    if not isinstance(data, (list, tuple)) or not data:
+        raise RuntimeError(
+            "FrameDataRaw.frame is unavailable; cannot compute authoritative per-action frame sequence."
+        )
+    return [np.array(pixels, copy=True) for pixels in data]
+
+
 def _make_env(game_id: str):
     mode = _resolve_operation_mode()
     kwargs: dict[str, object] = {"operation_mode": mode}

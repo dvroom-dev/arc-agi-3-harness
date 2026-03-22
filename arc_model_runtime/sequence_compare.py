@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 
+from .sequence_compare_artifacts import persist_current_compare
 from .sequence_compare_render import current_compare_markdown, report_md
 from .utils import (
     action_from_name,
@@ -86,6 +87,9 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
         "model_step_diff": None,
         "state_diff": None,
         "transition_mismatch": None,
+        "frame_count_game": None,
+        "frame_count_model": None,
+        "frame_diffs": [],
     }
     boundary_transition_compared = False
     for action in actions:
@@ -93,6 +97,7 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
         files = action.get("files", {}) if isinstance(action.get("files"), dict) else {}
         before_path = level_dir / str(files.get("before_state_hex", ""))
         after_path = level_dir / str(files.get("after_state_hex", ""))
+        frame_paths = files.get("frame_sequence_hex", [])
         if not before_path.exists() or not after_path.exists():
             report["matched"] = False
             report["divergence_step"] = local_step
@@ -100,6 +105,13 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
             break
         game_before = read_hex_grid(before_path)
         game_after = read_hex_grid(after_path)
+        game_frames: list[np.ndarray] = []
+        if isinstance(frame_paths, list):
+            for rel in frame_paths:
+                frame_path = level_dir / str(rel)
+                if frame_path.exists():
+                    game_frames.append(read_hex_grid(frame_path))
+        has_explicit_game_frames = bool(game_frames)
         model_before = np.array(compare_env.grid, dtype=np.int8, copy=True)
         game_state_before = str(action.get("state_before", "") or "")
         game_state_after = str(action.get("state_after", "") or "")
@@ -140,6 +152,9 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
             data=action_data,
             reasoning=None,
         )
+        if not getattr(compare_env, "last_step_frames", None):
+            compare_env.last_step_frames = [np.array(compare_env.grid, dtype=np.int8, copy=True)]
+        model_frames = [np.array(frame_grid, dtype=np.int8, copy=True) for frame_grid in compare_env.last_step_frames]
         model_after = np.array(compare_env.grid, dtype=np.int8, copy=True)
         model_level_complete_after = bool(compare_env.hooks.is_level_complete(compare_env))
         model_game_over_after = bool(compare_env.hooks.is_game_over(compare_env) or str(compare_env.state) == "GAME_OVER")
@@ -158,7 +173,20 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
             or int(action.get("level_after", game_levels_after + 1) or (game_levels_after + 1))
             > int(action.get("level_before", game_levels_before + 1) or (game_levels_before + 1))
         )
+        terminal_boundary = completion_boundary or game_game_over_after or model_game_over_after
+        if not game_frames and not completion_boundary:
+            game_frames = [np.array(game_after, dtype=np.int8, copy=True)]
         report["actions_compared"] = int(local_step)
+        if terminal_boundary and not has_explicit_game_frames:
+            comparable_game_frames = []
+            comparable_model_frames = []
+        else:
+            comparable_game_frames = (
+                game_frames[:-1] if completion_boundary and len(game_frames) > 1 else game_frames
+            )
+            comparable_model_frames = list(model_frames)
+        report["frame_count_game"] = int(len(comparable_game_frames))
+        report["frame_count_model"] = int(len(comparable_model_frames))
         if (
             model_state_before != game_state_before
             or model_state_after != game_state_after
@@ -202,6 +230,27 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
                 report["model_step_diff"] = diff_payload(model_before, model_after)
                 report["state_diff"] = diff_payload(game_after, model_after)
             break
+        if len(comparable_game_frames) != len(comparable_model_frames):
+            report["matched"] = False
+            report["divergence_step"] = local_step
+            report["divergence_reason"] = "frame_count_mismatch"
+            break
+        for frame_idx, (game_frame, model_frame) in enumerate(zip(comparable_game_frames, comparable_model_frames), start=1):
+            if game_frame.shape != model_frame.shape or not np.array_equal(game_frame, model_frame):
+                report["matched"] = False
+                report["divergence_step"] = local_step
+                report["divergence_reason"] = "intermediate_frame_mismatch"
+                report["frame_diffs"] = [
+                    {
+                        "frame_index": int(frame_idx),
+                        "game_frame_diff": diff_payload(game_before if frame_idx == 1 else game_frames[frame_idx - 2], game_frame),
+                        "model_frame_diff": diff_payload(model_before if frame_idx == 1 else model_frames[frame_idx - 2], model_frame),
+                        "state_diff": diff_payload(game_frame, model_frame),
+                    }
+                ]
+                break
+        if report["matched"] is False:
+            break
         if game_level_complete_after or model_level_complete_after:
             boundary_transition_compared = True
             report["comparison_stop_reason"] = "post_level_complete_state_diff_excluded"
@@ -220,132 +269,6 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
         report["comparison_stop_reason"] = "post_level_complete_state_diff_excluded"
     return report
 
-
-def _redact_payload_for_pinned_level(payload: dict[str, Any], *, pinned_level: int | None) -> dict[str, Any]:
-    if pinned_level is None:
-        return payload
-    sanitized = sanitize_visible_json_payload(payload, visible_level=int(pinned_level))
-    return sanitized if isinstance(sanitized, dict) else payload
-
-
-def _write_text_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text)
-    tmp.replace(path)
-
-
-def _export_compare_reports(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    exported: list[dict[str, Any]] = []
-    for report in reports:
-        if not isinstance(report, dict):
-            continue
-        item = dict(report)
-        if "end_reason" in item:
-            item["sequence_end_reason"] = item.pop("end_reason")
-        exported.append(item)
-    return exported
-
-
-def _persist_current_compare(session, payload: dict[str, Any]) -> None:
-    pin = load_analysis_level_pin(session.game_dir)
-    pinned_level: int | None = None
-    if isinstance(pin, dict):
-        try:
-            pinned_level = int(pin.get("level"))
-        except Exception:
-            pinned_level = None
-    payload = _redact_payload_for_pinned_level(payload, pinned_level=pinned_level)
-    reports = payload.get("reports")
-    if not isinstance(reports, list):
-        reports = []
-    exported_reports = _export_compare_reports(reports)
-    exported_compare_payload = dict(payload)
-    exported_compare_payload["reports"] = exported_reports
-    summary_payload = {
-        "level": int(payload.get("level", session.env.current_level)),
-        "command": ["python3", "model.py", "compare_sequences"],
-        "return_code": 0 if bool(payload.get("ok")) else 1,
-        "compare_ok": bool(payload.get("ok")),
-        "all_match": bool(payload.get("all_match")),
-        "compared_sequences": int(payload.get("compared_sequences", 0) or 0),
-        "diverged_sequences": int(payload.get("diverged_sequences", 0) or 0),
-        "reports": exported_reports,
-        "mismatched_reports": [
-            report for report in exported_reports if isinstance(report, dict) and report.get("matched") is False
-        ],
-        "current_runtime_state": {
-            "state": str(payload.get("state", "")),
-            "current_level": int(payload.get("current_level", session.env.current_level)),
-            "levels_completed": int(payload.get("levels_completed", 0) or 0),
-            "level_complete": bool(payload.get("level_complete", False)),
-            "current_level_complete": bool(payload.get("current_level_complete", False)),
-            "last_step_level_complete": bool(payload.get("last_step_level_complete", False)),
-            "last_completed_level": payload.get("last_completed_level"),
-            "game_over": bool(payload.get("game_over", False)),
-            "current_level_game_over": bool(payload.get("current_level_game_over", False)),
-            "last_step_game_over": bool(payload.get("last_step_game_over", False)),
-            "last_game_over_level": payload.get("last_game_over_level"),
-        },
-        "compare_payload": exported_compare_payload,
-        "stdout": "",
-        "stderr": "",
-    }
-    json_text = json.dumps(summary_payload, indent=2) + "\n"
-    md_text = current_compare_markdown(summary_payload)
-    _write_text_atomic(session.game_dir / "current_compare.json", json_text)
-    _write_text_atomic(session.game_dir / "current_compare.md", md_text)
-
-    level_current = session.game_dir / "level_current" / "sequence_compare"
-    _write_text_atomic(level_current / "current_compare.json", json_text)
-    _write_text_atomic(level_current / "current_compare.md", md_text)
-
-    for report in reports:
-        if not isinstance(report, dict):
-            continue
-        sequence_id = str(report.get("sequence_id") or "").strip()
-        if not sequence_id:
-            continue
-        report_text = report_md(report)
-        _write_text_atomic(level_current / f"{sequence_id}.md", report_text)
-
-    analysis_level_dir = session.game_dir / "analysis_level" / "sequence_compare"
-    if int(payload.get("level", session.env.current_level)) != int(session.env.current_level):
-        _write_text_atomic(analysis_level_dir / "current_compare.json", json_text)
-        _write_text_atomic(analysis_level_dir / "current_compare.md", md_text)
-        for report in reports:
-            if not isinstance(report, dict):
-                continue
-            sequence_id = str(report.get("sequence_id") or "").strip()
-            if not sequence_id:
-                continue
-            _write_text_atomic(analysis_level_dir / f"{sequence_id}.md", report_md(report))
-
-    level_compare = resolve_level_dir(session.game_dir, int(payload.get("level", session.env.current_level)))
-    if level_compare is not None:
-        compare_dir = level_compare / "sequence_compare"
-        _write_text_atomic(compare_dir / "current_compare.json", json_text)
-        _write_text_atomic(compare_dir / "current_compare.md", md_text)
-        for report in reports:
-            if not isinstance(report, dict):
-                continue
-            sequence_id = str(report.get("sequence_id") or "").strip()
-            if not sequence_id:
-                continue
-            _write_text_atomic(compare_dir / f"{sequence_id}.md", report_md(report))
-
-    canonical_artifacts = canonical_game_artifacts_dir(session.game_dir)
-    if canonical_artifacts is not None:
-        canonical_compare_dir = canonical_artifacts / f"level_{int(payload.get('level', session.env.current_level))}" / "sequence_compare"
-        _write_text_atomic(canonical_compare_dir / "current_compare.json", json_text)
-        _write_text_atomic(canonical_compare_dir / "current_compare.md", md_text)
-        for report in reports:
-            if not isinstance(report, dict):
-                continue
-            sequence_id = str(report.get("sequence_id") or "").strip()
-            if not sequence_id:
-                continue
-            _write_text_atomic(canonical_compare_dir / f"{sequence_id}.md", report_md(report))
 
 def compare_sequences(
     session,
@@ -480,8 +403,14 @@ def compare_sequences(
         "reports": reports,
         **session.get_status_state(),
     }
-    payload = _redact_payload_for_pinned_level(payload, pinned_level=pinned_level)
-    _persist_current_compare(session, payload)
+    payload = sanitize_visible_json_payload(payload, visible_level=int(pinned_level)) if pinned_level is not None else payload
+    if not isinstance(payload, dict):
+        payload = {
+            "ok": False,
+            "action": "compare_sequences",
+            "error": {"type": "invalid_compare_payload", "message": "sanitized compare payload was not a dict"},
+        }
+    persist_current_compare(session, payload)
     if bool(payload["all_match"]) and isinstance(pin, dict) and int(pin.get("level", -1)) == int(target_level):
         update_analysis_level_pin(
             session.game_dir,

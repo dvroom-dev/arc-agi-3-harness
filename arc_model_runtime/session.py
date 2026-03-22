@@ -13,6 +13,7 @@ import numpy as np
 from arcengine import GameAction
 
 from .hooks import ModelHooks
+from .state_views import state_payload, status_state, state_transition_flags
 from .utils import (
     action_from_name,
     diff_payload,
@@ -59,6 +60,7 @@ class ModelEnv:
         self.last_step_game_over = False
         self.last_game_over_level: int | None = None
         self.allow_missing_next_level_on_completion = False
+        self.last_step_frames: list[np.ndarray] = []
         self.grid = np.zeros((0, 0), dtype=np.int8)
         self.refresh_level_initial_states()
         self._init_level(1)
@@ -91,15 +93,25 @@ class ModelEnv:
         if clear_last_step_level_complete:
             self.last_step_level_complete = False
             self.last_step_game_over = False
+        self.last_step_frames = []
         self.grid = self.initial_grid_for_level(level)
         self.hooks.init_level(self, int(level))
+
+    def set_step_frames(self, frames: list[np.ndarray] | list[list[list[int]]]) -> None:
+        normalized: list[np.ndarray] = []
+        for frame in frames:
+            normalized.append(np.array(frame, dtype=np.int8, copy=True))
+        self.last_step_frames = normalized
 
     def step(self, action: GameAction, data=None, reasoning=None):
         self.level_complete = False
         self.last_step_level_complete = False
         self.game_over = False
         self.last_step_game_over = False
+        self.last_step_frames = []
         self.hooks.apply_action(self, action, data=data, reasoning=reasoning)
+        if not self.last_step_frames:
+            self.last_step_frames = [np.array(self.grid, dtype=np.int8, copy=True)]
         game_over = bool(self.hooks.is_game_over(self) or str(self.state) == "GAME_OVER")
         self.game_over = game_over
         self.last_step_game_over = game_over
@@ -111,6 +123,9 @@ class ModelEnv:
         self.level_complete = completed
         self.last_step_level_complete = completed
         if completed:
+            completed_grid = np.array(self.grid, dtype=np.int8, copy=True)
+            if not self.last_step_frames:
+                self.last_step_frames = [completed_grid]
             self.last_completed_level = int(self.current_level)
             self.levels_completed += 1
             if self.levels_completed >= self.win_levels:
@@ -294,40 +309,8 @@ class ModelSession:
         self._persist_to_disk("sync_frontier")
         return None
 
-    def _state_transition_flags(self) -> dict[str, Any]:
-        current_level_complete = bool(self.env.level_complete or str(self.env.state) == "WIN")
-        last_step_level_complete = bool(self.env.last_step_level_complete or str(self.env.state) == "WIN")
-        current_level_game_over = bool(self.env.game_over or str(self.env.state) == "GAME_OVER")
-        last_step_game_over = bool(self.env.last_step_game_over or str(self.env.state) == "GAME_OVER")
-        return {
-            "level_complete": last_step_level_complete,
-            "current_level_complete": current_level_complete,
-            "last_step_level_complete": last_step_level_complete,
-            "last_completed_level": (
-                int(self.env.last_completed_level) if self.env.last_completed_level is not None else None
-            ),
-            "game_over": last_step_game_over,
-            "current_level_game_over": current_level_game_over,
-            "last_step_game_over": last_step_game_over,
-            "last_game_over_level": (
-                int(self.env.last_game_over_level) if self.env.last_game_over_level is not None else None
-            ),
-        }
-
     def get_state(self) -> dict:
-        self.env.refresh_level_initial_states()
-        return {
-            "state": str(self.env.state),
-            "current_level": int(self.env.current_level),
-            "levels_completed": int(self.env.levels_completed),
-            **self._state_transition_flags(),
-            "win_levels": int(self.env.win_levels),
-            "guid": getattr(self.env, "guid", None),
-            "available_actions": [int(a) for a in getattr(self.env, "available_actions", [])],
-            "available_model_levels": [int(v) for v in self.env.available_model_levels],
-            "full_reset": bool(getattr(self.env, "full_reset", False)),
-            "grid_hex_rows": grid_hex_rows(self.env.grid),
-        }
+        return state_payload(self.env)
 
     def get_status_state(self) -> dict:
         """Public model status surface for CLI output/artifacts.
@@ -335,26 +318,7 @@ class ModelSession:
         Keep this compact and artifact-focused. Do not leak internal runtime
         scaffolding like the model env grid snapshot or synthetic action list.
         """
-        self.env.refresh_level_initial_states()
-        visible_level = effective_analysis_level(
-            self.game_dir,
-            frontier_level=load_frontier_level_from_arc_state() or int(self.env.current_level),
-        )
-        current_level = int(visible_level) if visible_level is not None else int(self.env.current_level)
-        levels_completed = max(0, current_level - 1)
-        available_model_levels = [int(v) for v in self.env.available_model_levels]
-        if visible_level is not None:
-            available_model_levels = [lvl for lvl in available_model_levels if int(lvl) <= int(visible_level)]
-        return {
-            "state": str(self.env.state),
-            "current_level": current_level,
-            "levels_completed": levels_completed,
-            **self._state_transition_flags(),
-            "win_levels": int(self.env.win_levels),
-            "guid": getattr(self.env, "guid", None),
-            "available_model_levels": available_model_levels,
-            "full_reset": bool(getattr(self.env, "full_reset", False)),
-        }
+        return status_state(game_dir=self.game_dir, env=self.env)
 
     def diff(self, before_state, after_state, output: str = "json"):
         before = np.array(before_state, copy=True) if isinstance(before_state, np.ndarray) else grid_from_hex_rows(before_state)

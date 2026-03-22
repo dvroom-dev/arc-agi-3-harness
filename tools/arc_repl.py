@@ -21,6 +21,7 @@ from arc_repl_diffs import (
 )
 from arc_repl_env import (
     _action_from_event_name,
+    _get_frame_sequence,
     _get_pixels,
     _last_step_failure_details,
     _make_env,

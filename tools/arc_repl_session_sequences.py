@@ -26,6 +26,12 @@ def write_hex_grid(path: Path, grid: np.ndarray) -> None:
     path.write_text("\n".join(rows) + "\n")
 
 
+def write_hex_rows(path: Path, rows: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    normalized = [str(row).strip().upper() for row in rows if str(row).strip()]
+    path.write_text("\n".join(normalized) + "\n")
+
+
 def _safe_action_slug(name: str) -> str:
     raw = str(name or "").strip().lower()
     safe = re.sub(r"[^a-z0-9_.-]+", "_", raw).strip("._")
@@ -235,6 +241,7 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
                 "game_over_after": bool(rec.get("game_over_after", state_after == "GAME_OVER")),
                 "before_rows": state_before_rows,
                 "after_rows": state_after_rows,
+                "frame_sequence_rows": rec.get("frame_sequence_rows", []),
                 "files": {},
             }
         )
@@ -323,6 +330,16 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
             step_dir.mkdir(parents=True, exist_ok=True)
             write_hex_grid(step_dir / "before_state.hex", before_grid)
             write_hex_grid(step_dir / "after_state.hex", after_grid)
+            frames_root = step_dir / "frames"
+            frame_sequence_rows = action.get("frame_sequence_rows", [])
+            frame_files: list[str] = []
+            if isinstance(frame_sequence_rows, list):
+                for frame_idx, frame_rows in enumerate(frame_sequence_rows, start=1):
+                    if not isinstance(frame_rows, list):
+                        continue
+                    frame_file = frames_root / f"frame_{frame_idx:04d}.hex"
+                    write_hex_rows(frame_file, frame_rows)
+                    frame_files.append(str(frame_file.relative_to(level_dir)))
 
             meta = {
                 "schema_version": "arc_repl.sequence_action.v1",
@@ -344,10 +361,12 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
                 "levels_completed_before": int(action["levels_completed_before"]),
                 "levels_completed_after": int(action["levels_completed_after"]),
                 "recorded_at_utc": str(action["recorded_at_utc"]),
+                "frame_count": int(len(frame_files)),
                 "files": {
                     "before_state_hex": "before_state.hex",
                     "after_state_hex": "after_state.hex",
                     "meta_json": "meta.json",
+                    "frame_sequence_hex": frame_files,
                 },
             }
             (step_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
@@ -356,9 +375,11 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
                 "before_state_hex": str(step_dir.relative_to(level_dir) / "before_state.hex"),
                 "after_state_hex": str(step_dir.relative_to(level_dir) / "after_state.hex"),
                 "meta_json": str(step_dir.relative_to(level_dir) / "meta.json"),
+                "frame_sequence_hex": frame_files,
             }
             action.pop("before_rows", None)
             action.pop("after_rows", None)
+            action.pop("frame_sequence_rows", None)
 
         seq["action_count"] = len(seq["actions"])
         seq_payload = {

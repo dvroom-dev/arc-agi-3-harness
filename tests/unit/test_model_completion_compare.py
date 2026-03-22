@@ -332,3 +332,86 @@ def test_compare_sequences_accepts_visible_pinned_completion_boundary(tmp_path: 
     assert report["matched"] is True
     assert report["comparison_stop_reason"] == "post_level_complete_state_diff_excluded"
 
+
+def test_compare_sequences_detects_intermediate_frame_mismatch(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["00", "00"])
+    (game_dir / "model_lib.py").write_text(
+        (game_dir / "model_lib.py").read_text()
+        + "\n\ndef init_level(env, level: int, *, cfg=None):\n"
+        + "    import numpy as np\n"
+        + "    env.current_level = int(level)\n"
+        + "    env.grid = np.array([[0, 0], [0, 0]], dtype=np.int8)\n"
+        + "\n\ndef apply_level_1(env, action, *, data=None, reasoning=None):\n"
+        + "    import numpy as np\n"
+        + "    _ = action, data, reasoning\n"
+        + "    env.set_step_frames([\n"
+        + "        np.array([[0, 1], [0, 0]], dtype=np.int8),\n"
+        + "        np.array([[0, 2], [0, 0]], dtype=np.int8),\n"
+        + "    ])\n"
+        + "    env.grid = np.array([[0, 2], [0, 0]], dtype=np.int8)\n"
+    )
+
+    step_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
+    _write_hex(step_dir / "before_state.hex", ["00", "00"])
+    _write_hex(step_dir / "after_state.hex", ["02", "00"])
+    frames_dir = step_dir / "frames"
+    _write_hex(frames_dir / "frame_0001.hex", ["01", "00"])
+    _write_hex(frames_dir / "frame_0002.hex", ["03", "00"])
+    (step_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
+
+    seq_payload = {
+        "schema_version": "arc_repl.level_sequence.v1",
+        "game_id": "ls20",
+        "level": 1,
+        "sequence_id": "seq_0001",
+        "sequence_number": 1,
+        "start_action_index": 1,
+        "end_action_index": 1,
+        "start_recorded_at_utc": "",
+        "end_recorded_at_utc": "",
+        "end_reason": "open",
+        "action_count": 1,
+        "actions": [
+            {
+                "local_step": 1,
+                "action_index": 1,
+                "tool_turn": 1,
+                "step_in_call": 1,
+                "call_action": "exec",
+                "action_name": "ACTION1",
+                "action_data": {},
+                "state_before": "NOT_FINISHED",
+                "state_after": "NOT_FINISHED",
+                "level_before": 1,
+                "level_after": 1,
+                "levels_completed_before": 0,
+                "levels_completed_after": 0,
+                "level_complete_before": False,
+                "level_complete_after": False,
+                "recorded_at_utc": "",
+                "files": {
+                    "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
+                    "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
+                    "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
+                    "frame_sequence_hex": [
+                        "sequences/seq_0001/actions/step_0001_action_000001_action1/frames/frame_0001.hex",
+                        "sequences/seq_0001/actions/step_0001_action_000001_action1/frames/frame_0002.hex",
+                    ],
+                },
+            }
+        ],
+    }
+    seq_root = game_dir / "level_1" / "sequences"
+    seq_root.mkdir(parents=True, exist_ok=True)
+    (seq_root / "seq_0001.json").write_text(json.dumps(seq_payload, indent=2))
+
+    proc = _run_model_with_env(game_dir, ["compare_sequences", "--game-id", "ls20", "--level", "1"], extra_env={})
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    report = payload["reports"][0]
+    assert report["matched"] is False
+    assert report["divergence_reason"] == "intermediate_frame_mismatch"
+    assert report["frame_count_game"] == 2
+    assert report["frame_count_model"] == 2

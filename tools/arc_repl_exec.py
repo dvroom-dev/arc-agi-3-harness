@@ -214,6 +214,17 @@ def _frame_view_dict(frame: FrameDataRaw, step_info: dict | None = None) -> dict
     return payload
 
 
+def _frame_sequence_hex_rows(frame: FrameDataRaw) -> list[list[str]]:
+    data = getattr(frame, "frame", None)
+    if not isinstance(data, (list, tuple)) or not data:
+        return []
+    out: list[list[str]] = []
+    for pixels in data:
+        grid = np.array(pixels, copy=True)
+        out.append(["".join(f"{int(v):X}" for v in row) for row in grid])
+    return out
+
+
 def _execute_script(
     script_source: str,
     env,
@@ -257,6 +268,7 @@ def _execute_script(
         frame = original_step(action_enum, data=data, reasoning=reasoning)
         if frame is not None:
             last_frame = frame
+            frame_sequence_rows = _frame_sequence_hex_rows(frame)
             current_pixels = get_pixels(env, frame)
             changes = _iter_cell_changes(last_pixels, current_pixels)
             levels_gained = int(frame.levels_completed) - prev_levels
@@ -283,7 +295,10 @@ def _execute_script(
                 "guid": getattr(frame, "guid", None),
                 "available_actions": [int(a) for a in getattr(frame, "available_actions", [])],
                 "full_reset": bool(getattr(frame, "full_reset", False)),
+                "frame_count": int(len(frame_sequence_rows) or 1),
             }
+            if frame_sequence_rows:
+                step_record["frame_sequence_rows"] = frame_sequence_rows
             if levels_gained > 0:
                 step_record["suppressed_cross_level_diff"] = True
             step_results.append(step_record)
