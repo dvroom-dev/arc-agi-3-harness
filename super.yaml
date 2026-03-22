@@ -268,7 +268,9 @@ prompt_parts:
 
 supervisor:
   enabled: true
-  cadence_enabled: false
+  cadence_enabled: true
+  cadence_time_ms: 600000
+  cadence_interrupt_policy: interrupt
   stop_condition: |
     Stop only when one of these is true:
     1) All levels of the current game are complete.
@@ -435,6 +437,19 @@ supervisor:
               2) If two consecutive reviews show that same empty-error pattern, prefer `stop_and_return` instead of repeated recovery loops.
               3) Only use `append_message_and_continue` for `agent_error` when the transcript contains concrete new error text or partial work that the next turn can directly recover from.
               4) Do not keep the run alive on repeated empty `agent_error` turns just to ask the agent to retry the same startup path again.
+    cadence:
+      supervisor_prompt:
+        operation: append
+        parts:
+          - literal: |
+              Cadence review is for mid-turn correction, not reassurance.
+
+              Priorities:
+              1) If the current turn is drifting away from its bounded target, intervene immediately.
+              2) If the current work has shifted from evidence gathering to deterministic route construction or search over already observed state, reassign out of `explore_only` / `explore_and_solve` and into the appropriate planning or model task.
+              3) If the agent is rereading stable files, manually recounting geometry, or burning actions without touching the named target component/state, do not continue the same turn unchanged.
+              4) Prefer one concrete corrective command over broad motivational guidance.
+              5) When the next step is obvious, be specific about the exact action, stop condition, or mode/profile to route to.
 
 agent:
   system_message:
