@@ -10,7 +10,7 @@ from harness_explore import run_input_exploration_from_reset
 from harness_repl_health import collect_repl_health, format_repl_crash_diagnostics, format_repl_health_summary
 from harness_runner_keepalive import IDLE_KEEPALIVE_MARKER, IDLE_KEEPALIVE_TRIGGER_SECONDS, events_include_real_game_action, log_keepalive_resolution
 from harness_runner_args import resolve_arc_base_url, resolve_game_ids, session_name_for_game
-from harness_runner_continue import continue_existing_run, has_recoverable_run_state, log_monitor_sources
+from harness_runner_continue import continue_existing_run, has_recoverable_run_state, log_monitor_sources, stop_if_supervisor_terminal
 from harness_runner_regression import _classify_level_drop
 from harness_runner_super_cycle import noop_super_cycle_error
 from harness_runtime import HarnessRuntime
@@ -234,6 +234,8 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
                 head_before_resume = runtime.load_conversation_head_metadata()
                 stdout = runtime.resume_super()
                 runtime.sync_active_conversation_id_from_session(); runtime.certify_or_block_wrapup_transition()
+                if stop_if_supervisor_terminal(runtime):
+                    return False
                 if not stdout.strip():
                     runtime.log(
                         "[harness] super returned empty assistant response; "
