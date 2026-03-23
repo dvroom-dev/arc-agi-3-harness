@@ -29,6 +29,7 @@ models:
     provider: codex
     model: gpt-5.3-codex-spark
     reasoning_effort: high
+    sandbox_mode: danger-full-access
 
 validators:
   model_compare_clean:
