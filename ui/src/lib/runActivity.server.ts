@@ -21,6 +21,10 @@ interface SuperStateFile {
   activeMode?: unknown;
   activeProcessStage?: unknown;
   activeTaskProfile?: unknown;
+  agentProvider?: unknown;
+  agentModel?: unknown;
+  supervisorProvider?: unknown;
+  supervisorModel?: unknown;
 }
 
 async function readSupervisorSummary(runId: string): Promise<{
@@ -92,19 +96,31 @@ async function readSupervisorSummary(runId: string): Promise<{
   const hasPendingReview = [...prompts].some((reviewId) => !responses.has(reviewId));
 
   return {
-    runtime: {
+      runtime: {
       agentProvider:
-        typeof latestStart?.providerName === "string" ? latestStart.providerName : null,
+        typeof superState?.agentProvider === "string"
+          ? String(superState.agentProvider)
+          : typeof latestStart?.providerName === "string"
+            ? latestStart.providerName
+            : null,
       agentModel:
-        typeof latestStart?.model === "string" ? latestStart.model : null,
+        typeof superState?.agentModel === "string"
+          ? String(superState.agentModel)
+          : typeof latestStart?.model === "string"
+            ? latestStart.model
+            : null,
       supervisorProvider:
-        typeof latestSupervisorFork?.supervisorProviderName === "string"
-          ? latestSupervisorFork.supervisorProviderName
-          : null,
+        typeof superState?.supervisorProvider === "string"
+          ? String(superState.supervisorProvider)
+          : typeof latestSupervisorFork?.supervisorProviderName === "string"
+            ? latestSupervisorFork.supervisorProviderName
+            : null,
       supervisorModel:
-        typeof latestSupervisorFork?.supervisorModel === "string"
-          ? latestSupervisorFork.supervisorModel
-          : null,
+        typeof superState?.supervisorModel === "string"
+          ? String(superState.supervisorModel)
+          : typeof latestSupervisorFork?.supervisorModel === "string"
+            ? latestSupervisorFork.supervisorModel
+            : null,
       activeMode:
         typeof superState?.activeMode === "string" ? String(superState.activeMode) : null,
       activeProcessStage:
