@@ -15,11 +15,6 @@ runtime_defaults:
     codex:
       responses_websockets: false
       responses_websockets_v2: false
-      model_providers:
-        chatgpt:
-          supports_websockets: false
-        openai:
-          supports_websockets: false
 
 models:
   frontier_reasoner:
