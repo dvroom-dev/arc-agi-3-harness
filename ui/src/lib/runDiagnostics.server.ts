@@ -4,6 +4,7 @@ import { runDir } from "@/lib/paths";
 
 export type RunDiagnosticSource =
   | "harness_phase"
+  | "harness_log"
   | "repl_daemon"
   | "super_state"
   | "super_review";
@@ -19,6 +20,23 @@ export interface RunDiagnostic {
 
 function cleanDetail(detail: string): string {
   return detail.replace(/\s+/g, " ").trim();
+}
+
+function diagnosticPriority(entry: RunDiagnostic): number {
+  switch (entry.source) {
+    case "harness_log":
+      return 6;
+    case "repl_daemon":
+      return 5;
+    case "super_review":
+      return 4;
+    case "super_state":
+      return 3;
+    case "harness_phase":
+      return 1;
+    default:
+      return 2;
+  }
 }
 
 function parseTimestamp(value: unknown): string | null {
@@ -65,6 +83,90 @@ async function readLatestHarnessPhaseError(runId: string): Promise<RunDiagnostic
   } catch {
     return null;
   }
+}
+
+async function readLatestHarnessLogError(runId: string): Promise<RunDiagnostic | null> {
+  const logPath = path.join(process.cwd(), "logs", `${runId}.log`);
+  try {
+    const [raw, stat] = await Promise.all([fs.readFile(logPath, "utf-8"), fs.stat(logPath)]);
+    const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+      const line = lines[index]!;
+      if (line.startsWith("[super] Error:")) {
+        return {
+          at: stat.mtime.toISOString(),
+          source: "harness_log",
+          severity: "error",
+          summary: "super process error",
+          detail: cleanDetail(line.replace(/^\[super\] Error:\s*/, "")),
+          file: logPath,
+        };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+async function readLatestRawCompactionStall(
+  runId: string,
+  harnessPhaseError: RunDiagnostic | null,
+): Promise<RunDiagnostic | null> {
+  if (!harnessPhaseError?.at) return null;
+  const conversationsDir = path.join(runDir(runId), ".ai-supervisor", "conversations");
+  let conversationEntries: fs.Dirent[] = [];
+  try {
+    conversationEntries = await fs.readdir(conversationsDir, { withFileTypes: true });
+  } catch {
+    return null;
+  }
+
+  const rawEventPaths = conversationEntries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(conversationsDir, entry.name, "raw_events", "events.ndjson"));
+
+  let latestMatch: RunDiagnostic | null = null;
+  for (const file of rawEventPaths) {
+    try {
+      const raw = await fs.readFile(file, "utf-8");
+      const lines = raw.split(/\r?\n/).filter(Boolean);
+      if (lines.length === 0) continue;
+      const lastLine = lines.at(-1);
+      if (!lastLine) continue;
+      const payload = JSON.parse(lastLine) as {
+        ts?: unknown;
+        provider?: unknown;
+        raw?: { type?: unknown; subtype?: unknown; status?: unknown } | null;
+      };
+      const provider = typeof payload.provider === "string" ? payload.provider.trim() : "";
+      const rawRecord = payload.raw && typeof payload.raw === "object" ? payload.raw : null;
+      const type = typeof rawRecord?.type === "string" ? rawRecord.type.trim().toLowerCase() : "";
+      const subtype = typeof rawRecord?.subtype === "string" ? rawRecord.subtype.trim().toLowerCase() : "";
+      const status = typeof rawRecord?.status === "string" ? rawRecord.status.trim().toLowerCase() : "";
+      const at = parseTimestamp(payload.ts);
+      if (!at) continue;
+      if (type !== "system" || subtype !== "status" || status !== "compacting") continue;
+      if (Date.parse(at) > Date.parse(harnessPhaseError.at)) continue;
+      const detail =
+        `${provider || "provider"} emitted \`system status compacting\` as the last raw event, ` +
+        `then no later provider events were recorded before ${harnessPhaseError.summary}.`;
+      const diagnostic: RunDiagnostic = {
+        at,
+        source: "super_review",
+        severity: "error",
+        summary: `${provider || "Provider"} stalled after compaction event`,
+        detail: cleanDetail(detail),
+        file,
+      };
+      if (!latestMatch || Date.parse(diagnostic.at || "") > Date.parse(latestMatch.at || "")) {
+        latestMatch = diagnostic;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return latestMatch;
 }
 
 async function readLatestReplDaemonError(runId: string): Promise<RunDiagnostic | null> {
@@ -216,8 +318,11 @@ async function readLatestSupervisorReviewError(runId: string): Promise<RunDiagno
 }
 
 export async function readRunDiagnostics(runId: string): Promise<RunDiagnostic[]> {
+  const harnessPhaseError = await readLatestHarnessPhaseError(runId);
   const diagnostics = await Promise.all([
-    readLatestHarnessPhaseError(runId),
+    Promise.resolve(harnessPhaseError),
+    readLatestHarnessLogError(runId),
+    readLatestRawCompactionStall(runId, harnessPhaseError),
     readLatestReplDaemonError(runId),
     readLatestSuperStateError(runId),
     readLatestSupervisorReviewError(runId),
@@ -228,6 +333,8 @@ export async function readRunDiagnostics(runId: string): Promise<RunDiagnostic[]
       if (a.severity !== b.severity) {
         return a.severity === "error" ? -1 : 1;
       }
+      const priorityDelta = diagnosticPriority(b) - diagnosticPriority(a);
+      if (priorityDelta !== 0) return priorityDelta;
       return Date.parse(b.at || "") - Date.parse(a.at || "");
     });
 }
