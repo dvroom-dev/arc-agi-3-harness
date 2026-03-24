@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
+import { readRunDiagnostics } from "@/lib/runDiagnostics.server";
 import { LOGS_DIR } from "@/lib/paths";
 import { readRawEventTail } from "@/lib/runArtifacts.server";
 import type { LogFeedEntry, LogFeedPayload, LogFeedStream } from "@/lib/types";
@@ -100,6 +101,22 @@ export async function readLogFeed(
       title: rawEvents.source || "raw events",
       file: rawEvents.source,
       entries: toEntries("super_raw", rawEvents.lines),
+    });
+  }
+
+  const diagnostics = await readRunDiagnostics(runId);
+  if (diagnostics.length > 0) {
+    streams.unshift({
+      id: "diagnostics",
+      title: "diagnostics",
+      file: diagnostics[0]?.file ?? null,
+      entries: diagnostics.map((entry, index) => ({
+        id: `diagnostics:${index}`,
+        source: "diagnostics",
+        severity: entry.severity,
+        label: entry.severity === "error" ? "DIAG" : "WARN",
+        text: `${entry.at ?? "unknown time"} ${entry.summary}: ${entry.detail}`,
+      })),
     });
   }
 

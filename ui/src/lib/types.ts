@@ -288,14 +288,14 @@ export type LogEntrySeverity = "error" | "warning" | "success" | "info";
 
 export interface LogFeedEntry {
   id: string;
-  source: "harness" | "super_raw";
+  source: "harness" | "super_raw" | "diagnostics";
   severity: LogEntrySeverity;
   label: string;
   text: string;
 }
 
 export interface LogFeedStream {
-  id: "harness" | "super_raw";
+  id: "harness" | "super_raw" | "diagnostics";
   title: string;
   file: string | null;
   totalLines?: number;

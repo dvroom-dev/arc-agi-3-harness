@@ -2,7 +2,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { LOGS_DIR, runDir } from "@/lib/paths";
+import { LOGS_DIR } from "@/lib/paths";
+import { readLatestRunDiagnostic } from "@/lib/runDiagnostics.server";
 import { readStoredRunParams } from "@/lib/runParams.server";
 import type { StoredRunParams } from "@/lib/runParams";
 import { readRunStateSnapshot } from "@/lib/runStateSnapshot.server";
@@ -349,96 +350,6 @@ function summarizeDisplayedState(state: string, active: boolean) {
   }
 }
 
-async function readLatestProviderReviewError(runId: string): Promise<{
-  at: string;
-  kind: string;
-  message: string;
-  providerThreadId: string | null;
-  providerTurnId: string | null;
-} | null> {
-  const conversationsDir = path.join(runDir(runId), ".ai-supervisor", "conversations");
-  let conversationEntries: fs.Dirent[] = [];
-  try {
-    conversationEntries = await fs.readdir(conversationsDir, { withFileTypes: true });
-  } catch {
-    return null;
-  }
-
-  const errors = await Promise.all(
-    conversationEntries
-      .filter((entry) => entry.isDirectory())
-      .map(async (entry) => {
-        const reviewsDir = path.join(conversationsDir, entry.name, "reviews");
-        let reviewFiles: string[] = [];
-        try {
-          reviewFiles = await fs.readdir(reviewsDir);
-        } catch {
-          return [];
-        }
-
-        const responseFiles = reviewFiles.filter((file) => file.endsWith("_response.txt"));
-        return Promise.all(
-          responseFiles.map(async (file) => {
-            const filePath = path.join(reviewsDir, file);
-            try {
-              const [raw, stat] = await Promise.all([
-                fs.readFile(filePath, "utf-8"),
-                fs.stat(filePath),
-              ]);
-              const parsed = JSON.parse(raw) as {
-                error_type?: unknown;
-                error?: unknown;
-                message?: unknown;
-                provider_thread_id?: unknown;
-                provider_turn_id?: unknown;
-              };
-              const kind =
-                typeof parsed.error_type === "string" ? parsed.error_type.trim() : "";
-              if (!kind) return null;
-              const detail =
-                typeof parsed.error === "string" && parsed.error.trim()
-                  ? parsed.error.trim()
-                  : typeof parsed.message === "string" && parsed.message.trim()
-                    ? parsed.message.trim()
-                    : kind;
-              return {
-                at: stat.mtime.toISOString(),
-                kind,
-                message: cleanDetail(detail),
-                providerThreadId:
-                  typeof parsed.provider_thread_id === "string"
-                    ? parsed.provider_thread_id.trim() || null
-                    : null,
-                providerTurnId:
-                  typeof parsed.provider_turn_id === "string"
-                    ? parsed.provider_turn_id.trim() || null
-                    : null,
-              };
-            } catch {
-              return null;
-            }
-          })
-        );
-      })
-  );
-
-  return errors
-    .flat()
-    .filter(
-      (
-        entry
-      ): entry is {
-        at: string;
-        kind: string;
-        message: string;
-        providerThreadId: string | null;
-        providerTurnId: string | null;
-      } => Boolean(entry)
-    )
-    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
-    .at(0) ?? null;
-}
-
 export async function readRunStatusSummary(runId: string): Promise<RunStatusSummary> {
   const [stateSnapshot, storedRunParams] = await Promise.all([
     readRunStateSnapshot(runId),
@@ -456,7 +367,7 @@ export async function readRunStatusSummary(runId: string): Promise<RunStatusSumm
   const active = Array.from(lookupIds).some((lookupId) => activeRunIds.has(lookupId));
   const logTail = await readLogTail(runId);
   const harnessFailureDetail = extractHarnessFailureDetail(logTail);
-  const providerReviewError = await readLatestProviderReviewError(runId);
+  const latestDiagnostic = await readLatestRunDiagnostic(runId);
   const hasLog = await fs
     .access(path.join(LOGS_DIR, `${runId}.log`))
     .then(() => true)
@@ -472,18 +383,19 @@ export async function readRunStatusSummary(runId: string): Promise<RunStatusSumm
   let detail: string | null = null;
 
   if (displayedState.toUpperCase() === "FAILED") {
-    if (harnessFailureDetail && !isProviderErrorDetail(harnessFailureDetail)) {
+    if (latestDiagnostic?.severity === "error") {
+      detail = `${latestDiagnostic.summary}: ${latestDiagnostic.detail}`;
+      if (isProviderErrorDetail(latestDiagnostic.detail)) {
+        category = "provider_error";
+        categoryLabel = "Provider Error";
+      } else {
+        category = "harness_error";
+        categoryLabel = "Harness Error";
+      }
+    } else if (harnessFailureDetail && !isProviderErrorDetail(harnessFailureDetail)) {
       category = "harness_error";
       categoryLabel = "Harness Error";
       detail = harnessFailureDetail;
-    } else if (
-      providerReviewError &&
-      (providerReviewError.kind === "provider_execution_error" ||
-        isProviderErrorDetail(providerReviewError.message))
-    ) {
-      category = "provider_error";
-      categoryLabel = "Provider Error";
-      detail = providerReviewError.message;
     } else if (harnessFailureDetail) {
       category = "provider_error";
       categoryLabel = "Provider Error";
@@ -493,7 +405,10 @@ export async function readRunStatusSummary(runId: string): Promise<RunStatusSumm
       categoryLabel = "Unknown Failure";
     }
   } else if (displayedState.toUpperCase() === "STOPPED") {
-    detail = null;
+    detail =
+      latestDiagnostic?.severity === "error"
+        ? `${latestDiagnostic.summary}: ${latestDiagnostic.detail}`
+        : null;
   } else if (displayedState.toUpperCase() === "GAME_OVER") {
     detail = "The ARC run ended in GAME_OVER.";
   } else if (displayedState.toUpperCase() === "LOSS") {
