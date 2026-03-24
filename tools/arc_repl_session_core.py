@@ -52,14 +52,15 @@ class BaseReplSession:
             context="at session start",
         )
         self.pixels = deps._get_pixels(self.env, self.frame)
+        bootstrap_level, bootstrap_pixels = int(self.frame.levels_completed) + 1, np.array(self.pixels, copy=True)
         if self.events:
             self.events = restore_session_from_history(self, self.events)
         self.game_id = str(getattr(self.frame, "game_id", "")).strip() or game_id
         self.history["game_id"] = self.game_id
         ensure_level_initial_state(
             session=self,
-            level=int(self.frame.levels_completed) + 1,
-            grid=np.array(self.pixels, copy=True),
+            level=bootstrap_level,
+            grid=bootstrap_pixels,
             source="session_bootstrap_reset",
         )
         self.action_history = ActionHistoryStore(
