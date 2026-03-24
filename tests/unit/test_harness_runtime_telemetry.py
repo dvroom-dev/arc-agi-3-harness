@@ -48,3 +48,28 @@ def test_phase_scope_writes_failure_entry(tmp_path: Path) -> None:
     assert entry["name"] == "arc_repl"
     assert entry["ok"] is False
     assert "RuntimeError: boom" in entry["error"]
+
+
+def test_phase_scope_writes_canonical_last_error_artifact(tmp_path: Path) -> None:
+    runtime = _make_runtime(tmp_path)
+
+    class DetailedError(RuntimeError):
+        def __init__(self):
+            super().__init__("super exited with code 1: real detail")
+            self.detail = "real detail"
+            self.process_name = "super"
+            self.return_code = 1
+
+    try:
+        with phase_scope_impl(runtime, category="super", name="resume"):
+            raise DetailedError()
+    except DetailedError:
+        pass
+
+    payload = json.loads((runtime.telemetry_dir / "last_error.json").read_text(encoding="utf-8"))
+    assert payload["category"] == "super"
+    assert payload["name"] == "resume"
+    assert payload["error"] == "DetailedError: super exited with code 1: real detail"
+    assert payload["meta"]["detail"] == "real detail"
+    assert payload["meta"]["process_name"] == "super"
+    assert payload["meta"]["return_code"] == 1

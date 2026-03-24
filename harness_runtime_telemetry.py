@@ -45,6 +45,20 @@ def append_phase_timing_impl(
         entry["meta"] = _sanitize_value(metadata)
     with runtime.phase_timings_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    if not ok:
+        last_error_path = runtime.telemetry_dir / "last_error.json"
+        last_error = {
+            "timestamp": entry["timestamp"],
+            "session_name": entry["session_name"],
+            "game_id": entry["game_id"],
+            "active_game_id": entry["active_game_id"],
+            "scorecard_id": entry["scorecard_id"],
+            "category": entry["category"],
+            "name": entry["name"],
+            "error": entry.get("error"),
+            "meta": entry.get("meta"),
+        }
+        last_error_path.write_text(json.dumps(last_error, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 @contextmanager
@@ -64,6 +78,15 @@ def phase_scope_impl(
     except BaseException as exc:
         ok = False
         error = f"{type(exc).__name__}: {exc}"
+        if getattr(exc, "detail", None):
+            phase_metadata["detail"] = str(getattr(exc, "detail"))
+        if getattr(exc, "process_name", None):
+            phase_metadata["process_name"] = str(getattr(exc, "process_name"))
+        if getattr(exc, "return_code", None) is not None:
+            try:
+                phase_metadata["return_code"] = int(getattr(exc, "return_code"))
+            except Exception:
+                phase_metadata["return_code"] = str(getattr(exc, "return_code"))
         raise
     finally:
         append_phase_timing_impl(

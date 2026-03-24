@@ -1,8 +1,9 @@
 import fs from "fs/promises";
 import path from "path";
-import { runDir } from "@/lib/paths";
+import { LOGS_DIR, runDir } from "@/lib/paths";
 
 export type RunDiagnosticSource =
+  | "canonical"
   | "harness_phase"
   | "harness_log"
   | "repl_daemon"
@@ -24,6 +25,8 @@ function cleanDetail(detail: string): string {
 
 function diagnosticPriority(entry: RunDiagnostic): number {
   switch (entry.source) {
+    case "canonical":
+      return 7;
     case "harness_log":
       return 6;
     case "repl_daemon":
@@ -85,8 +88,44 @@ async function readLatestHarnessPhaseError(runId: string): Promise<RunDiagnostic
   }
 }
 
+async function readCanonicalRunError(runId: string): Promise<RunDiagnostic | null> {
+  const errorPath = path.join(runDir(runId), "telemetry", "last_error.json");
+  try {
+    const payload = JSON.parse(await fs.readFile(errorPath, "utf-8")) as {
+      timestamp?: unknown;
+      category?: unknown;
+      name?: unknown;
+      error?: unknown;
+      meta?: {
+        detail?: unknown;
+        process_name?: unknown;
+        return_code?: unknown;
+      } | null;
+    };
+    const at = parseTimestamp(payload.timestamp);
+    const category = typeof payload.category === "string" ? payload.category.trim() : "unknown";
+    const name = typeof payload.name === "string" ? payload.name.trim() : "unknown";
+    const detail =
+      payload.meta && typeof payload.meta.detail === "string" && payload.meta.detail.trim()
+        ? payload.meta.detail.trim()
+        : typeof payload.error === "string" && payload.error.trim()
+          ? payload.error.trim()
+          : `${category}.${name} failed`;
+    return {
+      at,
+      source: "canonical",
+      severity: "error",
+      summary: `${category}.${name} failed`,
+      detail: cleanDetail(detail),
+      file: errorPath,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function readLatestHarnessLogError(runId: string): Promise<RunDiagnostic | null> {
-  const logPath = path.join(process.cwd(), "logs", `${runId}.log`);
+  const logPath = path.join(LOGS_DIR, `${runId}.log`);
   try {
     const [raw, stat] = await Promise.all([fs.readFile(logPath, "utf-8"), fs.stat(logPath)]);
     const lines = raw.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
@@ -320,6 +359,7 @@ async function readLatestSupervisorReviewError(runId: string): Promise<RunDiagno
 export async function readRunDiagnostics(runId: string): Promise<RunDiagnostic[]> {
   const harnessPhaseError = await readLatestHarnessPhaseError(runId);
   const diagnostics = await Promise.all([
+    readCanonicalRunError(runId),
     Promise.resolve(harnessPhaseError),
     readLatestHarnessLogError(runId),
     readLatestRawCompactionStall(runId, harnessPhaseError),

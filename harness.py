@@ -95,6 +95,36 @@ def _drain_stderr(proc, prefix="[super] "):
         print(f"{prefix}{line}", end="", file=sys.stderr, flush=True)
 
 
+class HarnessSubprocessError(RuntimeError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        process_name: str,
+        return_code: int,
+        detail: str | None = None,
+        stderr_lines: list[str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.process_name = str(process_name)
+        self.return_code = int(return_code)
+        self.detail = str(detail).strip() if detail else None
+        self.stderr_lines = list(stderr_lines or [])
+
+
+def _extract_process_error_detail(stderr_lines: list[str]) -> str | None:
+    cleaned = [line.strip() for line in stderr_lines if str(line).strip()]
+    if not cleaned:
+        return None
+    for line in reversed(cleaned):
+        if line.startswith("[super] Error:"):
+            return re.sub(r"^\[super\] Error:\s*", "", line).strip() or None
+    for line in reversed(cleaned):
+        if line.startswith("[super][stderr]"):
+            return re.sub(r"^\[super\]\[stderr\]\s*", "", line).strip() or None
+    return cleaned[-1] or None
+
+
 def run_super(
     args: list[str],
     *,
@@ -137,9 +167,17 @@ def _run_super_batch(cmd: list[str], *, cwd: str = "", env: dict[str, str] | Non
         for line in result.stderr.strip().splitlines():
             print(f"[super][stderr] {line}", file=sys.stderr, flush=True)
     if result.returncode != 0:
-        raise RuntimeError(
-            "super exited with code "
-            f"{result.returncode} (stdout/stderr captured in harness log)"
+        stderr_lines = result.stderr.strip().splitlines() if result.stderr.strip() else []
+        detail = _extract_process_error_detail([f"[super][stderr] {line}" for line in stderr_lines])
+        message = f"super exited with code {result.returncode}"
+        if detail:
+            message = f"{message}: {detail}"
+        raise HarnessSubprocessError(
+            message,
+            process_name="super",
+            return_code=result.returncode,
+            detail=detail,
+            stderr_lines=stderr_lines,
         )
     return result.stdout.strip()
 
@@ -222,6 +260,7 @@ def _run_super_streaming(
     env: dict[str, str] | None = None,
 ) -> str:
     """Streaming mode: tee stdout to stderr for display, capture transcript."""
+    stderr_lines: list[str] = []
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -232,7 +271,13 @@ def _run_super_streaming(
         start_new_session=True,
     )
 
-    stderr_thread = threading.Thread(target=_drain_stderr, args=(proc,), daemon=True)
+    def _drain_stderr_capture() -> None:
+        assert proc.stderr is not None
+        for line in proc.stderr:
+            stderr_lines.append(line.rstrip("\n"))
+            print(f"[super] {line}", end="", file=sys.stderr, flush=True)
+
+    stderr_thread = threading.Thread(target=_drain_stderr_capture, daemon=True)
     stderr_thread.start()
     artifact_stop_event = threading.Event()
     artifact_thread = None
@@ -259,7 +304,17 @@ def _run_super_streaming(
         transcript = _fix_streamed_transcript("".join(chunks))
 
         if proc.returncode != 0:
-            raise RuntimeError(f"super exited with code {proc.returncode}")
+            detail = _extract_process_error_detail([f"[super] {line}" for line in stderr_lines])
+            message = f"super exited with code {proc.returncode}"
+            if detail:
+                message = f"{message}: {detail}"
+            raise HarnessSubprocessError(
+                message,
+                process_name="super",
+                return_code=proc.returncode,
+                detail=detail,
+                stderr_lines=stderr_lines,
+            )
 
         if output_path is not None:
             artifact_stop_event.set()
