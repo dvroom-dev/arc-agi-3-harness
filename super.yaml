@@ -27,7 +27,7 @@ models:
     reasoning_effort: low
   code_repair:
     provider: codex
-    model: gpt-5.3-codex-spark
+    model: gpt-5.3-codex
     reasoning_effort: high
     sandbox_mode: danger-full-access
 
