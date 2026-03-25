@@ -26,8 +26,8 @@ models:
     model: gpt-5.4-mini
     reasoning_effort: low
   code_repair:
-    provider: codex
-    model: gpt-5.3-codex
+    provider: claude
+    model: claude-opus-4-6
     reasoning_effort: high
     sandbox_mode: danger-full-access
 
