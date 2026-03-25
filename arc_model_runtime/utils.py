@@ -44,6 +44,21 @@ def analysis_level_pin_path(game_dir: Path) -> Path:
     return game_dir / ".analysis_level_pin.json"
 
 
+def analysis_state_path(game_dir: Path) -> Path:
+    return game_dir / "analysis_state.json"
+
+
+def load_analysis_state(game_dir: Path) -> dict | None:
+    path = analysis_state_path(game_dir)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def load_analysis_level_pin(game_dir: Path) -> dict | None:
     path = analysis_level_pin_path(game_dir)
     if not path.exists():
@@ -122,6 +137,14 @@ def effective_analysis_level(game_dir: Path, frontier_level: int | None = None) 
     frontier = int(frontier_level) if frontier_level is not None else load_frontier_level_from_arc_state()
     if frontier is None:
         return None
+    analysis_state = load_analysis_state(game_dir)
+    if isinstance(analysis_state, dict):
+        try:
+            analysis_level = int(analysis_state.get("analysis_level"))
+        except Exception:
+            analysis_level = None
+        if analysis_level is not None and analysis_level > 0:
+            return analysis_level
     pin = load_analysis_level_pin(game_dir)
     if not isinstance(pin, dict):
         return frontier
@@ -235,6 +258,17 @@ def _iter_level_directories(game_dir: Path) -> list[Path]:
             if _level_current_matches(level_current, lvl):
                 dirs[lvl] = level_current
                 break
+    analysis_level = game_dir / "analysis_level"
+    if analysis_level.exists() and analysis_level.is_dir():
+        level = _level_number_for_dir(analysis_level)
+        if level is None:
+            analysis_state = load_analysis_state(game_dir)
+            try:
+                level = int((analysis_state or {}).get("analysis_level"))
+            except Exception:
+                level = None
+        if level is not None:
+            dirs[level] = analysis_level
     return [dirs[k] for k in sorted(dirs)]
 
 
@@ -242,7 +276,7 @@ def _level_number_for_dir(level_dir: Path) -> int | None:
     match = _LEVEL_DIR_RE.match(level_dir.name)
     if match:
         return int(match.group(1))
-    if level_dir.name == "level_current":
+    if level_dir.name in {"level_current", "analysis_level"}:
         for meta_name in ("meta.json", "initial_state.meta.json"):
             meta_path = level_dir / meta_name
             if not meta_path.exists():
@@ -269,6 +303,25 @@ def discover_level_initial_states(game_dir: Path) -> dict[int, np.ndarray]:
 
 
 def resolve_level_dir(game_dir: Path, level: int) -> Path | None:
+    analysis_state = load_analysis_state(game_dir)
+    if isinstance(analysis_state, dict):
+        try:
+            analysis_level = int(analysis_state.get("analysis_level"))
+        except Exception:
+            analysis_level = None
+        try:
+            frontier_level = int(analysis_state.get("frontier_level"))
+        except Exception:
+            frontier_level = None
+        analysis_dir = game_dir / "analysis_level"
+        if (
+            analysis_dir.exists()
+            and analysis_dir.is_dir()
+            and analysis_level is not None
+            and int(level) == analysis_level
+            and (frontier_level is None or analysis_level != frontier_level)
+        ):
+            return analysis_dir
     target_name = f"level_{int(level)}"
     candidates = [game_dir / target_name, game_dir / "levels" / target_name]
     state_root = _state_artifacts_root_for_active_game()

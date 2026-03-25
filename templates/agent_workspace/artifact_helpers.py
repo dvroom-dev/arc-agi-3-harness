@@ -18,6 +18,21 @@ def analysis_level_pin_path(game_dir: str | Path) -> Path:
     return coerce_path(game_dir) / ".analysis_level_pin.json"
 
 
+def analysis_state_path(game_dir: str | Path) -> Path:
+    return coerce_path(game_dir) / "analysis_state.json"
+
+
+def load_analysis_state(game_dir: str | Path) -> dict[str, Any] | None:
+    path = analysis_state_path(game_dir)
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text())
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def load_analysis_level_pin(game_dir: str | Path) -> dict[str, Any] | None:
     path = analysis_level_pin_path(game_dir)
     if not path.exists():
@@ -71,6 +86,25 @@ def load_hex_grid(path: str | Path) -> np.ndarray:
 
 def level_dir(game_dir: str | Path, level: int) -> Path:
     game_dir = coerce_path(game_dir)
+    analysis_state = load_analysis_state(game_dir)
+    if isinstance(analysis_state, dict):
+        try:
+            analysis_level = int(analysis_state.get("analysis_level"))
+        except Exception:
+            analysis_level = None
+        try:
+            frontier_level = int(analysis_state.get("frontier_level"))
+        except Exception:
+            frontier_level = None
+        analysis_dir = game_dir / "analysis_level"
+        if (
+            analysis_dir.exists()
+            and analysis_dir.is_dir()
+            and analysis_level is not None
+            and int(level) == analysis_level
+            and (frontier_level is None or analysis_level != frontier_level)
+        ):
+            return analysis_dir
     workspace_level = game_dir / f"level_{int(level)}"
     return workspace_level
 

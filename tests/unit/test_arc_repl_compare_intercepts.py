@@ -347,3 +347,89 @@ def test_run_exec_compare_intercept_returns_none_when_clean_without_level_gain(
     )
 
     assert marker is None
+
+
+def test_run_exec_compare_intercept_keeps_level_current_surface_frontier_during_wrapup(
+    monkeypatch, tmp_path: Path
+) -> None:
+    cwd = tmp_path / "agent"
+    cwd.mkdir(parents=True, exist_ok=True)
+    (cwd / "model.py").write_text("# model\n", encoding="utf-8")
+    (cwd / "analysis_state.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "arc.analysis_state.v2",
+                "analysis_scope": "wrapup",
+                "analysis_level": 1,
+                "frontier_level": 2,
+                "analysis_level_dir": "analysis_level",
+                "level_current_dir": "level_current",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    level_current_compare = cwd / "level_current" / "sequence_compare"
+    level_current_compare.mkdir(parents=True, exist_ok=True)
+    (level_current_compare / "current_compare.json").write_text(
+        json.dumps({"level": 2, "status": "no_sequences_yet"}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+    arc_state_dir = tmp_path / "arc"
+    monkeypatch.setenv("ARC_STATE_DIR", str(arc_state_dir))
+
+    level_dir = arc_state_dir / "game_artifacts" / "game_ls20" / "level_1" / "sequences"
+    level_dir.mkdir(parents=True, exist_ok=True)
+    (level_dir / "seq_0001.json").write_text(
+        json.dumps(
+            {
+                "sequence_id": "seq_0001",
+                "end_reason": "active",
+                "actions": [{"levels_completed_before": 0, "levels_completed_after": 0}],
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        arc_repl_compare_intercepts.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "ok": True,
+                    "level": 1,
+                    "all_match": False,
+                    "compared_sequences": 1,
+                    "diverged_sequences": 1,
+                    "reports": [{"sequence_id": "seq_0001", "matched": False, "report_file": "analysis_level/sequence_compare/seq_0001.md"}],
+                }
+            ),
+            stderr="",
+        ),
+    )
+
+    marker = arc_repl_intercepts.run_exec_compare_intercept(
+        cwd,
+        {
+            "ok": True,
+            "game_id": "ls20",
+            "current_level": 2,
+            "levels_completed": 1,
+            "steps_executed": 1,
+            "levels_gained_in_call": 0,
+            "state": "NOT_FINISHED",
+        },
+    )
+
+    assert marker is not None
+    root_compare = json.loads((cwd / "current_compare.json").read_text(encoding="utf-8"))
+    visible_compare = json.loads((level_current_compare / "current_compare.json").read_text(encoding="utf-8"))
+    analysis_compare = json.loads((cwd / "analysis_level" / "sequence_compare" / "current_compare.json").read_text(encoding="utf-8"))
+    assert root_compare["level"] == 1
+    assert analysis_compare["level"] == 1
+    assert visible_compare["level"] == 2

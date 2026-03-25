@@ -38,6 +38,7 @@ def overlay_latest_compare_artifacts(
     for stale_report in temp_compare_dir.glob("seq_*.md"):
         stale_report.unlink(missing_ok=True)
     source_dirs = [
+        game_dir / "analysis_level" / "sequence_compare",
         game_dir / "level_current" / "sequence_compare",
         game_dir / f"level_{int(visible_level)}" / "sequence_compare",
     ]

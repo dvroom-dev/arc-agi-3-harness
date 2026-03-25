@@ -366,6 +366,12 @@ def compare_sequences(
 
     compare_root = level_dir / "sequence_compare"
     compare_root.mkdir(parents=True, exist_ok=True)
+    if level_dir.name == "analysis_level":
+        report_surface_dir = "analysis_level/sequence_compare"
+    elif level_dir.name == "level_current":
+        report_surface_dir = "level_current/sequence_compare"
+    else:
+        report_surface_dir = f"level_{int(target_level)}/sequence_compare"
     reports: list[dict] = []
     diverged = 0
     for _, payload in eligible_payloads:
@@ -375,11 +381,6 @@ def compare_sequences(
         report["end_reason"] = str(payload.get("end_reason", "") or "")
         report_file = compare_root / f"{report['sequence_id']}.md"
         report_file.write_text(report_md(report))
-        report_surface_dir = (
-            "level_current/sequence_compare"
-            if int(target_level) == int(session.env.current_level)
-            else "analysis_level/sequence_compare"
-        )
         report["report_file"] = f"{report_surface_dir}/{report['sequence_id']}.md"
         reports.append(report)
         if not bool(report.get("matched", False)):

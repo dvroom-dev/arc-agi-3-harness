@@ -111,7 +111,7 @@ def test_model_compare_report_markdown_summarizes_large_diffs(tmp_path: Path) ->
     assert "## Diff Legend" in report_text
     assert "- start_action_index: 1" in report_text
     assert "- sequence_end_reason: open" in report_text
-    assert "report_file: level_current/sequence_compare/seq_0001.md" in current_compare_text
+    assert "report_file: level_1/sequence_compare/seq_0001.md" in current_compare_text
     assert "## Current Runtime State" in current_compare_text
     assert "- sequence_end_reason: open" in current_compare_text
     assert (game_dir / "level_current" / "sequence_compare" / "seq_0001.md").exists()

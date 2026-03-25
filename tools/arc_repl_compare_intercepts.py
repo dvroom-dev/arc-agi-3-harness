@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from arc_model_runtime.utils import sync_workspace_level_view
+from arc_model_runtime.utils import load_analysis_state, sync_workspace_level_view
 
 LEVEL_COMPLETE_MODEL_MISMATCH_MARKER = "__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__"
 COMPARE_CLEAN_INTERCEPT_MARKER = "__ARC_INTERCEPT_COMPARE_CLEAN__"
@@ -48,7 +48,15 @@ def _artifacts_game_dir(*, cwd: Path, game_id: str) -> Path:
     return Path(state_dir).expanduser() / "game_artifacts" / f"game_{_safe_slug(game_id)}"
 
 
-def _compare_target_level(result: dict) -> int | None:
+def _compare_target_level(cwd: Path, result: dict) -> int | None:
+    analysis_state = load_analysis_state(cwd)
+    if isinstance(analysis_state, dict):
+        try:
+            analysis_level = int(analysis_state.get("analysis_level"))
+        except Exception:
+            analysis_level = None
+        if analysis_level is not None and analysis_level > 0:
+            return analysis_level
     try:
         levels_gained = int(result.get("levels_gained_in_call", 0) or 0)
     except Exception:
@@ -193,9 +201,26 @@ def _write_current_compare_artifacts(
     _write_compare_artifact(cwd / "current_compare.md", report_text)
     _write_compare_artifact(cwd / "current_compare.json", json_text)
 
-    level_current_dir = cwd / "level_current" / "sequence_compare"
-    _write_compare_artifact(level_current_dir / "current_compare.md", report_text)
-    _write_compare_artifact(level_current_dir / "current_compare.json", json_text)
+    analysis_state = load_analysis_state(cwd)
+    analysis_level = None
+    frontier_level = None
+    if isinstance(analysis_state, dict):
+        try:
+            analysis_level = int(analysis_state.get("analysis_level"))
+        except Exception:
+            analysis_level = None
+        try:
+            frontier_level = int(analysis_state.get("frontier_level"))
+        except Exception:
+            frontier_level = None
+    if analysis_level is not None and int(target_level) == int(analysis_level) and frontier_level != analysis_level:
+        analysis_compare_dir = cwd / "analysis_level" / "sequence_compare"
+        _write_compare_artifact(analysis_compare_dir / "current_compare.md", report_text)
+        _write_compare_artifact(analysis_compare_dir / "current_compare.json", json_text)
+    else:
+        level_current_dir = cwd / "level_current" / "sequence_compare"
+        _write_compare_artifact(level_current_dir / "current_compare.md", report_text)
+        _write_compare_artifact(level_current_dir / "current_compare.json", json_text)
 
     try:
         _write_compare_artifact(canonical_md, report_text)
@@ -219,7 +244,7 @@ def run_exec_compare_intercept(cwd: Path, result: object) -> str | None:
     if not result_has_real_game_action("exec", result):
         return None
 
-    target_level = _compare_target_level(result)
+    target_level = _compare_target_level(cwd, result)
     if target_level is None or target_level <= 0:
         return None
 
