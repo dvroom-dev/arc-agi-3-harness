@@ -318,9 +318,15 @@ supervisor:
       - "Coverage helpers and compare helpers provide evidence only; the supervisor must decide whether the solved level's action-sequence evidence is fully accounted for by the model before moving on."
       - "Prefer finite-state closure over open-ended geometry narration. When progress appears to depend on a small discrete state space, consider exhaustive bounded testing of those discrete states before broad spatial speculation."
       - "If a worker's remaining problem is deterministic route construction or search over already observed state, reassign it out of explore mode and into code_model or solve_model instead of allowing more manual route narration."
+      - "Never ask `code_model` to execute a real-game action. If one exact real-game observation is still missing, route to `explore_only` on level 2+ or `explore_and_solve` on level 1 instead of keeping the worker in `code_model`."
       - "For rule enforcement decisions, cite concrete evidence pointers (turn/tool/output/file). When a tool interception marker is present, prioritize handling it immediately."
   tool_interception:
     rules:
+      - name: code-model-real-game-probe
+        when: invocation
+        tool: bash
+        match_type: regex
+        pattern: '^arc_repl(\s|$)'
       - name: idle-keepalive
         when: response
         tool: bash
@@ -376,7 +382,15 @@ supervisor:
               A tool interception rule matched. Decide immediately.
 
               Priority order:
-              1) If marker is `__ARC_INTERCEPT_IDLE_KEEPALIVE__`:
+              1) If the current mode is `code_model` and the intercepted tool call is a real-game `arc_repl` invocation:
+                 - Treat this as a mode violation, not as acceptable execution.
+                 - Do not keep the worker in `code_model` to run the probe.
+                 - If the blocker is one exact missing real-game observation:
+                   - on level 1, use `resume_mode_head` to `explore_and_solve`;
+                   - on level 2+, use `resume_mode_head` to `explore_only`.
+                 - Put the next handoff into the target mode, not `code_model`.
+                 - If the missing observation is still too vague to hand off safely, inject corrective guidance telling the worker to stop and report the exact missing observation from `code_model` instead of probing.
+              2) If marker is `__ARC_INTERCEPT_IDLE_KEEPALIVE__`:
                  - Capture `prior_mode` as the mode active when this marker was detected.
                  - If current ARC level is 1 and current mode is not `explore_and_solve`, use `resume_mode_head` to mode `explore_and_solve`.
                  - Otherwise use the smallest allowed real-game mode for one action.
@@ -391,16 +405,16 @@ supervisor:
                    - If sending `payload.message`, set `payload.message_template=intercept_command` (never `custom`).
                    - If using `mode_payload.user_message` (fork/resume path), manually wrap message in:
                      `<supervisor-command trigger="agent_tool_intercept"> ... </supervisor-command>`.
-              2) If marker is `__ARC_INTERCEPT_COMPARE_MISMATCH__`:
+              3) If marker is `__ARC_INTERCEPT_COMPARE_MISMATCH__`:
                  - Before level 1 is solved, fold the mismatch into supervisor-owned progress theory and choose the smallest next bounded worker task directly.
                  - Use `resume_mode_head` to `explore_and_solve` for one bounded level-1 probe when the mismatch means a missing observation is the blocker.
                  - Use `resume_mode_head` to `code_model` when the mismatch already points to a concrete component or mechanics repair target.
                  - After level 1 is solved or on later levels, treat the mismatch marker as an immediate `code_model` routing signal.
-              3) If marker is `__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__`:
+              4) If marker is `__ARC_INTERCEPT_LEVEL_COMPLETE_MODEL_MISMATCH__`:
                  - Set `transition_payload.analysis_scope=wrapup`, `transition_payload.analysis_level=<just-solved level>`, and `transition_payload.frontier_level=<current live level>`.
                  - Route directly to `code_model` with a handoff that the solved level needs post-completion cleanup, fresh solved-level component coverage, and solved-level compare repair.
                  - Once the supervisor judges that solved-level evidence accounting is complete, route out of the wrap-up envelope directly; helper scripts must not gate that decision.
-              4) If marker is `__ARC_INTERCEPT_COMPARE_CLEAN__`:
+              5) If marker is `__ARC_INTERCEPT_COMPARE_CLEAN__`:
                  - Treat compare-clean as a mandatory supervisor checkpoint after a covered real-game action or compare refresh.
                  - If current mode is `solve_model`, do not treat compare-clean alone as sufficient. Stay in `solve_model` unless the model-side `play.py` proof actually solves the level; otherwise route only to the worker that can answer the exact blocker.
                  - Put the compare-clean details into the handoff and explicitly name the single highest-value next question to answer.
@@ -413,7 +427,7 @@ supervisor:
                  - If the next step will be `explore_only`, the handoff must name exactly one newly introduced visible component or newly changed visible component state and one bounded real-game probe that tests it without attempting level completion.
                  - If the evidence already supports a deterministic bounded sequence to a decisive target, prefer the full sequence with its stop condition over a short sequence prefix that would obviously bounce back to progress-theory review mid-sequence.
                  - Inject concise guidance that compare-clean means model parity is clean for explored sequences, not that the level is solved.
-              4) If marker is `__ARC_INTERCEPT_RESET_LEVEL__`:
+              6) If marker is `__ARC_INTERCEPT_RESET_LEVEL__`:
                  - Judge whether the reset is appropriate for the current mode and evidence state.
                  - If appropriate, continue with a concise note.
                  - If not appropriate, inject a corrective supervisor command with concrete next action and mode alignment.
@@ -912,6 +926,7 @@ modes:
             Mode: code_model.
             Goal: patch `model_lib.py`, `play_lib.py`, and related model files until they match explored evidence and a frontier branch is ready for model proof.
             Do not use `arc_repl` in this mode.
+            If a real-game observation is still missing, do not execute it here. Report the exact missing observation and let the supervisor route the next bounded probe in an explore mode.
             `model.py` is harness-owned runtime glue. Do not edit it or use it as a Python scratchpad.
             `play.py` is a harness-owned static `exec_file` entrypoint. Do not edit it.
             Keep component definitions in `components.py`, model mechanics/completion logic in `model_lib.py`, and level-specific solve branches/helpers in `play_lib.py`.
@@ -939,6 +954,7 @@ modes:
             Read `analysis_state.json` first whenever level scope matters.
             `level_current/` always represents the live frontier-visible level.
             If `analysis_state.json` says `analysis_level != frontier_level`, then the current task is explicitly focused on a non-frontier level. In that case, use `analysis_level/` for that level's static/compare artifacts and explicit `--level <analysis_level>` arguments for model compare/coverage work. Do not infer scope from the visible frontier state.
+            Treat `component_coverage.*` as stale if its `level` does not match the active analysis level. In that case rerun coverage for the active analysis level before using it.
             If solved-level wrap-up is active, stay scoped to that solved level and ignore frontier-level artifacts until the supervisor routes out of wrap-up.
             Do not read raw `.hex` state files or sequence metadata directly in this mode. Use compare report markdown and sampled diff cells instead.
             Exception: if compare is already clean for the active frontier level and the remaining blocker is writing a deterministic frontier branch, you may inspect visible `level_current/initial_state.hex` or `level_current/current_state.hex` structure with the sanctioned helpers `inspect_grid_slice.py` and `inspect_grid_values.py`. Do not hand branch construction back to the supervisor just because you have not yet inspected the visible state structure yourself.
@@ -973,14 +989,15 @@ modes:
                if a needed visible entity already has a detector in `components.py`, use that detector from `model_lib.py`/`play_lib.py` instead of re-deriving it from raw value scans there;
                on later levels, patch by adding or overriding the current level's hook(s) rather than re-copying earlier mechanics;
             5) if `analysis_state.json` says `analysis_level != frontier_level`, run `python3 model.py compare_sequences --level <analysis_level>` and use `analysis_level/sequence_compare/*.md` for detailed reports; otherwise run `python3 model.py compare_sequences` with no explicit level;
-            6) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes;
-            7) if compare is clean across all explored current-level sequences:
+            6) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes; if the previously visible `component_coverage.md` was for a different level, treat it as stale until this rerun completes;
+            7) if one exact real-game observation is still missing, stop here and report that single missing observation with `report_process_result`; do not execute `arc_repl` in this mode;
+            8) if compare is clean across all explored current-level sequences:
                - if solved-level wrap-up is active, report whether evidence accounting appears complete or name the exact solved-level blocker;
                - report readiness for `solve_model` if a concrete current-level branch now exists in `play_lib.py`, any newly introduced current-level mechanics used by that branch are backed by action-linked real-game evidence rather than model-only inference, and the branch is ready to run through `play.py`;
                - otherwise report one exact missing real-game observation that blocks the next branch patch;
-            8) if compare is still red and a repair is blocked, stay in `code_model` and produce a precise blocker report with exact file/line evidence and the smallest required fix; do not switch out of `code_model` while parity remains red.
-            9) if there is one exact blocker preventing parity repair, ask the supervisor to escalate or resolve that blocker from `code_model`.
-            10) if compare is already clean and the only missing piece is a deterministic frontier branch, inspect visible `level_current/initial_state.hex` or `level_current/current_state.hex` yourself with the sanctioned grid helpers and write the branch in `play_lib.py`.
+            9) if compare is still red and a repair is blocked, stay in `code_model` and produce a precise blocker report with exact file/line evidence and the smallest required fix; do not switch out of `code_model` while parity remains red.
+            10) if there is one exact blocker preventing parity repair, ask the supervisor to escalate or resolve that blocker from `code_model`.
+            11) if compare is already clean and the only missing piece is a deterministic frontier branch, inspect visible `level_current/initial_state.hex` or `level_current/current_state.hex` yourself with the sanctioned grid helpers and write the branch in `play_lib.py`.
             Read these agent-workspace files as needed; prefer component summaries over raw grid artifacts:
             - `analysis_state.json`
             - `components.py`
@@ -1003,6 +1020,7 @@ modes:
         - "End each code_model turn with model-file edits or a `report_process_result` call."
         - "If compare is red and a single exact blocker remains, stay in code_model and report the blocker."
         - "If compare is clean and component coverage passes for the active analysis level, do not remain in code_model for open-ended re-analysis. Hand off the exact next mode/question promptly."
+        - "If one exact real-game observation is still missing, report it immediately and request the appropriate explore mode; do not execute that probe in code_model."
         - "When compare is red, reduce it to one exact active repair target: sequence id, action index, and mismatch class before broader reasoning."
         - "If the active mismatch is a late transition mismatch, patch or disprove that one transition before revisiting broader level mechanics or branch design."
         - "On level 2+, do not leave code_model with only 'completion unknown'. Either patch the frontier branch/play logic, or hand back exactly one missing real-game observation."
