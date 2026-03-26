@@ -28,8 +28,8 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _component_report_paths(game_dir: Path) -> tuple[Path, Path]:
-    return game_dir / "component_coverage.json", game_dir / "component_coverage.md"
+def _component_report_paths(game_dir: Path, *, level: int) -> dict[str, Path]:
+    return artifact_helpers.coverage_report_paths(game_dir, level)
 def _load_components_module(game_dir: Path):
     components_path = game_dir / "components.py"
     target_path = components_path if components_path.exists() else game_dir / "model_lib.py"
@@ -264,9 +264,16 @@ def _connected_uncovered_boxes(mask: np.ndarray) -> list[dict[str, Any]]:
     return boxes
 
 
-def _write_json_and_markdown(json_path: Path, md_path: Path, payload: dict[str, Any], markdown: str) -> None:
-    json_path.write_text(json.dumps(payload, indent=2) + "\n")
-    md_path.write_text(markdown)
+def _write_json_and_markdown(paths: dict[str, Path], payload: dict[str, Any], markdown: str) -> None:
+    json_text = json.dumps(payload, indent=2) + "\n"
+    for key in ("canonical_json", "root_json"):
+        path = paths[key]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json_text)
+    for key in ("canonical_md", "root_md"):
+        path = paths[key]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(markdown)
 
 
 def _component_coverage_markdown(payload: dict[str, Any]) -> str:
@@ -381,8 +388,8 @@ def run_component_coverage(game_dir: Path, *, level: int | None) -> tuple[dict[s
 
     payload["observed_shapes"] = observed_shapes
 
-    json_path, md_path = _component_report_paths(game_dir)
-    _write_json_and_markdown(json_path, md_path, payload, _component_coverage_markdown(payload))
+    paths = _component_report_paths(game_dir, level=int(level_value))
+    _write_json_and_markdown(paths, payload, _component_coverage_markdown(payload))
     return payload, 0 if payload["status"] == "pass" else 1
 
 

@@ -204,6 +204,21 @@ def current_compare_markdown_path(game_dir: str | Path) -> Path:
     return coerce_path(game_dir) / "current_compare.md"
 
 
+def coverage_report_paths(game_dir: str | Path, level: int) -> dict[str, Path]:
+    game_dir = coerce_path(game_dir)
+    canonical_dir = level_dir(game_dir, int(level))
+    canonical_json = canonical_dir / "component_coverage.json"
+    canonical_md = canonical_dir / "component_coverage.md"
+    root_json = game_dir / "component_coverage.json"
+    root_md = game_dir / "component_coverage.md"
+    return {
+        "canonical_json": canonical_json,
+        "canonical_md": canonical_md,
+        "root_json": root_json,
+        "root_md": root_md,
+    }
+
+
 def normalize_current_compare_payload(compare_payload: dict[str, Any]) -> dict[str, Any]:
     normalized = dict(compare_payload)
     nested = normalized.get("compare_payload")
