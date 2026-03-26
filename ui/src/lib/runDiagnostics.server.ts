@@ -103,6 +103,42 @@ async function readCanonicalRunError(runId: string): Promise<RunDiagnostic | nul
       } | null;
     };
     const at = parseTimestamp(payload.timestamp);
+    const phasesPath = path.join(runDir(runId), "telemetry", "harness_phases.ndjson");
+    try {
+      const rawPhases = await fs.readFile(phasesPath, "utf-8");
+      const matchingSuccessTimestamps = rawPhases
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => {
+          try {
+            return JSON.parse(line) as {
+              timestamp?: unknown;
+              ok?: unknown;
+              category?: unknown;
+              name?: unknown;
+            };
+          } catch {
+            return null;
+          }
+        })
+        .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
+        .filter(
+          (entry) =>
+            entry.ok === true &&
+            String(entry.category ?? "").trim() === String(payload.category ?? "").trim() &&
+            String(entry.name ?? "").trim() === String(payload.name ?? "").trim(),
+        )
+        .map((entry) => parseTimestamp(entry.timestamp))
+        .filter((value): value is string => Boolean(value));
+      if (
+        at &&
+        matchingSuccessTimestamps.some((successAt) => Date.parse(successAt) >= Date.parse(at))
+      ) {
+        return null;
+      }
+    } catch {
+      // ignore missing harness phases and fall back to canonical error artifact
+    }
     const category = typeof payload.category === "string" ? payload.category.trim() : "unknown";
     const name = typeof payload.name === "string" ? payload.name.trim() : "unknown";
     const detail =

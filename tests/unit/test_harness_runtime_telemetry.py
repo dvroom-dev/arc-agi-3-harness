@@ -73,3 +73,20 @@ def test_phase_scope_writes_canonical_last_error_artifact(tmp_path: Path) -> Non
     assert payload["meta"]["detail"] == "real detail"
     assert payload["meta"]["process_name"] == "super"
     assert payload["meta"]["return_code"] == 1
+
+
+def test_phase_scope_clears_canonical_last_error_after_later_success(tmp_path: Path) -> None:
+    runtime = _make_runtime(tmp_path)
+
+    try:
+        with phase_scope_impl(runtime, category="wrapup", name="certify_or_block_transition"):
+            raise RuntimeError("stale failure")
+    except RuntimeError:
+        pass
+
+    assert (runtime.telemetry_dir / "last_error.json").exists()
+
+    with phase_scope_impl(runtime, category="wrapup", name="certify_or_block_transition"):
+        pass
+
+    assert not (runtime.telemetry_dir / "last_error.json").exists()

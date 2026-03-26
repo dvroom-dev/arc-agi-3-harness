@@ -45,8 +45,21 @@ def append_phase_timing_impl(
         entry["meta"] = _sanitize_value(metadata)
     with runtime.phase_timings_path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(entry, sort_keys=True) + "\n")
+    last_error_path = runtime.telemetry_dir / "last_error.json"
+    if ok:
+        if last_error_path.exists():
+            try:
+                payload = json.loads(last_error_path.read_text(encoding="utf-8"))
+            except Exception:
+                payload = None
+            if (
+                isinstance(payload, dict)
+                and str(payload.get("category") or "").strip() == entry["category"]
+                and str(payload.get("name") or "").strip() == entry["name"]
+            ):
+                last_error_path.unlink(missing_ok=True)
+        return
     if not ok:
-        last_error_path = runtime.telemetry_dir / "last_error.json"
         last_error = {
             "timestamp": entry["timestamp"],
             "session_name": entry["session_name"],
