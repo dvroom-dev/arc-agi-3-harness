@@ -217,3 +217,80 @@ def test_wrapup_transition_releases_frontier_when_pinned_evidence_is_accounted_f
     meta = json.loads((game_dir / "level_current" / "meta.json").read_text())
     assert meta["level"] == 2
     assert meta["analysis_level_pinned"] is False
+
+
+def test_wrapup_transition_overrides_stale_frontier_analysis_state(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "wrapup-stale-frontier-state"
+    game_dir = run_dir / "agent" / "game_ls20"
+    arc_state_dir = run_dir / "supervisor" / "arc"
+    super_dir = run_dir / "super"
+    level1 = arc_state_dir / "game_artifacts" / "game_ls20" / "level_1"
+    level2 = arc_state_dir / "game_artifacts" / "game_ls20" / "level_2"
+    game_dir.mkdir(parents=True, exist_ok=True)
+    arc_state_dir.mkdir(parents=True, exist_ok=True)
+    super_dir.mkdir(parents=True, exist_ok=True)
+    level1.mkdir(parents=True, exist_ok=True)
+    level2.mkdir(parents=True, exist_ok=True)
+    (level1 / "initial_state.hex").write_text("0000\n")
+    (level2 / "initial_state.hex").write_text("1111\n")
+    (arc_state_dir / "state.json").write_text(
+        json.dumps({"current_level": 2, "levels_completed": 1}, indent=2) + "\n"
+    )
+    (super_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "activeMode": "code_model",
+                "activeTransitionPayload": {
+                    "analysis_scope": "wrapup",
+                    "analysis_level": "1",
+                    "frontier_level": "2",
+                },
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    (game_dir / "analysis_state.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "arc.analysis_state.v2",
+                "analysis_scope": "frontier",
+                "analysis_level": 1,
+                "frontier_level": 1,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    (game_dir / ".analysis_level_pin.json").write_text(
+        json.dumps({"level": 1, "phase": "pending_code_model"}, indent=2) + "\n"
+    )
+    (game_dir / "component_coverage.json").write_text(json.dumps({"status": "pass"}, indent=2) + "\n")
+    (game_dir / "current_compare.json").write_text(
+        json.dumps({"all_match": True, "level": 1}, indent=2) + "\n"
+    )
+    _write_level_current_surface(game_dir, level=1, pinned=True, initial_rows="0000\n")
+    (game_dir / "model_status.json").write_text(
+        json.dumps(
+            {
+                "state": {
+                    "current_level": 1,
+                    "levels_completed": 0,
+                    "available_model_levels": [1],
+                }
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+
+    runtime = _make_runtime(run_dir, arc_state_dir, game_dir)
+
+    harness_wrapup.certify_or_block_wrapup_transition_impl(runtime)
+
+    meta = json.loads((game_dir / "level_current" / "meta.json").read_text())
+    assert meta["level"] == 2
+    analysis_state = json.loads((game_dir / "analysis_state.json").read_text())
+    assert analysis_state["analysis_scope"] == "wrapup"
+    assert analysis_state["analysis_level"] == 1
+    assert analysis_state["frontier_level"] == 2

@@ -382,3 +382,49 @@ def test_sync_workspace_level_view_preserves_latest_pinned_compare_artifacts(tmp
     assert visible_payload["reports"][0]["actions_compared"] == 26
     assert (game_dir / "level_current" / "sequence_compare" / "seq_0001.md").read_text() == "# fresh report\n"
     assert not (game_dir / "level_current" / "sequence_compare" / "seq_0002.md").exists()
+
+
+def test_sync_workspace_level_view_can_force_frontier_level_past_stale_analysis_state(tmp_path: Path) -> None:
+    from arc_model_runtime.utils import sync_workspace_level_view
+
+    game_dir = tmp_path / "game_ls20"
+    game_dir.mkdir(parents=True, exist_ok=True)
+    (game_dir / "analysis_state.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "arc.analysis_state.v2",
+                "analysis_scope": "frontier",
+                "analysis_level": 1,
+                "frontier_level": 1,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    (game_dir / ".analysis_level_pin.json").write_text(
+        json.dumps({"level": 1, "phase": "pending_wrapup"}, indent=2)
+    )
+    arc_state_dir = tmp_path / "arc"
+    artifacts_root = arc_state_dir / "game_artifacts" / "game_ls20"
+    _write_hex(artifacts_root / "level_1" / "initial_state.hex", ["0000", "0000"])
+    _write_hex(artifacts_root / "level_2" / "initial_state.hex", ["1111", "1111"])
+
+    old = os.environ.get("ARC_STATE_DIR")
+    os.environ["ARC_STATE_DIR"] = str(arc_state_dir)
+    try:
+        visible = sync_workspace_level_view(
+            game_dir,
+            game_id="ls20",
+            frontier_level=2,
+            force_visible_level=2,
+        )
+    finally:
+        if old is None:
+            os.environ.pop("ARC_STATE_DIR", None)
+        else:
+            os.environ["ARC_STATE_DIR"] = old
+
+    assert visible == 2
+    meta = json.loads((game_dir / "level_current" / "meta.json").read_text())
+    assert meta["level"] == 2
+    assert meta["analysis_level_pinned"] is False

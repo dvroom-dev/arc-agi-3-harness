@@ -337,8 +337,14 @@ def resolve_level_dir(game_dir: Path, level: int) -> Path | None:
     return None
 
 
-def sync_workspace_level_view(game_dir: Path, *, game_id: str, frontier_level: int) -> int | None:
-    visible_level = effective_analysis_level(game_dir, frontier_level=frontier_level)
+def sync_workspace_level_view(
+    game_dir: Path,
+    *,
+    game_id: str,
+    frontier_level: int,
+    force_visible_level: int | None = None,
+) -> int | None:
+    visible_level = int(force_visible_level) if force_visible_level is not None else effective_analysis_level(game_dir, frontier_level=frontier_level)
     if visible_level is None:
         return None
     safe_game = sanitize_game_id(game_id)

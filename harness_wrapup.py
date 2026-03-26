@@ -160,6 +160,7 @@ def _sync_analysis_level_surface(
         game_dir,
         game_id=safe_game,
         frontier_level=int(frontier_level),
+        force_visible_level=int(frontier_level),
     )
     if visible_level is None and int(analysis_level) == int(frontier_level):
         _sync_analysis_state_file(
