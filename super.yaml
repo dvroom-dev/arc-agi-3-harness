@@ -572,6 +572,9 @@ modes:
             pattern: '^(switch_mode|check_supervisor|report_process_result)(\s|$)'
             case_sensitive: true
           - match_type: regex
+            pattern: '^(ls|find|rg|grep|wc|jq|arc_level)(\s|$)'
+            case_sensitive: true
+          - match_type: regex
             pattern: '^arc_repl (exec|reset_level)(\s|$)'
             case_sensitive: true
       provider_builtin_tools:
