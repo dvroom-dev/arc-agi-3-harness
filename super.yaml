@@ -8,13 +8,9 @@ runtime_defaults:
   agent_provider: claude
   agent_model: claude-opus-4-6
   agent_model_reasoning_effort: medium
-  supervisor_provider: codex
-  supervisor_model: gpt-5.4
+  supervisor_provider: claude
+  supervisor_model: claude-opus-4-6
   supervisor_model_reasoning_effort: high
-  provider_options:
-    codex:
-      responses_websockets: false
-      responses_websockets_v2: false
 
 models:
   frontier_reasoner:
@@ -22,8 +18,8 @@ models:
     model: claude-opus-4-6
     reasoning_effort: high
   fast_reader:
-    provider: codex
-    model: gpt-5.4-mini
+    provider: claude
+    model: claude-opus-4-6
     reasoning_effort: low
   code_repair:
     provider: claude
@@ -64,7 +60,7 @@ task_profiles:
     preferred_models: [frontier_reasoner]
     resume_strategy: fork_fresh
     context_rules:
-      - Use the smallest real-game probe that can discriminate between live explanations.
+      - Use the most efficient real-game probe that can discriminate between live explanations. This may be a long bounded sequence when the trigger condition is already known and the sequence is deterministic.
       - If a probe changes a different region than expected, elevate the changed region and downgrade the old target.
   model_repair:
     mode: code_model
@@ -103,6 +99,8 @@ process:
     - Model proof is a hypothesis check, not certification of real-game correctness for unseen frontier mechanics.
     - Any real-game contradiction against a resolved mechanic automatically reopens that mechanic.
     - A prior-level completion schema cannot become the leading frontier theory until all new frontier deltas are incorporated or ruled out with evidence.
+    - A visible monotone budget, fuel bar, turn bar, or countdown is a common failure/reset/end-of-attempt mechanic by default. Avoid intentionally exhausting it during ordinary exploration.
+    - If a countdown-style mechanic must be tested, prefer one deliberate bounded batch sequence that reaches the trigger cleanly over many micro-probes that repeatedly burn turns to approach it.
   stages:
     action_vocabulary:
       description: establish basic action vocabulary and controllable-actor semantics
@@ -290,7 +288,7 @@ supervisor:
       - "Treat unsupported certainty as a bug. If the transcript overstates what the evidence proves, correct the claim in the supervisor handoff instead of preserving the overconfident framing."
       - "Assume newly visible frontier features matter until disproven. If a visible feature is still unexplained, the agent likely does not understand the level well enough to solve it efficiently."
       - "Do not assign semantic roles to a feature unless action-linked evidence supports that role. Use neutral feature names until the role is proven, and do not assume a feature is unique unless evidence shows only one copy matters."
-      - "If evidence is ambiguous, request one minimal discriminating check instead of broad re-analysis. When the worker proposes a target, compare it against the highest-salience unresolved evidence from the latest real-game turn; if it ignores a more decisive clue, redirect it."
+      - "If evidence is ambiguous, request the most efficient discriminating check instead of broad re-analysis. That may be one action, or it may be one longer bounded batch if the trigger condition and sequence are already known."
       - "When switching between worker modes, prefer resume_mode_head over fork_new_conversation so cross-mode context is preserved. Level completion alone is not a reason to fork; only fork after a real discontinuity such as reset_level, game_complete, or game_over, or when a fresh start is explicitly justified."
       - "When choosing continue, resume_mode_head, or fork_new_conversation, always include a concrete handoff message: what was learned, why the mode is changing, and the exact next action or verification target."
       - "When routing to a new mode on schema_version 2 runs, keep process state consistent with that mode. Do not leave `process_stage`/`task_profile` pointing at stale exploration or component-coding state when the chosen mode is `solve_model` or `recover`."
@@ -301,6 +299,8 @@ supervisor:
       - "A bounded explore_and_solve sequence is allowed only when the required action semantics and visible state structure are already evidenced, and it must include an explicit stop condition: completion, novel event, sequence exhausted, blocked execution, or budget boundary."
       - "Any handoff into explore_only must include exactly one newly introduced visible component or one newly changed visible component state, one bounded real-game probe or bounded action sequence that tests it, and one explicit stop condition. Explore_only is evidence gathering only; it must not attempt to solve the level."
       - "When a target is already clear and the full action sequence is deterministic from existing evidence, prefer that full bounded sequence over a short sequence prefix. Do not force a return to progress-theory review after each expected repeated action when no novel evidence has appeared."
+      - "If a visible monotone budget/fuel/turn bar has been identified, assume exhaustion is likely to reset the level, consume progress, or trigger GAME_OVER. Do not intentionally exhaust it during ordinary exploration."
+      - "If exhausting a countdown-style mechanic is the highest-value remaining test, assign it as one deliberate bounded batch sequence with an explicit stop condition near the boundary; do not approach exhaustion through many tiny probe turns."
       - "After a bounded explore probe resolves or falsifies its target, update supervisor-owned progress theory directly. Do not route to a worker just to rewrite theory prose."
       - "If the latest bounded probe revealed a direct action-linked effect for the targeted component, close that exact question in the supervisor's progress theory instead of keeping the same broad question open."
       - "Reject a handoff that reuses the same evidence question after a discriminating probe already answered it, unless new contradictory evidence appeared."
@@ -615,6 +615,8 @@ modes:
             This mode must not attempt to solve the level.
             Treat the supervisor handoff packet as the full contract for the turn.
             Run only the bounded probe or bounded action sequence needed to answer that one question, then report the result with `report_process_result`.
+            If the handoff sequence is deterministic and longer than one action, execute it as one batch rather than decomposing it into many tiny approach probes.
+            If a visible monotone budget/fuel/turn bar is present, avoid intentionally exhausting it unless the handoff explicitly says exhaustion is the target of the probe.
             Do not inspect `.ai-supervisor/**`, blob files, provider/runtime source, or control-plane internals here.
             You may read raw state artifacts in this mode because the point is to gather one exact piece of frontier evidence.
         - prompt_part: arc_repl_probe_runtime
@@ -632,6 +634,8 @@ modes:
             Do not attempt level completion, broad action-sequence search, generic visible-structure mapping, or multi-hypothesis wandering in this mode.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
             For actionful probes, inspect the returned `artifacts.after_state_hex` first before reopening on-disk turn artifacts.
+            If the handoff already specifies a deterministic multi-action sequence, execute the whole bounded sequence in one script instead of many one-action turns.
+            If a visible monotone budget/fuel/turn bar is present, reset before exhausting it unless the handoff explicitly says the exhaustion trigger itself is the test target.
         - prompt_part: supervisor_context_block
         - prompt_part: switch_mode_usage
     agent_rules:
@@ -722,6 +726,8 @@ modes:
             Goal: on level 1 only, discover mechanics and find a real level solution.
             This mode may inspect raw `.hex` state files and sequence metadata because level-1 completion is not modeled yet.
             Keep the loop tight: probe or try a bounded likely solution, then report the result to the supervisor once the specific evidence or completion result is known.
+            If the handed-off sequence is deterministic and longer than one action, execute it as one batch rather than decomposing it into many one-action approach turns.
+            If a visible monotone budget/fuel/turn bar is present, avoid intentionally exhausting it during ordinary exploration. Reset before exhaustion unless the handoff explicitly says exhaustion is the target.
             Do not inspect `.ai-supervisor/**`, blob files, provider/runtime source, or control-plane internals here. If a tool result mentions those paths, ignore them and continue with workspace-visible game evidence only.
             Treat the newest supervisor-approved handoff as authoritative. If the supervisor narrowed the probe to one action or a shorter bounded sequence, execute that newer handoff rather than reviving an older broader plan.
         - prompt_part: arc_repl_probe_runtime
@@ -743,6 +749,8 @@ modes:
             If the probe changes a different visible region than the handoff named, report that changed region as the actual action-linked result and treat the original target as falsified or weakened instead of pretending the named target was tested successfully.
             Use `arc_repl exec` with stdin for one-off probes so you do not create new files in this mode.
             For actionful probes, inspect the returned `artifacts.after_state_hex` first before reopening on-disk turn artifacts.
+            If the handoff already specifies a deterministic multi-action sequence, execute that whole bounded sequence in one script instead of many one-action turns.
+            If a visible monotone budget/fuel/turn bar is present, reset before exhausting it unless the handoff explicitly says the exhaustion trigger itself is the target of the test.
             Do not use read-only `arc_repl` calls as inspection tools.
             Do not inspect Python runtime objects inside the probe script; the `arc_repl` response and next-mode artifacts are the inspection surface.
             Do not investigate harness/runtime/tooling behavior in this mode. If compare or intercept behavior looks inconsistent, record the exact workspace artifacts involved and return to the supervisor instead of inspecting internals.
