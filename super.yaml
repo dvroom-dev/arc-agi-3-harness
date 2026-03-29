@@ -246,6 +246,17 @@ prompt_parts:
           --user-message "Define visible components in code, verify detector coverage, and identify which frontier deltas still need a bounded probe."
         ```
 
+        Example for a bounded same-mode probe handoff:
+        ```bash
+        report_process_result \
+          --outcome complete \
+          --summary "bounded probe answered the current target: the current path is blocked at the first lateral move and no other visible component changed" \
+          --evidence "the full handed-off sequence was executed; the explicit stop condition was reached; the budget display still dropped by 1 per action" \
+          --user-message "Current bounded probe is closed. Choose the single next worker handoff."
+        ```
+
+        Call `report_process_result` exactly once per completed bounded probe, completed bounded action sequence, or completed solution attempt. After that call, stop the turn. Do not add a second narrative summary or a duplicate malformed `report_process_result`.
+
         For legacy/non-v2 flows, mode changes are still shell commands.
         There is no direct provider tool for supervisor/runtime control. Use Bash commands only.
 
@@ -743,6 +754,7 @@ modes:
             - perform the handed-off bounded action sequence or probe sequence until that one target class is actually answered;
             - stay focused only on that handed-off target class until it is answered, falsified, or its explicit bounded-sequence stop condition is reached;
             - report the outcome with `report_process_result --outcome ... --summary ... --evidence ...`.
+            - for a completed bounded probe, make exactly one `report_process_result` call and then stop the turn; do not follow it with a second prose-only recap or a duplicate malformed report;
             Do not invent a new action-sequence plan, feature target, or completion hypothesis in this mode after the bootstrap turn.
             If the current handoff is a bounded action sequence, do not bounce back to the supervisor after each expected repeated action; keep going until completion, a novel event, the explicit stop condition, or a blocker.
             The bootstrap turn should stay tiny: one or two distinct actions maximum, only enough to identify first-order action effects and which visible features respond to them.
