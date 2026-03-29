@@ -201,6 +201,7 @@ prompt_parts:
         - `python3 model.py status --game-id "${vars.game_id}"`
         - `python3 model.py compare_sequences --game-id "${vars.game_id}"`
         - `python3 inspect_sequence.py --current-mismatch`
+        - `python3 inspect_model_sequence.py --game-id "${vars.game_id}" --current-mismatch`
         - `python3 inspect_grid_slice.py --file level_current/current_state.hex --rows 36:55 --cols 29:38`
         - `python3 inspect_grid_slice.py --file level_current/initial_state.hex --rows 0:64 --cols 0:65`
         - `python3 inspect_grid_values.py --file level_current/current_state.hex --value C --value 9`
@@ -220,7 +221,7 @@ prompt_parts:
         If you parse JSON from a CLI, parse stdout only. Never pipe `2>&1` into `json.load`, `jq`, or another JSON parser.
         `inspect_grid_slice.py` accepts START:END ranges with END normally inclusive; for whole-grid spans you may use END equal to the grid size (for example `--rows 0:64 --cols 0:65` on a 64x65 grid).
         `inspect_grid_slice.py` and `inspect_grid_values.py` require `--file`; pass the target path explicitly every time.
-        Prefer existing helper scripts such as `inspect_sequence.py`, `inspect_components.py`, `inspect_grid_slice.py`, and `inspect_grid_values.py`.
+        Prefer existing helper scripts such as `inspect_sequence.py`, `inspect_model_sequence.py`, `inspect_components.py`, `inspect_grid_slice.py`, and `inspect_grid_values.py`.
         If `code_model` truly needs custom analysis, add a small read-only helper script in the workspace and run it directly; do not improvise `python3 -c` snippets.
         Use `python3 inspect_components.py --coverage --level LEVEL` to verify that exact component geometry covers every seen state for the current level.
         When using provider file-edit tools, read the file first, then edit/write it.
@@ -993,12 +994,15 @@ modes:
             0) read `analysis_state.json` and determine whether this task targets the frontier level or an explicit non-frontier `analysis_level`;
             1) inspect `components.py`, `current_compare.md`, the supervisor handoff packet, and the referenced `level_current/sequence_compare/*.md` report;
             2) if needed, run `python3 inspect_sequence.py --current-mismatch` to print the first mismatching compare report target and step;
+               for any red compare you must then run `python3 inspect_model_sequence.py --game-id "${vars.game_id}" --current-mismatch` before editing model logic, so you can inspect the exact model-vs-game frame counts, tracked value bboxes, and env state at the divergence step;
                for sanctioned grid inspection, use `python3 inspect_grid_slice.py --file ... --rows ... --cols ...` or `python3 inspect_grid_values.py --file ... --value ...` instead of `awk` or `python3 -c`;
                when reading large files, prefer bounded `Read` with `offset`/`limit` or `rg -n` over full-file reads that will be offloaded as persisted output;
             3) reduce compare to one exact active repair target: sequence id, action index, and mismatch class; if the mismatch is a transition mismatch, name the exact field(s) (`state_*`, `levels_completed_*`, `level_complete_*`, `game_over_*`) before continuing;
+               if the mismatch is `frame_count_mismatch` or `intermediate_frame_mismatch`, use `inspect_model_sequence.py` output as the primary evidence surface instead of ad hoc print debugging;
             4) name the exact mismatching sampled diff cells or transition fields, match them to the supervisor's active progress question, and patch the missing mechanics, completion transitions, frontier branch logic, or component detectors/names needed in `model_lib.py`/`play_lib.py`/`components.py`;
                if a needed visible entity already has a detector in `components.py`, use that detector from `model_lib.py`/`play_lib.py` instead of re-deriving it from raw value scans there;
                on later levels, patch by adding or overriding the current level's hook(s) rather than re-copying earlier mechanics;
+               do not add transient print/debug statements to model files until `inspect_model_sequence.py` has been run for the current exact mismatch and you can name the one missing internal fact it still does not expose;
             5) if `analysis_state.json` says `analysis_level != frontier_level`, run `python3 model.py compare_sequences --level <analysis_level>` and use `analysis_level/sequence_compare/*.md` for detailed reports; otherwise run `python3 model.py compare_sequences` with no explicit level;
             6) rerun `python3 inspect_components.py --coverage --level <LEVEL>` and confirm component coverage still passes; if the previously visible `component_coverage.md` was for a different level, treat it as stale until this rerun completes;
             7) if one exact real-game observation is still missing, stop here and report that single missing observation with `report_process_result`; do not execute `arc_repl` in this mode;
