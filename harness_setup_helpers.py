@@ -151,6 +151,7 @@ def setup_run_dir_impl(
     play_template: str,
     artifact_helpers_template: str,
     inspect_sequence_template: str,
+    inspect_model_sequence_template: str,
     inspect_components_template: str,
     inspect_grid_slice_template: str,
     inspect_grid_values_template: str,
@@ -206,6 +207,10 @@ def setup_run_dir_impl(
     inspect_sequence_file = game_dir / "inspect_sequence.py"
     if not inspect_sequence_file.exists():
         inspect_sequence_file.write_text(inspect_sequence_template)
+
+    inspect_model_sequence_file = game_dir / "inspect_model_sequence.py"
+    if not inspect_model_sequence_file.exists():
+        inspect_model_sequence_file.write_text(inspect_model_sequence_template)
 
     inspect_components_file = game_dir / "inspect_components.py"
     if not inspect_components_file.exists():

@@ -825,6 +825,9 @@ modes:
             pattern: '^python3 (\./)?inspect_sequence\.py(\s|$)'
             case_sensitive: true
           - match_type: regex
+            pattern: '^python3 (\./)?inspect_model_sequence\.py(\s|$)'
+            case_sensitive: true
+          - match_type: regex
             pattern: '^python3 (\./)?inspect_grid_(slice|values)\.py(\s|$)'
             case_sensitive: true
       provider_builtin_tools:
@@ -866,6 +869,7 @@ modes:
               - play.py
               - play_lib.py
               - inspect_sequence.py
+              - inspect_model_sequence.py
               - inspect_components.py
               - inspect_grid_slice.py
               - inspect_grid_values.py
@@ -891,6 +895,7 @@ modes:
               - play.py
               - play_lib.py
               - inspect_sequence.py
+              - inspect_model_sequence.py
               - inspect_components.py
               - inspect_grid_slice.py
               - inspect_grid_values.py
@@ -916,6 +921,7 @@ modes:
               - play.py
               - play_lib.py
               - inspect_sequence.py
+              - inspect_model_sequence.py
               - inspect_components.py
               - inspect_grid_slice.py
               - inspect_grid_values.py
@@ -977,6 +983,7 @@ modes:
             When compare is red, reduce the problem to one exact named mismatch before doing broader reasoning. Name the specific sequence, action index, and mismatch class (for example `after_state_mismatch`, `state_transition_mismatch`, `level_complete_after`, `game_over_after`, or one exact component delta) and treat that as the only active repair target until it is either fixed or replaced by a newer exact mismatch from fresh compare output.
             If compare has already narrowed to one late transition mismatch, do not restart broad branch analysis or speculate about unrelated earlier mechanics. Patch or disprove that one transition first.
             If compare is red and you have one exact blocker, stay in `code_model` and report that blocker precisely.
+            Once an exact mismatch is named, do not reopen broad map geometry, theory prose, or unrelated feature interpretation unless the mismatch helper output proves that one more visual fact is missing.
             If compare is already clean and component coverage already passes for the active analysis level, do not keep rereading current_compare or grid structure to re-justify the same branch. Either report the exact missing evidence question, or move forward to solve preparation immediately.
             Use relative workspace paths only. Do not synthesize absolute run/repo paths or derive `game_<id>` directories from `${vars.game_id}`.
             Read `current_compare.md` first. If `analysis_state.json` says `analysis_level != frontier_level`, open only the referenced `analysis_level/sequence_compare/*.md` report if deeper detail is needed; otherwise use `level_current/sequence_compare/*.md`.
@@ -999,6 +1006,7 @@ modes:
                when reading large files, prefer bounded `Read` with `offset`/`limit` or `rg -n` over full-file reads that will be offloaded as persisted output;
             3) reduce compare to one exact active repair target: sequence id, action index, and mismatch class; if the mismatch is a transition mismatch, name the exact field(s) (`state_*`, `levels_completed_*`, `level_complete_*`, `game_over_*`) before continuing;
                if the mismatch is `frame_count_mismatch` or `intermediate_frame_mismatch`, use `inspect_model_sequence.py` output as the primary evidence surface instead of ad hoc print debugging;
+               after that, stay inside a tight loop of helper -> patch -> compare until the exact mismatch changes; do not switch back to broad layout rereads while the same mismatch is still active;
             4) name the exact mismatching sampled diff cells or transition fields, match them to the supervisor's active progress question, and patch the missing mechanics, completion transitions, frontier branch logic, or component detectors/names needed in `model_lib.py`/`play_lib.py`/`components.py`;
                if a needed visible entity already has a detector in `components.py`, use that detector from `model_lib.py`/`play_lib.py` instead of re-deriving it from raw value scans there;
                on later levels, patch by adding or overriding the current level's hook(s) rather than re-copying earlier mechanics;

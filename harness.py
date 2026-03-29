@@ -83,6 +83,7 @@ MODEL_LIB_TEMPLATE = _load_agent_workspace_template("model_lib.py")
 PLAY_LIB_TEMPLATE = _load_agent_workspace_template("play_lib.py")
 ARTIFACT_HELPERS_TEMPLATE = _load_agent_workspace_template("artifact_helpers.py")
 INSPECT_SEQUENCE_TEMPLATE = _load_agent_workspace_template("inspect_sequence.py")
+INSPECT_MODEL_SEQUENCE_TEMPLATE = _load_agent_workspace_template("inspect_model_sequence.py")
 INSPECT_COMPONENTS_TEMPLATE = _load_agent_workspace_template("inspect_components.py")
 INSPECT_GRID_SLICE_TEMPLATE = _load_agent_workspace_template("inspect_grid_slice.py")
 INSPECT_GRID_VALUES_TEMPLATE = _load_agent_workspace_template("inspect_grid_values.py")
@@ -426,6 +427,7 @@ def setup_run_dir(
         play_template=PLAY_TEMPLATE,
         artifact_helpers_template=ARTIFACT_HELPERS_TEMPLATE,
         inspect_sequence_template=INSPECT_SEQUENCE_TEMPLATE,
+        inspect_model_sequence_template=INSPECT_MODEL_SEQUENCE_TEMPLATE,
         inspect_components_template=INSPECT_COMPONENTS_TEMPLATE,
         inspect_grid_slice_template=INSPECT_GRID_SLICE_TEMPLATE,
         inspect_grid_values_template=INSPECT_GRID_VALUES_TEMPLATE,
