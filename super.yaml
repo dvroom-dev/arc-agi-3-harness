@@ -231,31 +231,40 @@ prompt_parts:
     - literal: |
         On `schema_version: 2` runs, workflow progression is supervisor-owned.
         If the run frontmatter includes `process_stage` or `task_profile`, do not use `switch_mode`.
-        Use the run-local CLI wrappers instead:
-        - `report_process_result --outcome ... --summary ...`
-        - `check_supervisor --mode hard|soft`
-        If any older mode text elsewhere still says a builtin tool call, treat that text as legacy and use the CLI wrapper instead.
+        Prefer the builtin runtime tools directly:
+        - `report_process_result` with JSON args
+        - `check_supervisor` with JSON args
+        Use Bash wrappers only for legacy/non-v2 flows.
+        If any older mode text elsewhere still says to shell out for v2 runtime control, treat that text as legacy and use the builtin runtime tool instead.
 
         Example:
-        ```bash
-        report_process_result \
-          --outcome complete \
-          --summary "basic action vocabulary established" \
-          --evidence "ACTION1 moves the controllable actor up; ACTION4 moves it right" \
-          --requested-profile component_coding \
-          --user-message "Define visible components in code, verify detector coverage, and identify which frontier deltas still need a bounded probe."
+        ```json
+        {
+          "tool": "report_process_result",
+          "args": {
+            "outcome": "complete",
+            "summary": "basic action vocabulary established",
+            "evidence": "ACTION1 moves the controllable actor up; ACTION4 moves it right",
+            "requested_profile": "component_coding",
+            "user_message": "Define visible components in code, verify detector coverage, and identify which frontier deltas still need a bounded probe."
+          }
+        }
         ```
 
         Example for a bounded same-mode probe handoff:
-        ```bash
-        report_process_result \
-          --outcome complete \
-          --summary "bounded probe answered the current target: the current path is blocked at the first lateral move and no other visible component changed" \
-          --evidence "the full handed-off sequence was executed; the explicit stop condition was reached; the budget display still dropped by 1 per action" \
-          --user-message "Current bounded probe is closed. Choose the single next worker handoff."
+        ```json
+        {
+          "tool": "report_process_result",
+          "args": {
+            "outcome": "complete",
+            "summary": "bounded probe answered the current target: the current path is blocked at the first lateral move and no other visible component changed",
+            "evidence": "the full handed-off sequence was executed; the explicit stop condition was reached; the budget display still dropped by 1 per action",
+            "user_message": "Current bounded probe is closed. Choose the single next worker handoff."
+          }
+        }
         ```
 
-        Call `report_process_result` exactly once per completed bounded probe, completed bounded action sequence, or completed solution attempt. After that call, stop the turn. Do not add a second narrative summary or a duplicate malformed `report_process_result`.
+        `report_process_result` requires both `outcome` and `summary`. Call it exactly once per completed bounded probe, completed bounded action sequence, or completed solution attempt. After that tool call, stop the turn. Do not add a second narrative summary, a duplicate malformed `report_process_result`, or an immediate `check_supervisor` call about the same finished probe.
 
         For legacy/non-v2 flows, mode changes are still shell commands.
         There is no direct provider tool for supervisor/runtime control. Use Bash commands only.
@@ -753,8 +762,8 @@ modes:
             - otherwise treat the supervisor handoff in this activation message as the entire contract for this turn;
             - perform the handed-off bounded action sequence or probe sequence until that one target class is actually answered;
             - stay focused only on that handed-off target class until it is answered, falsified, or its explicit bounded-sequence stop condition is reached;
-            - report the outcome with `report_process_result --outcome ... --summary ... --evidence ...`.
-            - for a completed bounded probe, make exactly one `report_process_result` call and then stop the turn; do not follow it with a second prose-only recap or a duplicate malformed report;
+            - report the outcome with the builtin `report_process_result` tool using JSON args that include `outcome`, `summary`, and optional `evidence`;
+            - for a completed bounded probe, make exactly one `report_process_result` call and then stop the turn; do not follow it with a second prose-only recap, a duplicate malformed report, or a `check_supervisor` call about the same completed probe;
             Do not invent a new action-sequence plan, feature target, or completion hypothesis in this mode after the bootstrap turn.
             If the current handoff is a bounded action sequence, do not bounce back to the supervisor after each expected repeated action; keep going until completion, a novel event, the explicit stop condition, or a blocker.
             The bootstrap turn should stay tiny: one or two distinct actions maximum, only enough to identify first-order action effects and which visible features respond to them.
