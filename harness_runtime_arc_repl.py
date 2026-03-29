@@ -154,8 +154,8 @@ def resume_super_impl(rt, prompt: str | None = None, *, image_paths=None) -> str
         ]
         if rt.cycle_limit is not None:
             resume_args += ["--cycle-limit", str(rt.cycle_limit)]
-        if prompt:
-            resume_args += rt.prompt_args(prompt, prompt_kind="resume", image_paths=image_paths)
+        if prompt or image_paths:
+            resume_args += rt.prompt_args(prompt or "", prompt_kind="resume", image_paths=image_paths)
         resume_args += ["--output", str(rt.session_file)]
         stdout = rt.deps.run_super(resume_args, stream=True, cwd=rt.run_dir, env=rt.super_env)
         phase["assistant_text_bytes"] = len(stdout.encode("utf-8"))

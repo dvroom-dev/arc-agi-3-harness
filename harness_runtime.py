@@ -35,6 +35,10 @@ from harness_runtime_prompting import (
     prompt_args_impl,
     update_prompt_game_vars_impl,
 )
+from harness_runtime_images import (
+    ensure_level_start_prompt_image_impl,
+    level_start_prompt_images_impl,
+)
 from harness_runtime_scorecard import open_scorecard_now_impl
 from harness_runtime_session import (
     discover_workspace_conversation_id_impl,
@@ -225,6 +229,8 @@ class HarnessRuntime:
         self.update_prompt_game_vars()
 
         self.prompt_file_counter = 0
+        self.prompt_image_dir = self.run_dir / "prompt_images"
+        self.prompt_image_attached_levels: set[int] = set()
         self.repl_parent_pid = int(os.getpid())
         self.repl_parent_start_ticks = read_proc_start_ticks(self.repl_parent_pid)
 
@@ -443,6 +449,12 @@ class HarnessRuntime:
 
     def update_prompt_game_vars(self) -> None:
         update_prompt_game_vars_impl(self)
+
+    def ensure_level_start_prompt_image(self, *, level: int | None = None) -> Path:
+        return ensure_level_start_prompt_image_impl(self, level=level)
+
+    def level_start_prompt_images(self, state: dict | None) -> list[Path]:
+        return level_start_prompt_images_impl(self, state)
 
     def active_agent_dir(self) -> Path:
         """Return the current game-scoped agent directory for super --agent-dir."""

@@ -5,6 +5,7 @@ import time
 import traceback
 from argparse import Namespace
 from datetime import datetime, timezone
+from pathlib import Path
 
 from harness_explore import run_input_exploration_from_reset
 from harness_repl_health import collect_repl_health, format_repl_crash_diagnostics, format_repl_health_summary
@@ -12,6 +13,7 @@ from harness_runner_keepalive import IDLE_KEEPALIVE_MARKER, IDLE_KEEPALIVE_TRIGG
 from harness_runner_args import resolve_arc_base_url, resolve_game_ids, session_name_for_game
 from harness_runner_continue import continue_existing_run, has_recoverable_run_state, log_monitor_sources, stop_if_supervisor_terminal
 from harness_runner_regression import _classify_level_drop
+from harness_runner_start import start_super_new_impl
 from harness_runner_super_cycle import noop_super_cycle_error
 from harness_runtime import HarnessRuntime
 from harness_scorecard_helpers import close_shared_scorecard, open_shared_scorecard, run_scorecard_session_preflight, validate_scorecard_owner_check
@@ -50,7 +52,7 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
         runtime.log("[harness] input exploration is enabled (--explore-inputs).")
     else:
         runtime.log("[harness] input exploration is disabled (default).")
-    runtime.log("[harness] level-start prompt image attachments are disabled.")
+    runtime.log("[harness] level-start prompt image attachments use SDK-rendered initial-state images.")
     try:
         _, _, init_rc = runtime.run_arc_repl({"action": "status", "game_id": args.game_id})
         if init_rc != 0:
@@ -93,36 +95,19 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
         game_over_resets = 0
         last_recorded_completed_level = deps.read_max_recorded_completion_level(runtime.completions_md)
         last_real_game_action_at_monotonic = time.monotonic()
-        def _start_super_new(*, phase_label: str, start_mode: str | None = None) -> None:
-            runtime.log(f"[harness] starting super new ({phase_label})...")
-            runtime.refresh_dynamic_super_env()
-            runtime.log(f"[harness] super agent-dir: {runtime.active_agent_dir()}")
-            cmd = [
-                "new",
-                "--config", str(runtime.super_config),
-                "--workspace", str(runtime.run_dir),
-                "--config-dir", str(runtime.run_config_dir),
-                "--agent-dir", str(runtime.active_agent_dir()),
-                "--supervisor-dir", str(runtime.supervisor_dir),
-                *runtime.provider_args(),
-                *runtime.supervisor_args(),
-                "--output", str(runtime.session_file),
-            ]
-            if runtime.cycle_limit is not None:
-                cmd.extend(["--cycle-limit", str(runtime.cycle_limit)])
-            if start_mode:
-                cmd.extend(["--start-mode", str(start_mode)])
-            with runtime.phase_scope(
-                category="super",
-                name="new",
-                metadata={"phase_label": phase_label, "start_mode": start_mode},
-            ):
-                deps.run_super(
-                    cmd,
-                    stream=True,
-                    cwd=runtime.run_dir,
-                    env=runtime.super_env,
-                )
+        def _start_super_new(
+            *,
+            phase_label: str,
+            start_mode: str | None = None,
+            image_paths: list[Path] | None = None,
+        ) -> None:
+            start_super_new_impl(
+                runtime,
+                deps,
+                phase_label=phase_label,
+                start_mode=start_mode,
+                image_paths=image_paths,
+            )
             runtime.recover_session_file_from_workspace(reason="post-new", force=True)
             runtime.sync_active_conversation_id_from_session(); runtime.certify_or_block_wrapup_transition()
             log_monitor_sources(runtime)
@@ -232,7 +217,7 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
 
                 history_len_before_resume = processed_history_len
                 head_before_resume = runtime.load_conversation_head_metadata()
-                stdout = runtime.resume_super()
+                stdout = runtime.resume_super(image_paths=runtime.level_start_prompt_images(state))
                 runtime.sync_active_conversation_id_from_session(); runtime.certify_or_block_wrapup_transition()
                 if stop_if_supervisor_terminal(runtime):
                     return False
@@ -346,9 +331,15 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
                     "[harness] continue requested, but no recoverable conversation state was found; "
                     "starting a fresh supervisor session in the existing run directory."
                 )
-                _start_super_new(phase_label="continue-fallback-new")
+                _start_super_new(
+                    phase_label="continue-fallback-new",
+                    image_paths=runtime.level_start_prompt_images(init_state),
+                )
         else:
-            _start_super_new(phase_label="discovery")
+            _start_super_new(
+                phase_label="discovery",
+                image_paths=runtime.level_start_prompt_images(init_state),
+            )
         discovery_won = _run_super_loop()
         if score_after_solve and discovery_won and not runtime.active_scorecard_id:
             scorecard_id = runtime.open_scorecard_now()

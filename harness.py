@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 
 try:
-    from game_state import COLOR_NAMES, render_grid_to_image
+    from game_state import COLOR_NAMES
 except Exception as exc:  # pragma: no cover - fail fast
     raise RuntimeError(
         "Failed to import required game_state helpers. "

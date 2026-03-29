@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import io
-import sys
-from pathlib import Path
-from types import ModuleType, SimpleNamespace
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -73,41 +71,4 @@ def test_render_grid_to_terminal_rich_path(monkeypatch) -> None:
     game_state.render_grid_to_terminal(pixels, _frame(), file=buf)
     assert "GRID" in buf.getvalue()
 
-
-def test_render_grid_to_image_without_pillow(monkeypatch, tmp_path: Path) -> None:
-    fake_pil = ModuleType("PIL")
-
-    class FakeImageObj:
-        def __init__(self):
-            self.saved = None
-
-        def save(self, path):
-            Path(path).write_bytes(b"png")
-
-    class FakeImageModule:
-        @staticmethod
-        def new(mode, size):
-            return FakeImageObj()
-
-    class FakeDraw:
-        def rectangle(self, *args, **kwargs):
-            return None
-
-        def line(self, *args, **kwargs):
-            return None
-
-    class FakeImageDrawModule:
-        @staticmethod
-        def Draw(img):
-            return FakeDraw()
-
-    fake_pil.Image = FakeImageModule
-    fake_pil.ImageDraw = FakeImageDrawModule
-    monkeypatch.setitem(sys.modules, "PIL", fake_pil)
-    monkeypatch.setitem(sys.modules, "PIL.Image", FakeImageModule)
-    monkeypatch.setitem(sys.modules, "PIL.ImageDraw", FakeImageDrawModule)
-
-    out = tmp_path / "grid.png"
-    game_state.render_grid_to_image(np.zeros((4, 4), dtype=np.int8), out, scale=2, grid_lines=True)
-    assert out.exists()
 

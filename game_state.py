@@ -330,59 +330,6 @@ ARC_COLORS_RGB_TUPLES: dict[int, tuple[int, int, int]] = {
 }
 
 
-def render_grid_to_image(
-    pixels: np.ndarray,
-    path: Path | str,
-    *,
-    scale: int = 8,
-    grid_lines: bool = False,
-    grid_color: tuple[int, int, int] = (40, 40, 40),
-) -> None:
-    """Render a 64x64 pixel grid to a PNG image.
-
-    Args:
-        pixels: 2D numpy array of color IDs (0-15), typically shape (64, 64).
-        path: Output file path (should end in .png).
-        scale: Pixels per cell. 8 -> 512x512 image.
-        grid_lines: If True, draw 1px grid lines between cells.
-        grid_color: RGB color for grid lines.
-    """
-    from PIL import Image, ImageDraw
-
-    h, w = pixels.shape
-    if grid_lines:
-        img_w = w * scale + (w - 1)
-        img_h = h * scale + (h - 1)
-    else:
-        img_w = w * scale
-        img_h = h * scale
-
-    img = Image.new("RGB", (img_w, img_h))
-    draw = ImageDraw.Draw(img)
-
-    for r in range(h):
-        for c in range(w):
-            color = ARC_COLORS_RGB_TUPLES.get(int(pixels[r, c]), (0, 0, 0))
-            if grid_lines:
-                x0 = c * (scale + 1)
-                y0 = r * (scale + 1)
-            else:
-                x0 = c * scale
-                y0 = r * scale
-            draw.rectangle([x0, y0, x0 + scale - 1, y0 + scale - 1], fill=color)
-
-    # Draw grid lines if requested
-    if grid_lines:
-        for r in range(1, h):
-            y = r * (scale + 1) - 1
-            draw.line([(0, y), (img_w - 1, y)], fill=grid_color)
-        for c in range(1, w):
-            x = c * (scale + 1) - 1
-            draw.line([(x, 0), (x, img_h - 1)], fill=grid_color)
-
-    img.save(str(path))
-
-
 def render_grid_to_terminal(
     pixels: np.ndarray,
     frame: FrameDataRaw,
