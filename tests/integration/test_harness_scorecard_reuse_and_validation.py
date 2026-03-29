@@ -23,6 +23,13 @@ def _seed_project(root: Path) -> None:
     (root / "prompts" / "new_game_auto_explore.py").write_text("print('x')\n")
 
 
+def _seed_level_start_artifacts(root: Path, session_name: str, game_id: str = "ls20") -> None:
+    level_current = root / "runs" / session_name / "agent" / f"game_{game_id}" / "level_current"
+    level_current.mkdir(parents=True, exist_ok=True)
+    (level_current / "meta.json").write_text('{"level": 1}\n', encoding="utf-8")
+    (level_current / "initial_state.hex").write_text("0123\n4567\n", encoding="utf-8")
+
+
 def test_harness_reuses_existing_scorecard_without_closing(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("ARC_API_KEY", "test-key")
     root = tmp_path / "proj"
@@ -73,6 +80,7 @@ def test_harness_reuses_existing_scorecard_without_closing(tmp_path: Path, monke
         env = kwargs.get("env", {})
         arc_state_dir = Path(env.get("ARC_STATE_DIR", root / "runs" / "t-reuse-score" / "supervisor" / "arc"))
         arc_state_dir.mkdir(parents=True, exist_ok=True)
+        _seed_level_start_artifacts(root, "t-reuse-score")
         if isinstance(text_input, str):
             req = json.loads(text_input)
             action = req.get("action")

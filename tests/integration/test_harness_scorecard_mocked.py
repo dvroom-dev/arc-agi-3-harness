@@ -9,6 +9,13 @@ from types import ModuleType, SimpleNamespace
 import harness
 
 
+def _seed_level_start_artifacts(root: Path, session_name: str, game_id: str = "ls20", level: int = 1) -> None:
+    level_current = root / "runs" / session_name / "agent" / f"game_{game_id}" / "level_current"
+    level_current.mkdir(parents=True, exist_ok=True)
+    (level_current / "meta.json").write_text(json.dumps({"level": level}) + "\n", encoding="utf-8")
+    (level_current / "initial_state.hex").write_text("0123\n4567\n", encoding="utf-8")
+
+
 def test_harness_open_and_close_scorecard_mocked(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("ARC_API_KEY", "test-key")
     root = tmp_path / "proj"
@@ -63,6 +70,7 @@ def test_harness_open_and_close_scorecard_mocked(tmp_path: Path, monkeypatch) ->
         env = kwargs.get("env", {})
         arc_state_dir = Path(env.get("ARC_STATE_DIR", root / "runs" / "t-score" / "supervisor" / "arc"))
         arc_state_dir.mkdir(parents=True, exist_ok=True)
+        _seed_level_start_artifacts(root, "t-score")
         if isinstance(text_input, str):
             req = json.loads(text_input)
             action = req.get("action")
@@ -206,6 +214,7 @@ def test_harness_score_after_solve_opens_mid_run_and_uses_start_mode(
         text_input = kwargs.get("input")
         env = kwargs.get("env", {})
         arc_state_dir = Path(env.get("ARC_STATE_DIR", root / "runs" / "t-score-after-solve" / "supervisor" / "arc"))
+        _seed_level_start_artifacts(root, "t-score-after-solve")
         if isinstance(text_input, str):
             req = json.loads(text_input)
             action = req.get("action")
@@ -250,6 +259,7 @@ def test_harness_score_after_solve_opens_mid_run_and_uses_start_mode(
             new_calls.append(list(args_list))
             arc_state_dir = Path((kwargs.get("env") or {}).get("ARC_STATE_DIR"))
             # Make each phase immediately appear solved.
+            _seed_level_start_artifacts(root, "t-score-after-solve", level=8)
             _write_state(arc_state_dir, state="WIN", current_level=8, levels_completed=7)
         return "assistant"
 

@@ -53,11 +53,6 @@ def level_start_prompt_images_impl(runtime, state: dict | None) -> list[Path]:
         return []
     if level in runtime.prompt_image_attached_levels:
         return []
-    try:
-        image_path = ensure_level_start_prompt_image_impl(runtime, level=level)
-    except RuntimeError as exc:
-        if hasattr(runtime, "log"):
-            runtime.log(f"[harness] prompt image unavailable for level {level}: {exc}")
-        return []
+    image_path = ensure_level_start_prompt_image_impl(runtime, level=level)
     runtime.prompt_image_attached_levels.add(level)
     return [image_path]

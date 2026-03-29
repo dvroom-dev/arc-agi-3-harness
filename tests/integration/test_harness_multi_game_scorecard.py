@@ -22,6 +22,13 @@ def _seed_project(root: Path) -> None:
     (root / "prompts" / "new_game_auto_explore.py").write_text("print('x')\n")
 
 
+def _seed_level_start_artifacts(root: Path, session_name: str, game_id: str, level: int = 1) -> None:
+    level_current = root / "runs" / session_name / "agent" / f"game_{game_id}" / "level_current"
+    level_current.mkdir(parents=True, exist_ok=True)
+    (level_current / "meta.json").write_text(json.dumps({"level": level}) + "\n", encoding="utf-8")
+    (level_current / "initial_state.hex").write_text("0123\n4567\n", encoding="utf-8")
+
+
 def test_harness_runs_multiple_games_under_one_shared_scorecard(
     tmp_path: Path,
     monkeypatch,
@@ -99,6 +106,8 @@ def test_harness_runs_multiple_games_under_one_shared_scorecard(
             req = json.loads(text_input)
             action = req.get("action")
             req_game = str(req.get("game_id", "") or "").strip()
+            session_name = str(env.get("ARC_REPL_SESSION_KEY", "")).split("__", 1)[0] or arc_state_dir.parents[1].name
+            _seed_level_start_artifacts(root, session_name, req_game or "ls20")
             if action == "status":
                 observed_status_requests.append(req_game)
                 payload = {
@@ -224,6 +233,8 @@ def test_harness_multi_game_reused_scorecard_validates_per_game(
             req = json.loads(text_input)
             action = req.get("action")
             req_game = str(req.get("game_id", "") or "").strip()
+            session_name = str(env.get("ARC_REPL_SESSION_KEY", "")).split("__", 1)[0] or arc_state_dir.parents[1].name
+            _seed_level_start_artifacts(root, session_name, req_game or "ls20")
             payload = {
                 "ok": True,
                 "game_id": f"{req_game}-gamehash",

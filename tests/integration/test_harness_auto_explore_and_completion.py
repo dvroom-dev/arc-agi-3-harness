@@ -23,6 +23,13 @@ def _seed_project(root: Path) -> None:
     (root / "prompts" / "new_game_auto_explore.py").write_text("print('x')\n")
 
 
+def _seed_level_start_artifacts(root: Path, session_name: str, game_id: str = "ls20", level: int = 1) -> None:
+    level_current = root / "runs" / session_name / "agent" / f"game_{game_id}" / "level_current"
+    level_current.mkdir(parents=True, exist_ok=True)
+    (level_current / "meta.json").write_text(json.dumps({"level": level}) + "\n", encoding="utf-8")
+    (level_current / "initial_state.hex").write_text("0123\n4567\n", encoding="utf-8")
+
+
 def test_harness_runs_auto_explore_once(tmp_path: Path, monkeypatch) -> None:
     root = tmp_path / "proj"
     _seed_project(root)
@@ -53,6 +60,7 @@ def test_harness_runs_auto_explore_once(tmp_path: Path, monkeypatch) -> None:
         env = kwargs.get("env", {})
         arc_state_dir = Path(env.get("ARC_STATE_DIR", root / "runs" / "t-auto" / "supervisor" / "arc"))
         arc_state_dir.mkdir(parents=True, exist_ok=True)
+        _seed_level_start_artifacts(root, "t-auto")
         if isinstance(text_input, str):
             req = json.loads(text_input)
             action = req.get("action")
@@ -174,6 +182,7 @@ def test_harness_records_level_completion(tmp_path: Path, monkeypatch) -> None:
                 completed = 0 if counters["status"] == 1 else 1
             else:
                 completed = 1
+            _seed_level_start_artifacts(root, "t-complete", level=completed + 1)
             state = {
                 "game_id": "ls20-cb3b57cc",
                 "state": "NOT_FINISHED",
@@ -210,6 +219,7 @@ def test_harness_records_level_completion(tmp_path: Path, monkeypatch) -> None:
             return "assistant"
         arc_state_dir = root / "runs" / "t-complete" / "supervisor" / "arc"
         arc_state_dir.mkdir(parents=True, exist_ok=True)
+        _seed_level_start_artifacts(root, "t-complete", level=2)
         (arc_state_dir / "state.json").write_text(
             json.dumps(
                 {

@@ -393,7 +393,15 @@ def _run_single_game(deps, args, *, operation_mode_name: str, arc_base_url: str,
         raise
     finally:
         try:
-            runtime.recover_session_file_from_workspace(reason="run-finalize", force=True)
+            has_super_state = (runtime.run_dir / "super" / "state.json").exists()
+            has_workspace_conversation = bool(runtime.discover_workspace_conversation_id())
+            if has_super_state or runtime.session_file.exists() or has_workspace_conversation:
+                runtime.recover_session_file_from_workspace(reason="run-finalize", force=True)
+            else:
+                runtime.log(
+                    "[harness] skipping run-finalize session recovery: no super state, session.md, "
+                    "or workspace conversation exists"
+                )
         except Exception as exc:
             runtime.log(f"[harness] WARNING: failed to recover session artifacts during finalization: {exc}")
         runtime.close_scorecard_if_needed()

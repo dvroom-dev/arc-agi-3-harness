@@ -16,6 +16,13 @@ def _write_session_file(path: Path, conversation_id: str = "conv-1") -> None:
     )
 
 
+def _seed_level_start_artifacts(root: Path, session_name: str, game_id: str = "ls20") -> None:
+    level_current = root / "runs" / session_name / "agent" / f"game_{game_id}" / "level_current"
+    level_current.mkdir(parents=True, exist_ok=True)
+    (level_current / "meta.json").write_text('{"level": 1}\n', encoding="utf-8")
+    (level_current / "initial_state.hex").write_text("0123\n4567\n", encoding="utf-8")
+
+
 def test_harness_main_handles_game_over_then_reset(tmp_path: Path, monkeypatch) -> None:
     root = tmp_path / "proj"
     (root / "tools").mkdir(parents=True)
@@ -53,6 +60,7 @@ def test_harness_main_handles_game_over_then_reset(tmp_path: Path, monkeypatch) 
         seen_repl_session_keys.append(str(env.get("ARC_REPL_SESSION_KEY", "")))
         arc_state_dir = Path(env.get("ARC_STATE_DIR", root / "runs" / "t-loop" / "supervisor" / "arc"))
         arc_state_dir.mkdir(parents=True, exist_ok=True)
+        _seed_level_start_artifacts(root, "t-loop")
         history_file = arc_state_dir / "tool-engine-history.json"
         turn = 0
         if history_file.exists():
@@ -170,6 +178,7 @@ def test_harness_main_recovers_from_game_over_when_auto_reset_limit_is_zero(
         env = kwargs.get("env", {})
         arc_state_dir = Path(env.get("ARC_STATE_DIR", root / "runs" / "t-loop-no-reset" / "supervisor" / "arc"))
         arc_state_dir.mkdir(parents=True, exist_ok=True)
+        _seed_level_start_artifacts(root, "t-loop-no-reset")
         history_file = arc_state_dir / "tool-engine-history.json"
         turn = 0
         if history_file.exists():

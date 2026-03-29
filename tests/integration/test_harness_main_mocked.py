@@ -414,6 +414,10 @@ def test_harness_fails_loudly_on_noop_provider_cycle(
         arc_state_dir = root / "runs" / "t-noop" / "supervisor" / "arc"
         arc_state_dir.mkdir(parents=True, exist_ok=True)
         (arc_state_dir / "tool-engine-history.json").write_text(json.dumps({"turn": 1, "events": []}))
+        level_current_dir = root / "runs" / "t-noop" / "agent" / "game_ls20" / "level_current"
+        level_current_dir.mkdir(parents=True, exist_ok=True)
+        (level_current_dir / "meta.json").write_text('{"level": 1}\n', encoding="utf-8")
+        (level_current_dir / "initial_state.hex").write_text("0123\n4567\n", encoding="utf-8")
         if isinstance(text_input, str):
             req = json.loads(text_input)
             action = req.get("action")
