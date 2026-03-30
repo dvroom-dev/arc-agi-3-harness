@@ -103,3 +103,39 @@ def summarize_instance_state(state_dir: Path) -> dict:
         "history_count": len(history) if isinstance(history, list) else 0,
         "action_count": len(action_history) if isinstance(action_history, list) else 0,
     }
+
+
+def sync_solver_artifacts_to_model_workspace(meta: dict, solver_dir: Path) -> list[str]:
+    model_workspace = Path(str(meta["model_workspace_dir"]))
+    model_workspace.mkdir(parents=True, exist_ok=True)
+    synced: list[str] = []
+    for child in solver_dir.iterdir():
+        name = child.name
+        should_sync = (
+            name == "level_current"
+            or name == "analysis_level"
+            or name.startswith("level_")
+            or name in {
+                "current_compare.json",
+                "current_compare.md",
+                "component_coverage.json",
+                "component_coverage.md",
+                "analysis_state.json",
+                ".analysis_level_pin.json",
+                "model_status.json",
+            }
+        )
+        if not should_sync:
+            continue
+        destination = model_workspace / name
+        if destination.exists() or destination.is_symlink():
+            if destination.is_dir() and not destination.is_symlink():
+                shutil.rmtree(destination, ignore_errors=True)
+            else:
+                destination.unlink(missing_ok=True)
+        if child.is_dir():
+            shutil.copytree(child, destination)
+        else:
+            shutil.copy2(child, destination)
+        synced.append(str(destination))
+    return synced
