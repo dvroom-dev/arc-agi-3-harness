@@ -41,7 +41,7 @@ modeler:
   session_scope: run
   resume_policy: always
   reasoning_effort: low
-  turn_timeout_ms: 60000
+  turn_timeout_ms: 900000
   provider: {{MODELER_PROVIDER}}
   model: {{MODELER_MODEL}}
   triggers:
@@ -55,11 +55,11 @@ modeler:
     continue_message_template_file: {{PROMPTS_ROOT}}/modeler_continue.md
 bootstrapper:
   prompt_file: {{PROMPTS_ROOT}}/bootstrapper.md
-  working_directory: {{MODEL_WORKSPACE_REL}}
+  working_directory: .
   session_scope: run
   resume_policy: always
   reasoning_effort: low
-  turn_timeout_ms: 60000
+  turn_timeout_ms: 900000
   provider: {{BOOTSTRAPPER_PROVIDER}}
   model: {{BOOTSTRAPPER_MODEL}}
   output_schema: bootstrap_attestation_v1
