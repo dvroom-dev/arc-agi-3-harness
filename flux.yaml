@@ -40,6 +40,8 @@ modeler:
   working_directory: {{MODEL_WORKSPACE_REL}}
   session_scope: run
   resume_policy: always
+  reasoning_effort: low
+  turn_timeout_ms: 60000
   provider: {{MODELER_PROVIDER}}
   model: {{MODELER_MODEL}}
   triggers:
@@ -56,6 +58,8 @@ bootstrapper:
   working_directory: {{MODEL_WORKSPACE_REL}}
   session_scope: run
   resume_policy: always
+  reasoning_effort: low
+  turn_timeout_ms: 60000
   provider: {{BOOTSTRAPPER_PROVIDER}}
   model: {{BOOTSTRAPPER_MODEL}}
   output_schema: bootstrap_attestation_v1

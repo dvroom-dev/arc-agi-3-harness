@@ -5,18 +5,9 @@ import json
 import re
 import shutil
 from pathlib import Path
+from harness_config_templates import arc_action_tool_script, json_cli_wrapper, python_tool_wrapper
 
-def _json_cli_wrapper(tool_name: str) -> str:
-    return f"""#!/usr/bin/env bash
-set -euo pipefail
-printf '{{"ok":true,"tool":"{tool_name}","argv":'
-python3 - <<'PY' "$@"
-import json
-import sys
-print(json.dumps(sys.argv[1:]))
-PY
-printf '}}\\n'
-"""
+
 def parse_args_impl() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="ARC-AGI-3 supervisor harness")
     parser.add_argument("--game-id", default="ls20", help="Game ID to load")
@@ -370,6 +361,14 @@ def setup_run_config_dir_impl(
         dst = tools_dir / filename
         shutil.copyfile(src, dst)
 
+    arc_action_src = project_root / "tools" / "arc_action.py"
+    arc_action_dst = tools_dir / "arc_action.py"
+    if arc_action_src.exists():
+        shutil.copyfile(arc_action_src, arc_action_dst)
+    else:
+        arc_action_dst.write_text(arc_action_tool_script())
+        arc_action_dst.chmod(0o755)
+
     for filename in optional_tools:
         src = project_root / "tools" / filename
         if not src.exists():
@@ -386,37 +385,26 @@ def setup_run_config_dir_impl(
     shutil.copytree(runtime_src, runtime_dst)
 
     py = str(project_venv_python)
-    arc_repl_wrapper = f"""#!/usr/bin/env bash
-set -euo pipefail
-SCRIPT_DIR=\"$(cd \"$(dirname \"${{BASH_SOURCE[0]}}\")\" && pwd)\"
-CONFIG_DIR=\"$(cd \"${{SCRIPT_DIR}}/..\" && pwd)\"
-exec \"{py}\" \"${{CONFIG_DIR}}/tools/arc_repl_cli.py\" \"$@\"
-"""
-    arc_repl_path = bin_dir / "arc_repl"
-    arc_repl_path.write_text(arc_repl_wrapper)
-    arc_repl_path.chmod(0o755)
+    for command_name, tool_filename in (
+        ("arc_repl", "arc_repl_cli.py"),
+        ("arc_level", "arc_level.py"),
+        ("arc_action", "arc_action.py"),
+    ):
+        wrapper_path = bin_dir / command_name
+        wrapper_path.write_text(python_tool_wrapper(py, tool_filename))
+        wrapper_path.chmod(0o755)
 
-    arc_level_wrapper = f"""#!/usr/bin/env bash
-set -euo pipefail
-SCRIPT_DIR=\"$(cd \"$(dirname \"${{BASH_SOURCE[0]}}\")\" && pwd)\"
-CONFIG_DIR=\"$(cd \"${{SCRIPT_DIR}}/..\" && pwd)\"
-exec \"{py}\" \"${{CONFIG_DIR}}/tools/arc_level.py\" \"$@\"
-"""
-    arc_level_path = bin_dir / "arc_level"
-    arc_level_path.write_text(arc_level_wrapper)
-    arc_level_path.chmod(0o755)
-
-    switch_mode_wrapper = _json_cli_wrapper("switch_mode")
+    switch_mode_wrapper = json_cli_wrapper("switch_mode")
     switch_mode_path = bin_dir / "switch_mode"
     switch_mode_path.write_text(switch_mode_wrapper)
     switch_mode_path.chmod(0o755)
 
-    check_supervisor_wrapper = _json_cli_wrapper("check_supervisor")
+    check_supervisor_wrapper = json_cli_wrapper("check_supervisor")
     check_supervisor_path = bin_dir / "check_supervisor"
     check_supervisor_path.write_text(check_supervisor_wrapper)
     check_supervisor_path.chmod(0o755)
 
-    report_process_result_wrapper = _json_cli_wrapper("report_process_result")
+    report_process_result_wrapper = json_cli_wrapper("report_process_result")
     report_process_result_path = bin_dir / "report_process_result"
     report_process_result_path.write_text(report_process_result_wrapper)
     report_process_result_path.chmod(0o755)

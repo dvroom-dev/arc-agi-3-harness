@@ -91,17 +91,21 @@ def summarize_instance_state(state_dir: Path) -> dict:
     state = json.loads(state_path.read_text()) if state_path.exists() else {}
     history = json.loads(history_path.read_text()) if history_path.exists() else []
     action_history = json.loads(action_history_path.read_text()) if action_history_path.exists() else []
+    history_events = history.get("events", []) if isinstance(history, dict) else history
+    action_count = len(action_history) if isinstance(action_history, list) else 0
+    if action_count == 0 and isinstance(state, dict):
+        action_count = int(state.get("current_attempt_steps", 0) or state.get("total_steps", 0) or 0)
     return {
         "summary": (
             f"state={state.get('state', '?')} "
             f"level={state.get('current_level', '?')} "
             f"completed={state.get('levels_completed', '?')} "
-            f"history_events={len(history) if isinstance(history, list) else 0} "
-            f"actions={len(action_history) if isinstance(action_history, list) else 0}"
+            f"history_events={len(history_events) if isinstance(history_events, list) else 0} "
+            f"actions={action_count}"
         ),
         "state": state if isinstance(state, dict) else {},
-        "history_count": len(history) if isinstance(history, list) else 0,
-        "action_count": len(action_history) if isinstance(action_history, list) else 0,
+        "history_count": len(history_events) if isinstance(history_events, list) else 0,
+        "action_count": action_count,
     }
 
 

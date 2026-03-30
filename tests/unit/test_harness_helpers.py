@@ -265,9 +265,9 @@ def test_setup_run_config_dir_creates_wrappers(tmp_path: Path, monkeypatch: pyte
     assert (bin_dir / "arc_level").exists()
     assert (tools_dir / "arc_repl.py").exists()
     assert (tools_dir / "arc_level.py").exists()
+    assert (tools_dir / "arc_action.py").exists()
     assert (tools_dir / "arc_repl_session_restore.py").exists()
     assert (tools_dir / "arc_model_runtime" / "__init__.py").exists()
-    assert not (tools_dir / "arc_action.py").exists()
     assert (run_config / "prompts" / "new_game_auto_explore.py").exists()
 
 

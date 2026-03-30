@@ -9,6 +9,7 @@ Rules:
 - Use relative paths and commands from the current workspace; do not rely on absolute repo or home-directory paths.
 - Treat the current workspace as disposable: it belongs only to this solver attempt.
 - `arc_repl` supports `status`, `reset_level`, `exec`, `exec_file`, and `shutdown`.
+- `arc_action ACTION1` is the shortest path for a one-step real-game probe.
 - `arc_level --json` is the quickest read path for current level/state metadata.
 - After at most one or two read-only inspections, run a bounded real-game probe with `arc_repl exec`.
 - Prefer action-linked evidence over pure visual speculation when identifying the controllable actor.
@@ -21,7 +22,7 @@ Rules:
 
 First-turn default plan:
 1. Run `arc_level --json`.
-2. Immediately run a one-action `ACTION1` probe with `arc_repl exec`.
+2. Immediately run a one-action `ACTION1` probe with `arc_action ACTION1`.
 3. Read the resulting diff/artifacts.
 4. Stop. Do not keep exploring indefinitely in the same turn.
 
