@@ -28,6 +28,7 @@ def main() -> None:
     env = build_instance_env(meta, state_dir, conversation_id=raw_instance_id)
     status = run_arc_repl_status(meta, env, solver_dir)
     summary = summarize_instance_state(state_dir)
+    available_actions = status.get("available_actions", [])
     write_json_stdout(
         {
             "instance_id": raw_instance_id,
@@ -35,7 +36,11 @@ def main() -> None:
             "prompt_text": (
                 f"Game: {meta['game_id']}\n"
                 f"Initial status: {summary['summary']}\n"
-                f"arc_repl_status: {status}"
+                f"Current level: {status.get('current_level')}\n"
+                f"Levels completed: {status.get('levels_completed')}\n"
+                f"Available actions: {available_actions}\n"
+                "Use only the current workspace and run-local commands already on PATH.\n"
+                "Do not construct or chase absolute filesystem paths."
             ),
             "env": env,
             "metadata": {
