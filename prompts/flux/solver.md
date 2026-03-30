@@ -14,7 +14,16 @@ Rules:
 - Prefer action-linked evidence over pure visual speculation when identifying the controllable actor.
 - Inside `arc_repl exec`, the reliable read path is `frame = env.get_frame(); grid = frame.grid`.
 - Do not assume `env.grid` exists.
-- Start with a real action probe early. Do not spend the whole turn on inspection.
+- Before this turn ends, you must execute at least one real action probe with `env.step(...)`.
+- Do not spend the whole turn on inspection. One quick read pass is enough before probing.
+- The best default first probe is a single bounded action such as `ACTION1`, then inspect the resulting diff/artifacts.
+- If a probe succeeds, stop and let later turns build from that evidence instead of chaining many speculative reads.
+
+First-turn default plan:
+1. Run `arc_level --json`.
+2. Immediately run a one-action `ACTION1` probe with `arc_repl exec`.
+3. Read the resulting diff/artifacts.
+4. Stop. Do not keep exploring indefinitely in the same turn.
 
 Example one-action probe:
 

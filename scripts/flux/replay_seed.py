@@ -57,7 +57,11 @@ def main() -> None:
         elif tool == "read_file":
             results.append(_read_file(working_directory, str(args.get("path", ""))))
     state_dir = Path(str(instance.get("metadata", {}).get("state_dir", "")))
-    synced = sync_solver_artifacts_to_model_workspace(meta, working_directory) if working_directory.exists() else []
+    synced = (
+        sync_solver_artifacts_to_model_workspace(meta, working_directory, state_dir=state_dir)
+        if working_directory.exists()
+        else []
+    )
     evidence = [summarize_instance_state(state_dir)] if state_dir.exists() else []
     if evidence:
         evidence[0]["synced_artifacts"] = synced

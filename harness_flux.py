@@ -4,6 +4,7 @@ import json
 import signal
 import subprocess
 import sys
+import shutil
 from pathlib import Path
 
 import harness as deps
@@ -35,7 +36,7 @@ def _write_flux_runtime_meta(runtime: HarnessRuntime, arc_base_url: str) -> Path
         "run_tools_dir": str(runtime.run_tools_dir),
         "python_executable": str(deps.PROJECT_VENV_PYTHON),
         "run_arc_repl_tool": str(runtime.run_arc_repl_tool),
-        "solver_template_dir": str(runtime.active_agent_dir()),
+        "solver_template_dir": str((runtime.run_dir / "flux_seed" / "agent" / Path(runtime.active_agent_dir()).name)),
         "model_workspace_dir": str(runtime.active_agent_dir()),
         "arc_env_dir": str(runtime.arc_env_dir),
         "arc_prompt_game_id": runtime.prompt_game_id,
@@ -47,6 +48,16 @@ def _write_flux_runtime_meta(runtime: HarnessRuntime, arc_base_url: str) -> Path
     }
     meta_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return meta_path
+
+
+def _snapshot_clean_solver_seed(runtime: HarnessRuntime) -> Path:
+    source = runtime.active_agent_dir()
+    destination = runtime.run_dir / "flux_seed" / "agent" / source.name
+    if destination.exists():
+        shutil.rmtree(destination, ignore_errors=True)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, destination)
+    return destination
 
 
 def _write_initial_seed_bundle(run_dir: Path) -> Path:
@@ -138,6 +149,7 @@ def main() -> None:
     )
     runtime.log(f"[flux] run dir: {runtime.run_dir}")
     runtime.log(f"[flux] durable model workspace: {runtime.active_agent_dir()}")
+    _snapshot_clean_solver_seed(runtime)
     _result, _stdout, init_rc = runtime.run_arc_repl({"action": "status", "game_id": args.game_id})
     if init_rc != 0:
         raise RuntimeError("failed to initialize ARC state for flux launcher")
