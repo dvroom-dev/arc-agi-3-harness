@@ -24,3 +24,4 @@ def test_render_flux_config_includes_durable_workspace() -> None:
     text = _render_flux_config(runtime)
     assert "working_directory: agent/game_ls20" in text
     assert "output_schema: model_update_v1" in text
+    assert "check_model.py" in text

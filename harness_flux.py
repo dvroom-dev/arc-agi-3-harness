@@ -70,92 +70,31 @@ def _write_initial_seed_bundle(run_dir: Path) -> Path:
 
 
 def _render_flux_config(runtime: HarnessRuntime) -> str:
+    template = (PROJECT_ROOT / "flux.yaml").read_text(encoding="utf-8")
     prompts_root = PROJECT_ROOT / "prompts" / "flux"
     scripts_root = PROJECT_ROOT / "scripts" / "flux"
     model_workspace_rel = _safe_relpath(runtime.run_dir, runtime.active_agent_dir())
-    seed_bundle_rel = "flux/seed/current.json"
     provider_name = str(getattr(runtime.args, "provider", None) or "claude").strip() or "claude"
     solver_model = "mock-model" if provider_name == "mock" else "claude-opus-4-6"
     modeler_provider = provider_name
     modeler_model = "mock-model" if provider_name == "mock" else "claude-opus-4-6"
     bootstrapper_provider = provider_name if provider_name == "mock" else "codex"
     bootstrapper_model = "mock-model" if bootstrapper_provider == "mock" else "gpt-5.4"
-    return f"""schema_version: 1
-runtime_defaults:
-  provider: {provider_name}
-  model: {solver_model}
-  reasoning_effort: medium
-  sandbox_mode: workspace-write
-  approval_policy: never
-  env: {{}}
-storage:
-  flux_root: flux
-  ai_root: .ai-flux
-orchestrator:
-  tick_ms: 1000
-  solver_preempt_grace_ms: 15000
-  evidence_poll_ms: 5000
-  modeler_idle_backoff_ms: 10000
-  bootstrapper_idle_backoff_ms: 10000
-problem:
-  provision_instance:
-    command: ["python3", "{scripts_root / "provision_instance.py"}"]
-  destroy_instance:
-    command: ["python3", "{scripts_root / "destroy_instance.py"}"]
-  observe_evidence:
-    command: ["python3", "{scripts_root / "observe_evidence.py"}"]
-  replay_seed:
-    command: ["python3", "{scripts_root / "replay_seed.py"}"]
-  merge_evidence:
-    strategy: dedupe_by_fingerprint
-solver:
-  prompt_file: {prompts_root / "solver.md"}
-  session_scope: per_attempt
-  resume_policy: never
-  cadence_ms: 30000
-  queue_replacement_grace_ms: 15000
-  tools:
-    builtin: [shell, read_file, write_file, list_dir, apply_patch]
-modeler:
-  prompt_file: {prompts_root / "modeler.md"}
-  working_directory: {model_workspace_rel}
-  session_scope: run
-  resume_policy: always
-  provider: {modeler_provider}
-  model: {modeler_model}
-  triggers:
-    on_new_evidence: true
-    on_solver_stopped: true
-    periodic_ms: 60000
-  output_schema: model_update_v1
-  acceptance:
-    command: ["python3", "{scripts_root / "check_model.py"}"]
-    parse_as: json
-    continue_message_template_file: {prompts_root / "modeler_continue.md"}
-bootstrapper:
-  prompt_file: {prompts_root / "bootstrapper.md"}
-  working_directory: {model_workspace_rel}
-  session_scope: run
-  resume_policy: always
-  provider: {bootstrapper_provider}
-  model: {bootstrapper_model}
-  output_schema: bootstrap_attestation_v1
-  seed_bundle_path: {seed_bundle_rel}
-  replay:
-    max_attempts_per_event: 5
-    continue_message_template_file: {prompts_root / "bootstrapper_continue.md"}
-observability:
-  capture_prompts: true
-  capture_raw_provider_events: true
-  capture_tool_calls: true
-  capture_tool_results: true
-  capture_queue_snapshots: true
-  capture_timing_metrics: true
-retention:
-  keep_all_events: true
-  keep_all_sessions: true
-  keep_all_attempts: true
-"""
+    replacements = {
+        "{{RUNTIME_PROVIDER}}": provider_name,
+        "{{RUNTIME_MODEL}}": solver_model,
+        "{{PROMPTS_ROOT}}": str(prompts_root),
+        "{{SCRIPTS_ROOT}}": str(scripts_root),
+        "{{MODEL_WORKSPACE_REL}}": model_workspace_rel,
+        "{{MODELER_PROVIDER}}": modeler_provider,
+        "{{MODELER_MODEL}}": modeler_model,
+        "{{BOOTSTRAPPER_PROVIDER}}": bootstrapper_provider,
+        "{{BOOTSTRAPPER_MODEL}}": bootstrapper_model,
+    }
+    rendered = template
+    for needle, value in replacements.items():
+        rendered = rendered.replace(needle, value)
+    return rendered
 
 
 def _launch_flux(runtime: HarnessRuntime, config_path: Path) -> int:
