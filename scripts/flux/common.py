@@ -205,6 +205,8 @@ def _ensure_sequence_surface(meta: dict, model_workspace: Path) -> None:
         return
     game_id = str(turn_meta.get("game_id", meta.get("game_id", "")) or "")
     action_name = str(turn_meta.get("action_label", "") or "").upper()
+    if action_name.startswith("EXEC("):
+        action_name = "ACTION1"
     levels_completed_before = int(turn_meta.get("levels_completed_before", 0) or 0)
     levels_completed_after = int(turn_meta.get("levels_completed_after", 0) or 0)
     level_complete_after = bool(turn_meta.get("level_complete_after", False))
