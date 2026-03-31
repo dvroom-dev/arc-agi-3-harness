@@ -80,6 +80,23 @@ function normalizeSessionSummary(payload: JsonRecord | null, sessionType: FluxSe
   };
 }
 
+async function readActiveSessionRecords(runRoot: string, state: JsonRecord | null): Promise<Partial<Record<FluxSessionType, JsonRecord | null>>> {
+  const activeRaw = (state?.active as JsonRecord | undefined) ?? {};
+  const records: Partial<Record<FluxSessionType, JsonRecord | null>> = {};
+  for (const sessionType of SESSION_TYPES) {
+    const payload = (activeRaw[sessionType] as JsonRecord | undefined) ?? {};
+    const sessionId = typeof payload.sessionId === "string" ? String(payload.sessionId) : null;
+    if (!sessionId) {
+      records[sessionType] = null;
+      continue;
+    }
+    records[sessionType] = await readJson<JsonRecord>(
+      path.join(runRoot, ".ai-flux", "sessions", sessionType, sessionId, "session.json"),
+    );
+  }
+  return records;
+}
+
 async function listSessionSummaries(baseDir: string, sessionType: FluxSessionType): Promise<FluxSessionSummary[]> {
   const sessionRoot = path.join(baseDir, ".ai-flux", "sessions", sessionType);
   const entries = await fs.readdir(sessionRoot, { withFileTypes: true }).catch(() => []);
@@ -199,7 +216,13 @@ async function readFrameSnapshots(gameDir: string): Promise<{ frames: FluxFrameS
   return { frames, actions, currentLevel };
 }
 
-function toRunSummary(runId: string, state: JsonRecord | null, runtimeMeta: JsonRecord | null): FluxRunSummary {
+function toRunSummary(
+  runId: string,
+  state: JsonRecord | null,
+  runtimeMeta: JsonRecord | null,
+  activeSessionRecords: Partial<Record<FluxSessionType, JsonRecord | null>> = {},
+  latestSessionSummaries: Partial<Record<FluxSessionType, FluxSessionSummary[]>> = {},
+): FluxRunSummary {
   const activeRaw = (state?.active as JsonRecord | undefined) ?? {};
   const status = typeof state?.status === "string" ? String(state.status) : "missing";
   const pid = typeof state?.pid === "number" ? Number(state.pid) : null;
@@ -207,9 +230,20 @@ function toRunSummary(runId: string, state: JsonRecord | null, runtimeMeta: Json
   const active = Object.fromEntries(
     SESSION_TYPES.map((sessionType) => {
       const payload = (activeRaw[sessionType] as JsonRecord | undefined) ?? {};
+      const sessionRecord = activeSessionRecords[sessionType] ?? null;
+      const sessionStatus = typeof sessionRecord?.status === "string"
+        ? String(sessionRecord.status)
+        : (typeof payload.status === "string" ? String(payload.status) : "unknown");
+      const latestRunningSession = (latestSessionSummaries[sessionType] ?? []).find((session) => session.status === "running") ?? null;
+      const resolvedSessionId = latestRunningSession && sessionStatus !== "running"
+        ? latestRunningSession.sessionId
+        : (typeof payload.sessionId === "string" ? String(payload.sessionId) : null);
+      const resolvedStatus = latestRunningSession && sessionStatus !== "running"
+        ? latestRunningSession.status
+        : sessionStatus;
       return [sessionType, {
-        status: isLive ? (typeof payload.status === "string" ? String(payload.status) : "unknown") : "idle",
-        sessionId: typeof payload.sessionId === "string" ? String(payload.sessionId) : null,
+        status: isLive ? resolvedStatus : "idle",
+        sessionId: resolvedSessionId,
       }];
     }),
   ) as FluxRunSummary["active"];
@@ -231,7 +265,11 @@ export async function listFluxRuns(): Promise<FluxRunSummary[]> {
     const fluxState = await readJson<JsonRecord>(path.join(root, "flux", "state.json"));
     if (!fluxState) return null;
     const runtimeMeta = await readJson<JsonRecord>(path.join(root, "flux_runtime.json"));
-    return toRunSummary(entry.name, fluxState, runtimeMeta);
+    const activeSessionRecords = await readActiveSessionRecords(root, fluxState);
+    const latestSessionSummaries = Object.fromEntries(await Promise.all(
+      SESSION_TYPES.map(async (sessionType) => [sessionType, await listSessionSummaries(root, sessionType)]),
+    )) as Partial<Record<FluxSessionType, FluxSessionSummary[]>>;
+    return toRunSummary(entry.name, fluxState, runtimeMeta, activeSessionRecords, latestSessionSummaries);
   }));
   return runs.filter(Boolean).sort((left, right) => (right?.updatedAt || "").localeCompare(left?.updatedAt || "")) as FluxRunSummary[];
 }
@@ -241,7 +279,11 @@ export async function readFluxRunDetail(runId: string): Promise<FluxRunDetail | 
   const state = await readJson<JsonRecord>(path.join(root, "flux", "state.json"));
   if (!state) return null;
   const runtimeMeta = await readJson<JsonRecord>(path.join(root, "flux_runtime.json"));
-  const summary = toRunSummary(runId, state, runtimeMeta);
+  const activeSessionRecords = await readActiveSessionRecords(root, state);
+  const sessionHistory = Object.fromEntries(await Promise.all(SESSION_TYPES.map(async (sessionType) => {
+    return [sessionType, await listSessionSummaries(root, sessionType)];
+  }))) as FluxRunDetail["sessionHistory"];
+  const summary = toRunSummary(runId, state, runtimeMeta, activeSessionRecords, sessionHistory);
   const currentState = await readJson<JsonRecord>(path.join(root, "supervisor", "arc", "state.json"));
   const queues = Object.fromEntries(await Promise.all(SESSION_TYPES.map(async (sessionType) => {
     const queue = await readJson<{ items?: unknown[] }>(path.join(root, "flux", "queues", `${sessionType}.json`));
@@ -249,9 +291,6 @@ export async function readFluxRunDetail(runId: string): Promise<FluxRunDetail | 
   }))) as FluxRunDetail["queues"];
   const { gameDir, attemptId } = await pickGameDirForRun(runId, state);
   const timeline = gameDir ? await readFrameSnapshots(gameDir) : { frames: [], actions: [], currentLevel: null };
-  const sessionHistory = Object.fromEntries(await Promise.all(SESSION_TYPES.map(async (sessionType) => {
-    return [sessionType, await listSessionSummaries(root, sessionType)];
-  }))) as FluxRunDetail["sessionHistory"];
   return {
     ...summary,
     queues,
