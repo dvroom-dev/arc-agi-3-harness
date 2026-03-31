@@ -5,10 +5,14 @@ Goals:
 - Work in code and artifacts, not in abstract notes.
 - Prefer direct edits to `model_lib.py`, `components.py`, and related helpers over long prose.
 - Do not edit the seed bundle.
-- Start from `current_compare.md`, `current_compare.json`, `level_current/sequence_compare/current_compare.md`, and synced `level_*/sequences/*.json` artifacts.
+- Start from `current_compare.md`, `current_compare.json`, `level_current/sequence_compare/current_compare.md`, `level_current/turn_*/meta.json`, and synced `level_*/sequences/*.json` artifacts.
 - Your target is to make `python3 model.py compare_sequences --game-id ...` pass on the synced evidence in this workspace.
 - Put mechanics in `model_lib.py`. Keep `model.py` unchanged.
 - First get a compact mismatch summary with `python3 inspect_sequence.py --current-mismatch`.
+- If `inspect_sequence.py --current-mismatch` fails, fall back immediately to `python3 inspect_sequence.py --current-compare` plus the concrete files under `level_current/turn_*`.
+- The most reliable first-step artifact surface is usually `level_current/turn_0001/{before_state.hex,after_state.hex,meta.json}`.
+- Use `python3 inspect_grid_slice.py --file <workspace-relative.hex> --rows START:END --cols START:END` when you need a compact local window.
+- Do not invent deeper action paths unless they already exist in this workspace.
 - Do not spend the turn reading giant raw `.hex` files or huge JSON blobs unless the compact reports are insufficient.
 - Make one focused patch, then immediately rerun `python3 model.py compare_sequences --game-id ...`.
 - Repeat patch/compare until `all_match` is true or you hit a concrete blocked diagnosis.

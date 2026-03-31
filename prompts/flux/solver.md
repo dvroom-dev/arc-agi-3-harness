@@ -30,7 +30,9 @@ Rules:
 - Before this turn ends, you must execute at least one real action probe with `env.step(...)`.
 - Do not spend the whole turn on inspection. One quick read pass is enough before probing.
 - The best default first probe is a single bounded action such as `ACTION1`, then inspect the resulting diff/artifacts.
-- If a probe succeeds, stop and let later turns build from that evidence instead of chaining many speculative reads.
+- If a probe succeeds and it clearly suggests one grounded follow-up move, take that follow-up instead of stopping immediately.
+- Do not end the turn after a single probe unless you are genuinely blocked on ambiguity and have already written down the exact action-linked evidence you found.
+- Use the remaining turn budget to either solve the level or gather one more tightly justified action-linked observation.
 - Use real-game actions to discover mechanics and validate your theory.
 - Once mechanics are clear, solve the game rather than staying in perpetual exploration.
 
@@ -38,7 +40,7 @@ First-turn default plan:
 1. Run `arc_level --json`.
 2. Immediately run a one-action `ACTION1` probe with `arc_action ACTION1`.
 3. Read the resulting diff/artifacts.
-4. Stop. Do not keep exploring indefinitely in the same turn.
+4. If the probe points to a concrete next move, take it. Otherwise stop with a compact action-linked diagnosis.
 
 Example one-action probe:
 

@@ -176,6 +176,19 @@ def _ensure_sequence_surface(meta: dict, model_workspace: Path) -> None:
     level_dir = model_workspace / f"level_{level_num}"
     if not level_dir.exists():
         shutil.copytree(level_current, level_dir)
+    elif not any(level_dir.iterdir()):
+        for child in level_current.iterdir():
+            destination = level_dir / child.name
+            if destination.exists() or destination.is_symlink():
+                if destination.is_dir() and not destination.is_symlink():
+                    shutil.rmtree(destination, ignore_errors=True)
+                else:
+                    destination.unlink(missing_ok=True)
+            if child.is_dir():
+                shutil.copytree(child, destination)
+            else:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(child, destination)
     turn_meta_candidates: list[tuple[int, Path, dict]] = []
     for candidate in sorted(level_dir.glob("turn_*")):
         turn_meta_path = candidate / "meta.json"
