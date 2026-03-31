@@ -14,6 +14,7 @@ from .visible_compare_surface import (
     overlay_latest_compare_artifacts,
     sync_workspace_compare_surface,
 )
+from .visible_sequence_surface import preserve_local_sequence_surface
 
 from .visible_artifacts import (
     ANALYSIS_LEVEL_STATUS_FILE,
@@ -360,6 +361,11 @@ def sync_workspace_level_view(
     temp = game_dir / ".level_current.tmp"
     _remove_path(temp)
     shutil.copytree(src, temp)
+    preserve_local_sequence_surface(
+        game_dir=game_dir,
+        temp_level_current=temp,
+        visible_level=int(visible_level),
+    )
     sanitize_visible_level_tree(temp, visible_level=int(visible_level))
     overlay_latest_compare_artifacts(
         game_dir=game_dir,
