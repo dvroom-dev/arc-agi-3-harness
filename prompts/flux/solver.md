@@ -27,6 +27,11 @@ Rules:
 - Prefer action-linked evidence over pure visual speculation when identifying the controllable actor.
 - Inside `arc_repl exec`, the reliable read path is `frame = env.get_frame(); grid = frame.grid`.
 - Do not assume `env.grid` exists.
+- Use the available actions list as your action vocabulary and choose actions that explore the most important unresolved feature in the current state.
+- Prefer stateful exploration. If an action changes a feature, continue from that changed state long enough to learn the mechanic instead of resetting immediately.
+- Do not enumerate every action from a fresh reset just to catalog isolated deltas.
+- Resets are for being stuck, recovering from a bad branch, or preserving a visible fuel/turn budget. They are not a default exploration tool.
+- Before resetting, ask whether one more action from the current state is more likely to clarify the mechanic than starting over.
 - Before this turn ends, you must execute at least one real action probe with `env.step(...)`.
 - Do not spend the whole turn on inspection. One quick read pass is enough before probing.
 - The best default first probe is a single bounded action such as `ACTION1`, then inspect the resulting diff/artifacts.
@@ -40,7 +45,9 @@ First-turn default plan:
 1. Run `arc_level --json`.
 2. Immediately run a one-action `ACTION1` probe with `arc_action ACTION1`.
 3. Read the resulting diff/artifacts.
-4. If the probe points to a concrete next move, take it. Otherwise stop with a compact action-linked diagnosis.
+4. If the probe points to a concrete next move, keep going from the changed state.
+5. Reset only if the current branch is clearly less informative than a fresh start or you need to protect a visible budget.
+6. Do not burn the turn on reset-plus-single-action catalogs.
 
 Example one-action probe:
 

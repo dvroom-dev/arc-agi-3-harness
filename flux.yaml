@@ -22,6 +22,8 @@ problem:
     command: ["python3", "{{SCRIPTS_ROOT}}/destroy_instance.py"]
   observe_evidence:
     command: ["python3", "{{SCRIPTS_ROOT}}/observe_evidence.py"]
+  sync_model_workspace:
+    command: ["python3", "{{SCRIPTS_ROOT}}/sync_model_workspace.py"]
   replay_seed:
     command: ["python3", "{{SCRIPTS_ROOT}}/replay_seed.py"]
   merge_evidence:
