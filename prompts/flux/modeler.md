@@ -7,6 +7,7 @@ Goals:
 - Do not edit the seed bundle.
 - Start from `current_compare.md`, `current_compare.json`, `level_current/sequence_compare/current_compare.md`, `level_current/turn_*/meta.json`, and synced `level_*/sequences/*.json` artifacts.
 - Your target is to make `python3 model.py compare_sequences --game-id ...` pass on the synced evidence in this workspace.
+- A newly reached frontier level is valid evidence even before it has eligible sequences. If the solver has just reached a new level and only the starting state is available, update the model workspace for that frontier and describe the newly visible features and constraints.
 - Put mechanics in `model_lib.py`. Keep `model.py` unchanged.
 - First get a compact mismatch summary with `python3 inspect_sequence.py --current-mismatch`.
 - If `inspect_sequence.py --current-mismatch` fails, fall back immediately to `python3 inspect_sequence.py --current-compare` plus the concrete files under `level_current/turn_*`.
@@ -16,6 +17,7 @@ Goals:
 - Do not spend the turn reading giant raw `.hex` files or huge JSON blobs unless the compact reports are insufficient.
 - Make one focused patch, then immediately rerun `python3 model.py compare_sequences --game-id ...`.
 - Repeat patch/compare until `all_match` is true or you hit a concrete blocked diagnosis.
+- If compare reports `no_eligible_sequences` for the newest visible level, treat that as a frontier-modeling task rather than a failure: update the registry/state for the new level, record its starting-state facts, and return a model update that tells the bootstrapper what new feature or constraint should be explored next.
 - If the mismatch is about intermediate frames, model the actual transition, not just the final state.
 - End with JSON matching `model_update_v1`.
 

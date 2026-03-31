@@ -13,6 +13,34 @@ from common import (
 )
 
 
+def _read_frontier_level(model_workspace: Path) -> int:
+    level_meta = model_workspace / "level_current" / "meta.json"
+    try:
+        payload = json.loads(level_meta.read_text()) if level_meta.exists() else {}
+        return int(payload.get("level", 1) or 1)
+    except Exception:
+        return 1
+
+
+def _run_compare(model_workspace: Path, meta: dict, child_env: dict[str, str], frontier_level: int | None = None) -> tuple[int, dict]:
+    command = ["python3", "model.py", "compare_sequences", "--game-id", str(meta["game_id"])]
+    if frontier_level is not None:
+        command.extend(["--level", str(frontier_level)])
+    proc = subprocess.run(
+        command,
+        cwd=str(model_workspace),
+        text=True,
+        capture_output=True,
+        env=child_env,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr or proc.stdout)
+    payload = json.loads(proc.stdout or "{}")
+    if not isinstance(payload, dict):
+        raise RuntimeError("compare_sequences returned non-object JSON")
+    return proc.returncode, payload
+
+
 def main() -> None:
     payload = read_json_stdin()
     model_output = payload.get("modelOutput") if isinstance(payload.get("modelOutput"), dict) else {}
@@ -35,41 +63,63 @@ def main() -> None:
     child_env["ARC_STATE_DIR"] = str(Path(workspace_root) / "supervisor" / "arc")
     child_env["ARC_MODEL_DISABLE_CANONICAL_ARTIFACTS"] = "1"
     child_env["PATH"] = f"{meta['run_bin_dir']}:{child_env.get('PATH', '')}"
-    proc = subprocess.run(
-        ["python3", "model.py", "compare_sequences", "--game-id", str(meta["game_id"])],
-        cwd=str(model_workspace),
-        text=True,
-        capture_output=True,
-        env=child_env,
-    )
-    if proc.returncode != 0:
-        write_json_stdout(
-            {
-                "accepted": False,
-                "message": f"compare_sequences failed: {proc.stderr or proc.stdout}",
-                "model_output": model_output,
-            }
-        )
-        return
+    frontier_level = _read_frontier_level(model_workspace)
     try:
-        compare_payload = json.loads(proc.stdout or "{}")
+        _default_code, compare_payload = _run_compare(model_workspace, meta, child_env, frontier_level=None)
     except Exception as exc:
         write_json_stdout(
             {
                 "accepted": False,
-                "message": f"compare_sequences returned non-JSON output: {exc}",
+                "message": f"compare_sequences failed: {exc}",
                 "model_output": model_output,
             }
         )
         return
-    accepted = bool(compare_payload.get("all_match"))
-    summary = str(compare_payload.get("summary", "") or model_output.get("summary", "")).strip()
+
+    compare_level = int(compare_payload.get("level", 1) or 1)
+    frontier_compare_payload = None
+    if frontier_level > compare_level:
+        try:
+            _frontier_code, frontier_compare_payload = _run_compare(model_workspace, meta, child_env, frontier_level=frontier_level)
+        except Exception as exc:
+            write_json_stdout(
+                {
+                    "accepted": False,
+                    "message": f"frontier compare_sequences failed: {exc}",
+                    "model_output": model_output,
+                    "compare_payload": compare_payload,
+                }
+            )
+            return
+
+    compare_for_acceptance = frontier_compare_payload or compare_payload
+    error_payload = compare_for_acceptance.get("error") if isinstance(compare_for_acceptance.get("error"), dict) else {}
+    error_type = str(error_payload.get("type", "") or "")
+    eligible_sequences = int(compare_for_acceptance.get("eligible_sequences", 0) or 0)
+    frontier_snapshot = {
+        "level": frontier_level,
+        "meta_file": str(model_workspace / "level_current" / "meta.json"),
+        "current_compare_file": str(model_workspace / "level_current" / "sequence_compare" / "current_compare.json"),
+    }
+
+    accepted = bool(compare_for_acceptance.get("all_match"))
+    if not accepted and frontier_level > 1 and frontier_compare_payload and error_type == "no_eligible_sequences" and eligible_sequences == 0:
+        accepted = True
+        compare_for_acceptance = {
+            **frontier_compare_payload,
+            "frontier_snapshot": frontier_snapshot,
+            "frontier_discovery": True,
+        }
+
+    summary = str(compare_for_acceptance.get("summary", "") or model_output.get("summary", "")).strip()
+    if not summary and accepted and frontier_compare_payload and error_type == "no_eligible_sequences":
+        summary = f"frontier level {frontier_level} synced with no eligible sequences yet"
     write_json_stdout(
         {
             "accepted": accepted,
             "message": summary or ("compare_sequences passed" if accepted else "compare_sequences did not pass"),
             "model_output": model_output,
-            "compare_payload": compare_payload,
+            "compare_payload": compare_for_acceptance,
         }
     )
 
