@@ -307,7 +307,21 @@ function spawnDetached(command: string, args: string[], cwd: string, env?: Recor
   child.unref();
 }
 
+function safeRunIdPrefix(value: string): string {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/[^A-Za-z0-9_.-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || "flux-ui";
+}
+
+function uniqueRunId(prefix: string): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  return `${safeRunIdPrefix(prefix)}-${stamp}`;
+}
+
 export async function startFluxRun(input: FluxRunStartRequest): Promise<{ runId: string }> {
+  const runId = uniqueRunId(input.sessionName);
   spawnDetached("python", [
     HARNESS_FLUX_ENTRYPOINT,
     "--game-id",
@@ -315,11 +329,11 @@ export async function startFluxRun(input: FluxRunStartRequest): Promise<{ runId:
     "--operation-mode",
     input.operationMode,
     "--session-name",
-    input.sessionName,
+    runId,
     "--provider",
     input.provider,
   ], path.dirname(HARNESS_FLUX_ENTRYPOINT));
-  return { runId: input.sessionName };
+  return { runId };
 }
 
 export async function controlFluxRun(runId: string, action: "stop" | "continue"): Promise<{ ok: true }> {

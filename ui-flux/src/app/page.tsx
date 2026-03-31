@@ -385,7 +385,7 @@ export default function Home() {
               <section className="rounded-[24px] border border-white/10 bg-[var(--panel)] p-4">
                 <div className="mb-3 text-xs uppercase tracking-[0.2em] text-white/50">Start Run</div>
                 <div className="space-y-3">
-                  <input className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" value={form.sessionName} onChange={(event) => setForm((value) => ({ ...value, sessionName: event.target.value }))} placeholder="session name" />
+                  <input className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" value={form.sessionName} onChange={(event) => setForm((value) => ({ ...value, sessionName: event.target.value }))} placeholder="run name prefix" />
                   <input className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" value={form.gameId} onChange={(event) => setForm((value) => ({ ...value, gameId: event.target.value }))} placeholder="game id" />
                   <div className="grid grid-cols-2 gap-2">
                     <select className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" value={form.provider} onChange={(event) => setForm((value) => ({ ...value, provider: event.target.value as FluxRunStartRequest["provider"] }))}>
@@ -399,7 +399,7 @@ export default function Home() {
                       <option value="NORMAL">NORMAL</option>
                     </select>
                   </div>
-                  <button onClick={() => void startRun()} className="w-full rounded-xl bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-black">Start Flux Run</button>
+                  <button onClick={() => void startRun()} className="w-full rounded-xl bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-black">Start New Run</button>
                 </div>
               </section>
               <div className="space-y-2">
@@ -450,7 +450,7 @@ export default function Home() {
           <div className="border-b border-white/10 px-5 py-4">
             <div className="mb-3 text-xs uppercase tracking-[0.2em] text-white/50">Start Run</div>
             <div className="space-y-3">
-              <input className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" value={form.sessionName} onChange={(event) => setForm((value) => ({ ...value, sessionName: event.target.value }))} placeholder="session name" />
+              <input className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" value={form.sessionName} onChange={(event) => setForm((value) => ({ ...value, sessionName: event.target.value }))} placeholder="run name prefix" />
               <input className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" value={form.gameId} onChange={(event) => setForm((value) => ({ ...value, gameId: event.target.value }))} placeholder="game id" />
               <div className="grid grid-cols-2 gap-2">
                 <select className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" value={form.provider} onChange={(event) => setForm((value) => ({ ...value, provider: event.target.value as FluxRunStartRequest["provider"] }))}>
@@ -464,7 +464,7 @@ export default function Home() {
                   <option value="NORMAL">NORMAL</option>
                 </select>
               </div>
-              <button onClick={() => void startRun()} className="w-full rounded-xl bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-black">Start Flux Run</button>
+              <button onClick={() => void startRun()} className="w-full rounded-xl bg-[var(--accent)] px-3 py-2 text-sm font-semibold text-black">Start New Run</button>
             </div>
           </div>
           <div className="min-h-0 overflow-auto p-3">
