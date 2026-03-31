@@ -5,7 +5,8 @@ runtime_defaults:
   reasoning_effort: medium
   sandbox_mode: workspace-write
   approval_policy: never
-  env: {}
+  env:
+    ARC_MODEL_DISABLE_CANONICAL_ARTIFACTS: "1"
 storage:
   flux_root: flux
   ai_root: .ai-flux

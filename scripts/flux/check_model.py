@@ -33,6 +33,7 @@ def main() -> None:
     child_env = dict(os.environ)
     child_env["ARC_CONFIG_DIR"] = str(meta["run_config_dir"])
     child_env["ARC_STATE_DIR"] = str(Path(workspace_root) / "supervisor" / "arc")
+    child_env["ARC_MODEL_DISABLE_CANONICAL_ARTIFACTS"] = "1"
     child_env["PATH"] = f"{meta['run_bin_dir']}:{child_env.get('PATH', '')}"
     proc = subprocess.run(
         ["python3", "model.py", "compare_sequences", "--game-id", str(meta["game_id"])],

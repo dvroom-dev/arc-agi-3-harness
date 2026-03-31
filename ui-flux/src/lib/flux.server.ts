@@ -201,24 +201,25 @@ async function readFrameSnapshots(gameDir: string): Promise<{ frames: FluxFrameS
 
 function toRunSummary(runId: string, state: JsonRecord | null, runtimeMeta: JsonRecord | null): FluxRunSummary {
   const activeRaw = (state?.active as JsonRecord | undefined) ?? {};
+  const status = typeof state?.status === "string" ? String(state.status) : "missing";
+  const pid = typeof state?.pid === "number" ? Number(state.pid) : null;
+  const isLive = status === "running" && isPidAlive(pid);
   const active = Object.fromEntries(
     SESSION_TYPES.map((sessionType) => {
       const payload = (activeRaw[sessionType] as JsonRecord | undefined) ?? {};
       return [sessionType, {
-        status: typeof payload.status === "string" ? String(payload.status) : "unknown",
+        status: isLive ? (typeof payload.status === "string" ? String(payload.status) : "unknown") : "idle",
         sessionId: typeof payload.sessionId === "string" ? String(payload.sessionId) : null,
       }];
     }),
   ) as FluxRunSummary["active"];
-  const status = typeof state?.status === "string" ? String(state.status) : "missing";
-  const pid = typeof state?.pid === "number" ? Number(state.pid) : null;
   return {
     runId,
     gameId: typeof runtimeMeta?.game_id === "string" ? String(runtimeMeta.game_id) : null,
     updatedAt: typeof state?.updatedAt === "string" ? String(state.updatedAt) : null,
     startedAt: typeof state?.startedAt === "string" ? String(state.startedAt) : null,
     status,
-    liveStatus: status === "running" ? (isPidAlive(pid) ? "running" : "stale") : (status === "missing" ? "missing" : "stopped"),
+    liveStatus: status === "running" ? (isLive ? "running" : "stale") : (status === "missing" ? "missing" : "stopped"),
     active,
   };
 }

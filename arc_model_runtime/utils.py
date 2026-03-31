@@ -202,6 +202,9 @@ def _state_artifacts_root_for_active_game() -> Path | None:
 
 
 def canonical_game_artifacts_dir(game_dir: Path) -> Path | None:
+    disable_canonical = str(os.getenv("ARC_MODEL_DISABLE_CANONICAL_ARTIFACTS", "") or "").strip().lower()
+    if disable_canonical in {"1", "true", "yes", "on"}:
+        return None
     del game_dir  # Reserved for future per-workspace routing if needed.
     return _state_artifacts_root_for_active_game()
 
