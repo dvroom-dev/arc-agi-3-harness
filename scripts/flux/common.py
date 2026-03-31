@@ -92,7 +92,13 @@ def summarize_instance_state(state_dir: Path) -> dict:
     history = json.loads(history_path.read_text()) if history_path.exists() else []
     action_history = json.loads(action_history_path.read_text()) if action_history_path.exists() else []
     history_events = history.get("events", []) if isinstance(history, dict) else history
-    action_count = len(action_history) if isinstance(action_history, list) else 0
+    if isinstance(action_history, list):
+        action_count = len(action_history)
+    elif isinstance(action_history, dict):
+        records = action_history.get("records")
+        action_count = len(records) if isinstance(records, list) else 0
+    else:
+        action_count = 0
     if action_count == 0 and isinstance(state, dict):
         action_count = int(state.get("current_attempt_steps", 0) or state.get("total_steps", 0) or 0)
     return {
