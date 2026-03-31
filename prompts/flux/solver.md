@@ -29,9 +29,12 @@ Rules:
 - Do not assume `env.grid` exists.
 - Use the available actions list as your action vocabulary and choose actions that explore the most important unresolved feature in the current state.
 - Prefer stateful exploration. If an action changes a feature, continue from that changed state long enough to learn the mechanic instead of resetting immediately.
-- Do not enumerate every action from a fresh reset just to catalog isolated deltas.
+- Hard rule: do not enumerate every available action from a fresh reset just to catalog isolated deltas.
+- Hard rule: do not spend a turn building an action map by running `reset_level` between single-action probes.
+- If one action changes a localized feature, your next action should usually interact with that same feature from the resulting state.
 - Resets are for being stuck, recovering from a bad branch, or preserving a visible fuel/turn budget. They are not a default exploration tool.
 - Before resetting, ask whether one more action from the current state is more likely to clarify the mechanic than starting over.
+- In a normal turn, use at most one reset, and only after you can state why the current branch is less informative than a fresh start.
 - Before this turn ends, you must execute at least one real action probe with `env.step(...)`.
 - Do not spend the whole turn on inspection. One quick read pass is enough before probing.
 - The best default first probe is a single bounded action such as `ACTION1`, then inspect the resulting diff/artifacts.
@@ -48,6 +51,7 @@ First-turn default plan:
 4. If the probe points to a concrete next move, keep going from the changed state.
 5. Reset only if the current branch is clearly less informative than a fresh start or you need to protect a visible budget.
 6. Do not burn the turn on reset-plus-single-action catalogs.
+7. Do not test all four actions independently unless you have already proven that state continuity is irrelevant.
 
 Example one-action probe:
 
