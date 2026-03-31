@@ -139,12 +139,12 @@ function StateView({
       </section>
       <section className="rounded-[24px] border border-white/10 bg-[var(--panel)] p-4">
         <div className="mb-3 text-xs uppercase tracking-[0.18em] text-white/45">Action Log</div>
-        <div className="space-y-2">
+        <div className="max-h-[260px] overflow-auto space-y-2 pr-1">
           {detail.actions.map((action) => (
             <div key={`${action.turnDir}:${action.step}`} className="rounded-xl border border-white/8 bg-black/20 p-3">
-              <div className="font-mono text-sm text-white">{action.actionLabel}</div>
-              <div className="mt-1 text-xs text-[var(--muted)]">step {action.step} · changed {action.changedPixels} px</div>
-              <div className="mt-2 text-[11px] text-white/55">{action.stateBefore} → {action.stateAfter}</div>
+              <div className="truncate font-mono text-xs text-white">
+                {action.step}. {action.actionLabel} · {action.changedPixels}px · {action.stateBefore} → {action.stateAfter}
+              </div>
             </div>
           ))}
         </div>
