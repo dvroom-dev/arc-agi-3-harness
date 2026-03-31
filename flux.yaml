@@ -31,7 +31,7 @@ solver:
   session_scope: per_attempt
   resume_policy: never
   reasoning_effort: low
-  cadence_ms: 20000
+  cadence_ms: 60000
   queue_replacement_grace_ms: 15000
   tools:
     builtin: [shell, read_file, write_file, list_dir, apply_patch]
