@@ -142,6 +142,12 @@ async function pickGameDirForRun(runId: string, state: JsonRecord | null): Promi
       return { gameDir: path.join(agentDir, game.name), attemptId: path.basename(latestAttempt) };
     }
   }
+  const durableAgentDir = path.join(root, "agent");
+  const durableEntries = await fs.readdir(durableAgentDir, { withFileTypes: true }).catch(() => []);
+  const durableGame = durableEntries.find((entry) => entry.isDirectory() && entry.name.startsWith("game_"));
+  if (durableGame) {
+    return { gameDir: path.join(durableAgentDir, durableGame.name), attemptId: null };
+  }
   return { gameDir: null, attemptId: null };
 }
 
