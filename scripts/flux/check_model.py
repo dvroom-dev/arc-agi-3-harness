@@ -22,6 +22,17 @@ def _read_frontier_level(model_workspace: Path) -> int:
         return 1
 
 
+def _frontier_level_ready(model_workspace: Path, frontier_level: int) -> bool:
+    level_dir = model_workspace / f"level_{frontier_level}"
+    if not level_dir.exists() or not level_dir.is_dir():
+        return False
+    required = [
+        level_dir / "initial_state.hex",
+        level_dir / "initial_state.meta.json",
+    ]
+    return all(path.exists() for path in required)
+
+
 def _run_compare(model_workspace: Path, meta: dict, child_env: dict[str, str], frontier_level: int | None = None) -> tuple[int, dict]:
     command = ["python3", "model.py", "compare_sequences", "--game-id", str(meta["game_id"])]
     if frontier_level is not None:
@@ -78,7 +89,8 @@ def main() -> None:
 
     compare_level = int(compare_payload.get("level", 1) or 1)
     frontier_compare_payload = None
-    if frontier_level > compare_level:
+    frontier_ready = _frontier_level_ready(model_workspace, frontier_level)
+    if frontier_level > compare_level and frontier_ready:
         try:
             _frontier_code, frontier_compare_payload = _run_compare(model_workspace, meta, child_env, frontier_level=frontier_level)
         except Exception as exc:
@@ -91,6 +103,16 @@ def main() -> None:
                 }
             )
             return
+    elif frontier_level > compare_level and not frontier_ready:
+        compare_payload = {
+            **compare_payload,
+            "frontier_sync_pending": True,
+            "frontier_snapshot": {
+                "level": frontier_level,
+                "level_dir": str(model_workspace / f"level_{frontier_level}"),
+                "ready": False,
+            },
+        }
 
     compare_for_acceptance = frontier_compare_payload or compare_payload
     error_payload = compare_for_acceptance.get("error") if isinstance(compare_for_acceptance.get("error"), dict) else {}

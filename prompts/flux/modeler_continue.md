@@ -7,3 +7,4 @@ Use `python3 inspect_sequence.py --current-mismatch` for a compact summary, make
 If the feedback is `no_eligible_sequences` for the newest visible level, model the frontier start state instead of retrying the same compare loop.
 Do not start a long investigation pass here. Make one quick model change or one quick frontier update, rerun acceptance, and report the result.
 If multiple sequences exist, resume from the earliest failing sequence in order.
+For that earliest failing sequence, default to a local mechanics patch from the earliest mismatching step instead of investigating compare internals or loader behavior.

@@ -18,6 +18,9 @@ Goals:
 - Do not spend the turn reading giant raw `.hex` files or huge JSON blobs unless the compact reports are insufficient.
 - Hard rule: do not spend a turn doing broad theory work across many sequences if one local patch can be tried immediately.
 - Hard rule: after one compact read pass, either patch the model or explicitly declare a concrete blocked reason.
+- For the earliest failing sequence, assume the first useful patch is local: direct action effect, collision/blocking rule, state update, or budget/cost update.
+- Do not start by debugging the compare tool, loader path, or whether your code was imported unless a rerun after a local patch still shows contradictory evidence.
+- The first failing sequence is usually just the starting state plus a short action chain. Read the earliest failing step's `before_state`, `after_state`, and `meta.json`, patch the direct mechanic, and rerun compare.
 - Make one focused patch, then immediately rerun `python3 model.py compare_sequences --game-id ...`.
 - Repeat patch/compare until `all_match` is true or you hit a concrete blocked diagnosis.
 - When multiple sequences exist, focus on them in order. Fix the earliest failing or unmodeled sequence first before spending time on later sequences.

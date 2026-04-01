@@ -5,6 +5,8 @@ import os
 import shutil
 import subprocess
 import sys
+import time
+import uuid
 from pathlib import Path
 
 
@@ -119,18 +121,55 @@ def sync_solver_artifacts_to_model_workspace(meta: dict, solver_dir: Path, state
     model_workspace = Path(str(meta["model_workspace_dir"]))
     model_workspace.mkdir(parents=True, exist_ok=True)
     synced: list[str] = []
-    def _replace_copy(child: Path, destination: Path) -> None:
-        if destination.exists() or destination.is_symlink():
-            if destination.is_dir() and not destination.is_symlink():
-                shutil.rmtree(destination, ignore_errors=True)
+
+    def _cleanup_path(target: Path) -> None:
+        if target.exists() or target.is_symlink():
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target, ignore_errors=True)
             else:
-                destination.unlink(missing_ok=True)
-        if child.is_dir():
-            shutil.copytree(child, destination)
-        else:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(child, destination)
-        synced.append(str(destination))
+                target.unlink(missing_ok=True)
+
+    def _is_retryable_copy_error(exc: BaseException) -> bool:
+        if isinstance(exc, FileNotFoundError):
+            return True
+        if not isinstance(exc, shutil.Error):
+            return False
+        errors = exc.args[0] if exc.args else []
+        if not isinstance(errors, list):
+            return False
+        for record in errors:
+            if not isinstance(record, tuple) or len(record) < 3:
+                return False
+            message = str(record[2])
+            if "No such file or directory" not in message:
+                return False
+        return True
+
+    def _replace_copy(child: Path, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        last_error: BaseException | None = None
+        for attempt in range(3):
+            temp_target = destination.parent / f".{destination.name}.flux-sync-{uuid.uuid4().hex}"
+            _cleanup_path(temp_target)
+            try:
+                if child.is_dir():
+                    shutil.copytree(child, temp_target)
+                else:
+                    shutil.copy2(child, temp_target)
+                _cleanup_path(destination)
+                temp_target.replace(destination)
+                synced.append(str(destination))
+                return
+            except BaseException as exc:
+                last_error = exc
+                _cleanup_path(temp_target)
+                if not _is_retryable_copy_error(exc) or attempt == 2:
+                    raise RuntimeError(
+                        f"failed to sync artifact {child} -> {destination}: {exc}"
+                    ) from exc
+                time.sleep(0.05)
+        if last_error is not None:
+            raise RuntimeError(f"failed to sync artifact {child} -> {destination}: {last_error}")
 
     for child in solver_dir.iterdir():
         name = child.name
