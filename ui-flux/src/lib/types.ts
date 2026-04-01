@@ -15,6 +15,7 @@ export interface FluxFrameSnapshot {
   label: string;
   grid: number[][];
   actionLabel: string | null;
+  lastActionLabel: string | null;
   turnDir: string | null;
   changedPixels: number;
   stepCount: number;

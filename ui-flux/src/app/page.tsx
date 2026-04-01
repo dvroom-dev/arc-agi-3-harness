@@ -96,6 +96,9 @@ function StateView({
             <div className="mt-2 text-sm text-[var(--muted)]">
               Attempt {detail.currentAttemptId ?? "n/a"} · Level {detail.currentLevel ?? "?"} · {String(detail.currentState?.state ?? "unknown")}
             </div>
+            <div className="mt-1 text-xs text-[var(--muted)]">
+              Last action {currentFrame?.lastActionLabel ?? "none"}
+            </div>
           </div>
           <div className="flex gap-2">
             <button onClick={() => void controlRun("continue")} className="rounded-xl border border-white/10 px-3 py-2 text-sm text-white/80">Continue</button>
@@ -124,7 +127,7 @@ function StateView({
             className="w-full"
           />
           <div className="mt-2 flex items-center justify-between text-xs text-[var(--muted)]">
-            <span>{detail.frames[liveFrameIndex]?.label ?? "n/a"}</span>
+            <span>{detail.frames[liveFrameIndex]?.label ?? "n/a"} · last action {detail.frames[liveFrameIndex]?.lastActionLabel ?? "none"}</span>
             <button
               onClick={() => {
                 setFollowLive(true);

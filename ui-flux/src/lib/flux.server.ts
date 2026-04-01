@@ -56,6 +56,14 @@ async function readJsonLines(filePath: string): Promise<JsonRecord[]> {
   return items;
 }
 
+async function listJsonFiles(dirPath: string): Promise<string[]> {
+  const entries = await fs.readdir(dirPath, { withFileTypes: true }).catch(() => []);
+  return entries
+    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
+    .map((entry) => path.join(dirPath, entry.name))
+    .sort((left, right) => left.localeCompare(right));
+}
+
 function isPidAlive(pid: number | null): boolean {
   if (!pid || pid <= 0) return false;
   try {
@@ -157,49 +165,105 @@ async function readFrameSnapshots(gameDir: string): Promise<{ frames: FluxFrameS
   const currentLevel = typeof meta?.level === "number" ? Number(meta.level) : null;
   const initialHex = await readText(path.join(levelCurrentDir, "initial_state.hex"));
   const currentHex = await readText(path.join(levelCurrentDir, "current_state.hex"));
-  const turns = await readJsonLines(path.join(levelCurrentDir, "turn_index.jsonl"));
-
   const frames: FluxFrameSnapshot[] = [];
   const actions: FluxActionSummary[] = [];
+  let lastActionLabel: string | null = null;
   if (initialHex) {
     frames.push({
       id: "initial",
       label: "Initial",
       grid: parseHexGrid(initialHex),
       actionLabel: null,
+      lastActionLabel: null,
       turnDir: null,
       changedPixels: 0,
       stepCount: 0,
     });
   }
-
-  for (let index = 0; index < turns.length; index += 1) {
-    const turn = turns[index] ?? {};
-    const turnDir = typeof turn.turn_dir === "string" ? String(turn.turn_dir) : null;
-    const afterHex = turnDir ? await readText(path.join(gameDir, turnDir, "after_state.hex")) : null;
-    const actionLabel = typeof turn.action_label === "string" ? String(turn.action_label) : "unknown";
-    const changedPixels = typeof turn.changed_pixels === "number" ? Number(turn.changed_pixels) : 0;
-    if (typeof turn.steps_executed === "number" && Number(turn.steps_executed) > 0 && turnDir) {
-      actions.push({
-        step: actions.length + 1,
+  const levelDir = currentLevel ? path.join(gameDir, `level_${currentLevel}`) : levelCurrentDir;
+  const sequenceRoot = path.join(levelDir, "sequences");
+  const sequenceFiles = await listJsonFiles(sequenceRoot);
+  type ActionRecord = {
+    actionIndex: number;
+    actionLabel: string;
+    changedPixels: number;
+    turnDir: string;
+    stateBefore: string;
+    stateAfter: string;
+    afterGrid: number[][];
+  };
+  const actionRecords: ActionRecord[] = [];
+  for (const sequenceFile of sequenceFiles) {
+    const sequence = await readJson<JsonRecord>(sequenceFile);
+    const sequenceActions = Array.isArray(sequence?.actions) ? sequence.actions : [];
+    for (const action of sequenceActions) {
+      if (!action || typeof action !== "object" || Array.isArray(action)) continue;
+      const record = action as JsonRecord;
+      const actionIndex = typeof record.action_index === "number"
+        ? Number(record.action_index)
+        : (typeof record.local_step === "number" ? Number(record.local_step) : actionRecords.length + 1);
+      const actionLabel = typeof record.action_name === "string" ? String(record.action_name) : "UNKNOWN";
+      const files = (record.files && typeof record.files === "object" && !Array.isArray(record.files))
+        ? record.files as JsonRecord
+        : {};
+      const afterStatePath = typeof files.after_state_hex === "string"
+        ? path.join(levelDir, String(files.after_state_hex))
+        : null;
+      const afterHex = afterStatePath ? await readText(afterStatePath) : null;
+      if (!afterHex) continue;
+      const beforeHex = typeof files.before_state_hex === "string"
+        ? await readText(path.join(levelDir, String(files.before_state_hex)))
+        : null;
+      const beforeGrid = beforeHex ? parseHexGrid(beforeHex) : null;
+      const afterGrid = parseHexGrid(afterHex);
+      const rows = Math.max(beforeGrid?.length ?? 0, afterGrid.length);
+      const cols = Math.max(
+        ...Array.from({ length: rows }, (_, index) => Math.max(beforeGrid?.[index]?.length ?? 0, afterGrid[index]?.length ?? 0)),
+        0,
+      );
+      let changedPixels = 0;
+      for (let row = 0; row < rows; row += 1) {
+        for (let col = 0; col < cols; col += 1) {
+          const beforeValue = beforeGrid?.[row]?.[col] ?? null;
+          const afterValue = afterGrid[row]?.[col] ?? null;
+          if (beforeValue !== afterValue) changedPixels += 1;
+        }
+      }
+      const turnDir = typeof record.tool_turn === "number"
+        ? `level_${currentLevel ?? 1}/turn_${String(Number(record.tool_turn)).padStart(4, "0")}`
+        : path.relative(gameDir, path.dirname(afterStatePath ?? levelDir));
+      actionRecords.push({
+        actionIndex,
         actionLabel,
         changedPixels,
         turnDir,
-        stateBefore: typeof turn.state_before_action === "string" ? String(turn.state_before_action) : "",
-        stateAfter: typeof turn.state_after_action === "string" ? String(turn.state_after_action) : "",
+        stateBefore: typeof record.state_before === "string" ? String(record.state_before) : "",
+        stateAfter: typeof record.state_after === "string" ? String(record.state_after) : "",
+        afterGrid,
       });
     }
-    if (afterHex && turnDir) {
-      frames.push({
-        id: `turn-${index + 1}`,
-        label: actionLabel,
-        grid: parseHexGrid(afterHex),
-        actionLabel,
-        turnDir,
-        changedPixels,
-        stepCount: typeof turn.steps_executed === "number" ? Number(turn.steps_executed) : 0,
-      });
-    }
+  }
+  actionRecords.sort((left, right) => left.actionIndex - right.actionIndex);
+  for (const action of actionRecords) {
+    lastActionLabel = action.actionLabel;
+    actions.push({
+      step: actions.length + 1,
+      actionLabel: action.actionLabel,
+      changedPixels: action.changedPixels,
+      turnDir: action.turnDir,
+      stateBefore: action.stateBefore,
+      stateAfter: action.stateAfter,
+    });
+    frames.push({
+      id: `action-${action.actionIndex}`,
+      label: `${actions.length}. ${action.actionLabel}`,
+      grid: action.afterGrid,
+      actionLabel: action.actionLabel,
+      lastActionLabel,
+      turnDir: action.turnDir,
+      changedPixels: action.changedPixels,
+      stepCount: actions.length,
+    });
   }
 
   if (currentHex) {
@@ -211,7 +275,8 @@ async function readFrameSnapshots(gameDir: string): Promise<{ frames: FluxFrameS
         id: "current",
         label: "Current",
         grid: currentGrid,
-        actionLabel: null,
+        actionLabel: lastActionLabel,
+        lastActionLabel,
         turnDir: null,
         changedPixels: 0,
         stepCount: actions.length,
