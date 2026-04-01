@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from harness_runtime_images import _read_hex_grid, _sdk_render_grid_to_image
+
 from common import (
     build_instance_env,
     copy_solver_template,
@@ -12,6 +14,19 @@ from common import (
     summarize_instance_state,
     write_json_stdout,
 )
+
+
+def _render_initial_prompt_image(workspace_root: str, raw_instance_id: str, solver_dir: Path) -> Path | None:
+    initial_hex = solver_dir / "level_current" / "initial_state.hex"
+    if not initial_hex.exists():
+        return None
+    prompt_image_dir = Path(workspace_root) / "prompt_images"
+    prompt_image_dir.mkdir(parents=True, exist_ok=True)
+    dest = prompt_image_dir / f"{raw_instance_id}_initial.png"
+    if not dest.exists():
+        pixels = _read_hex_grid(initial_hex)
+        _sdk_render_grid_to_image(pixels, dest)
+    return dest
 
 
 def main() -> None:
@@ -29,6 +44,7 @@ def main() -> None:
     status = run_arc_repl_status(meta, env, solver_dir)
     summary = summarize_instance_state(state_dir)
     available_actions = status.get("available_actions", [])
+    prompt_image = _render_initial_prompt_image(workspace_root, raw_instance_id, solver_dir)
     write_json_stdout(
         {
             "instance_id": raw_instance_id,
@@ -42,6 +58,7 @@ def main() -> None:
                 "Use only the current workspace and run-local commands already on PATH.\n"
                 "Do not construct or chase absolute filesystem paths."
             ),
+            "prompt_images": [str(prompt_image)] if prompt_image else [],
             "env": env,
             "metadata": {
                 "instance_root": str(root),
