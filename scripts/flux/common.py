@@ -69,6 +69,15 @@ def copy_solver_template(meta: dict, destination: Path) -> Path:
     return destination
 
 
+def copy_model_workspace(meta: dict, destination: Path) -> Path:
+    source = Path(str(meta["model_workspace_dir"]))
+    if destination.exists():
+        shutil.rmtree(destination, ignore_errors=True)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, destination)
+    return destination
+
+
 def run_arc_repl_status(meta: dict, env: dict[str, str], cwd: Path) -> dict:
     proc = subprocess.run(
         [meta["python_executable"], meta["run_arc_repl_tool"]],

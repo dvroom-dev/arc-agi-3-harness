@@ -1,9 +1,22 @@
-Replay feedback for the current seed bundle:
+Bootstrap feedback for the current seed:
 
+Model rehearsal results:
+{{model_rehearsal_results}}
+
+Real replay results:
+{{real_replay_results}}
+
+Generic replay fallback:
 {{replay_results}}
 
-Re-read `flux/seed/current.json`, compare the replay feedback against the accepted model state under `agent/`, and make sure the synthetic seed message names any still-unexplained visible feature that should be prioritized next.
-If the replay or accepted evidence shows a newer stage or frontier than the current seed message talks about, rewrite the seed so it targets that newer frontier instead of repeating older opening guidance.
-Prefer a seed that will give the next solver a quick useful result: one focused feature probe or one concrete solve attempt.
+Re-read `flux/seed/current.json`.
 
-Revise the seed only if it improves the next solver attempt, then return fresh `bootstrap_attestation_v1` JSON.
+Rules:
+- If the seed changed and rehearsal exposed an error or weaker-than-expected branch, revise the seed and return `continue_refining`.
+- If rehearsal succeeded but the seed can still be improved into a better full-run level-1-to-frontier seed, revise it and return `continue_refining`.
+- Return `finalize_seed` only when the current seed is ready to be replayed from level 1 on a fresh real game.
+- Keep solved-level steps ideal and deterministic.
+- For the frontier, either choose the best current solve attempt or one short exploration branch for the most important unresolved feature.
+- Preserve explanations of known mechanics and logical choices in the synthetic seed messages.
+
+Return fresh `bootstrap_seed_decision_v1` JSON.

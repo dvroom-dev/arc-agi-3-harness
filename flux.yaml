@@ -25,8 +25,10 @@ problem:
     command: ["python3", "{{SCRIPTS_ROOT}}/observe_evidence.py"]
   sync_model_workspace:
     command: ["python3", "{{SCRIPTS_ROOT}}/sync_model_workspace.py"]
-  replay_seed:
-    command: ["python3", "{{SCRIPTS_ROOT}}/replay_seed.py"]
+  rehearse_seed_on_model:
+    command: ["python3", "{{SCRIPTS_ROOT}}/rehearse_seed_on_model.py"]
+  replay_seed_on_real_game:
+    command: ["python3", "{{SCRIPTS_ROOT}}/replay_seed_on_real_game.py"]
   merge_evidence:
     strategy: dedupe_by_fingerprint
 solver:
@@ -65,8 +67,9 @@ bootstrapper:
   turn_timeout_ms: 900000
   provider: {{BOOTSTRAPPER_PROVIDER}}
   model: {{BOOTSTRAPPER_MODEL}}
-  output_schema: bootstrap_attestation_v1
+  output_schema: bootstrap_seed_decision_v1
   seed_bundle_path: flux/seed/current.json
+  require_model_rehearsal_before_finalize: true
   replay:
     max_attempts_per_event: 5
     continue_message_template_file: {{PROMPTS_ROOT}}/bootstrapper_continue.md
