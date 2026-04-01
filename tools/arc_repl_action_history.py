@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import os
 from typing import Any
 
 try:
@@ -66,7 +67,10 @@ class ActionHistoryStore:
             "records": self.records,
             "next_action_index": self.next_action_index,
         }
-        self.path.write_text(json.dumps(payload, indent=2))
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = self.path.with_suffix(self.path.suffix + f".tmp-{os.getpid()}-{datetime.now(timezone.utc).timestamp()}")
+        tmp_path.write_text(json.dumps(payload, indent=2))
+        tmp_path.replace(self.path)
 
     def append(
         self,

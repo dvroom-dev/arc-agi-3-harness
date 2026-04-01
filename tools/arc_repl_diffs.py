@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import time
 
 import numpy as np
 from arcengine.enums import FrameDataRaw
@@ -220,7 +221,10 @@ def write_machine_state(
         "total_resets": total_run_resets,
         "steps": [desc for desc, _ in step_snapshots],
     }
-    (directory / "state.json").write_text(json.dumps(state, indent=2))
+    state_path = directory / "state.json"
+    tmp_path = state_path.with_suffix(state_path.suffix + f".tmp-{os.getpid()}-{time.time_ns()}")
+    tmp_path.write_text(json.dumps(state, indent=2))
+    tmp_path.replace(state_path)
 
 
 def write_game_state(

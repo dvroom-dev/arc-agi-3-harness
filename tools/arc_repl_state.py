@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 
@@ -224,4 +225,8 @@ def _load_history(cwd: Path, game_id: str, make_id_candidates) -> dict:
 
 
 def _save_history(cwd: Path, history: dict) -> None:
-    _history_path(cwd).write_text(json.dumps(history, indent=2))
+    path = _history_path(cwd)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + f".tmp-{os.getpid()}-{time.time_ns()}")
+    tmp.write_text(json.dumps(history, indent=2))
+    tmp.replace(path)

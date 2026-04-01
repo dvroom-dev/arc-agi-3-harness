@@ -20,6 +20,21 @@ def read_json_stdin() -> dict:
     return payload
 
 
+def read_json_file_with_retry(path: Path, *, attempts: int = 4, delay_s: float = 0.05):
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            return json.loads(path.read_text())
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay_s)
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"failed reading JSON from {path}")
+
+
 def write_json_stdout(payload: dict) -> None:
     sys.stdout.write(json.dumps(payload) + "\n")
 
@@ -99,9 +114,9 @@ def summarize_instance_state(state_dir: Path) -> dict:
     state_path = state_dir / "state.json"
     history_path = state_dir / "tool-engine-history.json"
     action_history_path = state_dir / "action-history.json"
-    state = json.loads(state_path.read_text()) if state_path.exists() else {}
-    history = json.loads(history_path.read_text()) if history_path.exists() else []
-    action_history = json.loads(action_history_path.read_text()) if action_history_path.exists() else []
+    state = read_json_file_with_retry(state_path) if state_path.exists() else {}
+    history = read_json_file_with_retry(history_path) if history_path.exists() else []
+    action_history = read_json_file_with_retry(action_history_path) if action_history_path.exists() else []
     history_events = history.get("events", []) if isinstance(history, dict) else history
     if isinstance(action_history, list):
         action_count = len(action_history)
