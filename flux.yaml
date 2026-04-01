@@ -12,7 +12,7 @@ storage:
   ai_root: .ai-flux
 orchestrator:
   tick_ms: 1000
-  solver_preempt_grace_ms: 15000
+  solver_preempt_grace_ms: 120000
   evidence_poll_ms: 5000
   modeler_idle_backoff_ms: 10000
   bootstrapper_idle_backoff_ms: 10000
@@ -35,7 +35,7 @@ solver:
   resume_policy: never
   reasoning_effort: low
   cadence_ms: 60000
-  queue_replacement_grace_ms: 15000
+  queue_replacement_grace_ms: 120000
   tools:
     builtin: [shell, read_file, write_file, list_dir, apply_patch]
 modeler:

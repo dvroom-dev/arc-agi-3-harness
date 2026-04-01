@@ -20,6 +20,8 @@ Goals:
 - Hard rule: after one compact read pass, either patch the model or explicitly declare a concrete blocked reason.
 - Make one focused patch, then immediately rerun `python3 model.py compare_sequences --game-id ...`.
 - Repeat patch/compare until `all_match` is true or you hit a concrete blocked diagnosis.
+- When multiple sequences exist, focus on them in order. Fix the earliest failing or unmodeled sequence first before spending time on later sequences.
+- Do not optimize a later sequence while an earlier one still fails.
 - If compare reports `no_eligible_sequences` for the newest visible level, treat that as a frontier-modeling task rather than a failure: update the registry/state for the new level, record its starting-state facts, and return a model update that tells the bootstrapper what new feature or constraint should be explored next.
 - For a frontier level, prefer a fast descriptive update:
   - identify the new visible structures
