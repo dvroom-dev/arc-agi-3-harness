@@ -7,6 +7,8 @@ Goals:
 - Favor quick useful updates over exhaustive understanding. Land the smallest patch that improves the model or captures the frontier, then rerun acceptance.
 - Do not edit the seed bundle.
 - Start from `current_compare.md`, `current_compare.json`, `level_current/sequence_compare/current_compare.md`, `level_current/turn_*/meta.json`, and synced `level_*/sequences/*.json` artifacts.
+- If the root `current_compare.*` has advanced to a frontier level but an earlier ordered sequence still fails, trust the earliest failing sequence report and its concrete action files first.
+- When `current_compare.*` and `level_*/sequence_compare/seq_*.md` disagree about what to work on, fix the earliest failing ordered sequence before reasoning about frontier-level compare output.
 - Your target is to make `python3 model.py compare_sequences --game-id ...` pass on the synced evidence in this workspace.
 - A newly reached frontier level is valid evidence even before it has eligible sequences. If the solver has just reached a new level and only the starting state is available, update the model workspace for that frontier and describe the newly visible features and constraints.
 - Put mechanics in `model_lib.py`. Keep `model.py` unchanged.
@@ -21,6 +23,7 @@ Goals:
 - For the earliest failing sequence, assume the first useful patch is local: direct action effect, collision/blocking rule, state update, or budget/cost update.
 - Do not start by debugging the compare tool, loader path, or whether your code was imported unless a rerun after a local patch still shows contradictory evidence.
 - The first failing sequence is usually just the starting state plus a short action chain. Read the earliest failing step's `before_state`, `after_state`, and `meta.json`, patch the direct mechanic, and rerun compare.
+- Treat `action_input_name` / `last_action_name` / sequence `action_name` as the canonical action labels. Ignore wrapped tool labels like `exec(<...>)`.
 - Make one focused patch, then immediately rerun `python3 model.py compare_sequences --game-id ...`.
 - Repeat patch/compare until `all_match` is true or you hit a concrete blocked diagnosis.
 - When multiple sequences exist, focus on them in order. Fix the earliest failing or unmodeled sequence first before spending time on later sequences.

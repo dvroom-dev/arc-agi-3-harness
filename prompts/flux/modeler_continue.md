@@ -8,3 +8,5 @@ If the feedback is `no_eligible_sequences` for the newest visible level, model t
 Do not start a long investigation pass here. Make one quick model change or one quick frontier update, rerun acceptance, and report the result.
 If multiple sequences exist, resume from the earliest failing sequence in order.
 For that earliest failing sequence, default to a local mechanics patch from the earliest mismatching step instead of investigating compare internals or loader behavior.
+If root `current_compare.*` has moved to a newer frontier level, use the earliest failing ordered sequence report from the acceptance feedback as the source of truth until that earlier sequence passes.
+Treat `action_input_name`, `last_action_name`, and sequence `action_name` as canonical; ignore wrapped tool labels like `exec(<...>)`.

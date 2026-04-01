@@ -103,6 +103,18 @@ def summarize_instance_state(state_dir: Path) -> dict:
         action_count = 0
     if action_count == 0 and isinstance(state, dict):
         action_count = int(state.get("current_attempt_steps", 0) or state.get("total_steps", 0) or 0)
+    state_payload = state if isinstance(state, dict) else {}
+    normalized_last_action = str(state_payload.get("last_action", "") or "")
+    action_input_name = str(state_payload.get("action_input_name", "") or "")
+    if normalized_last_action.lower().startswith("exec(") and action_input_name:
+        normalized_last_action = action_input_name
+    if not normalized_last_action and action_input_name:
+        normalized_last_action = action_input_name
+    if normalized_last_action:
+        state_payload = {
+            **state_payload,
+            "last_action_name": normalized_last_action,
+        }
     return {
         "summary": (
             f"state={state.get('state', '?')} "
@@ -110,10 +122,12 @@ def summarize_instance_state(state_dir: Path) -> dict:
             f"completed={state.get('levels_completed', '?')} "
             f"history_events={len(history_events) if isinstance(history_events, list) else 0} "
             f"actions={action_count}"
+            + (f" last_action={normalized_last_action}" if normalized_last_action else "")
         ),
-        "state": state if isinstance(state, dict) else {},
+        "state": state_payload,
         "history_count": len(history_events) if isinstance(history_events, list) else 0,
         "action_count": action_count,
+        "last_action_name": normalized_last_action or None,
     }
 
 
