@@ -5,6 +5,7 @@ import signal
 import subprocess
 import sys
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 import harness as deps
@@ -127,8 +128,49 @@ def _launch_flux(runtime: HarnessRuntime, config_path: Path) -> int:
         str(config_path),
     ]
     runtime.log(f"[flux] running: {' '.join(cmd)}")
-    proc = subprocess.run(cmd, cwd=str(runtime.run_dir), env=env)
-    return int(proc.returncode)
+    flux_logs_dir = runtime.run_dir / "flux" / "logs"
+    flux_logs_dir.mkdir(parents=True, exist_ok=True)
+    launcher_log_path = flux_logs_dir / "launcher.log"
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(runtime.run_dir),
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    assert proc.stdout is not None
+    with launcher_log_path.open("a", encoding="utf-8") as log_file:
+        for line in proc.stdout:
+            log_file.write(line)
+            log_file.flush()
+            sys.stdout.write(line)
+            sys.stdout.flush()
+    rc = int(proc.wait())
+    event_path = runtime.run_dir / "flux" / "events.jsonl"
+    if event_path.exists():
+        event_payload = {
+            "eventId": f"evt_launcher_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}",
+            "ts": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "kind": "launcher.child_exited",
+            "workspaceRoot": str(runtime.run_dir),
+            "summary": f"flux child exited with code {rc}",
+            "payload": {"exitCode": rc, "logFile": str(launcher_log_path)},
+        }
+        with event_path.open("a", encoding="utf-8") as event_file:
+            event_file.write(json.dumps(event_payload) + "\n")
+    state_path = runtime.run_dir / "flux" / "state.json"
+    if state_path.exists():
+        try:
+            state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+            if isinstance(state_payload, dict) and state_payload.get("status") == "running":
+                state_payload["status"] = "stopped"
+                state_payload["updatedAt"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+                state_path.write_text(json.dumps(state_payload, indent=2) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+    return rc
 
 
 def main() -> None:
