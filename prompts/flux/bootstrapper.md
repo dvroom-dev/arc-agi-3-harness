@@ -18,6 +18,10 @@ Goals:
 - For every solved level, include the best known action sequence and explain the known mechanics and logic behind that sequence.
 - Carry forward useful mechanic knowledge cumulatively across levels. The next solver should inherit the confirmed rules from earlier solved levels as well as any confirmed new mechanics from later solved/frontier levels.
 - Do not treat solved levels as replay only. Their synthetic messages should explain the mechanics that remain relevant later, not just list the route.
+- Prefer this seed message structure:
+  - one cumulative mechanics message summarizing the confirmed reusable rules learned so far across all levels
+  - one solved-route message per solved level, explaining why that route works
+  - one frontier message naming the unresolved mechanic/branch that matters next
 - For the frontier level, include either:
   - the best current solve attempt
   - or one short, high-value exploration branch targeting the most important unresolved feature
@@ -35,6 +39,7 @@ Goals:
   - a trigger changes the HUD/goal symbol color or state
 - When such mechanics are known, the frontier message should say both what the mechanic does and why it matters for the next branch.
 - If a later solved/frontier level reveals a new mechanic that is likely reusable, add it to the cumulative mechanic summary instead of isolating it in a single frontier-only sentence.
+- Do not omit a confirmed later-level mechanic just because the frontier replay is not stable yet. If the solver has already learned a reusable rule, pass that rule forward in the seed text even if the full frontier route is still unresolved.
 - Do not write vague seed guidance like "keep exploring" or "make progress".
 - Do not anchor the seed on an older frontier if the accepted model already supports a better full-run opening from level 1.
 - Keep replay steps deterministic and minimal.

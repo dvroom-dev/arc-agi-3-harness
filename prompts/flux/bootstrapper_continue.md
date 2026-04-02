@@ -22,6 +22,10 @@ Rules:
 - Return `finalize_seed` only when the current seed is ready to be replayed from level 1 on a fresh real game.
 - Keep solved-level steps ideal and deterministic.
 - Keep the mechanic explanation cumulative across levels. Preserve confirmed rules from solved levels and add later confirmed mechanics that matter for future reasoning.
+- Keep the seed message structure disciplined:
+  - cumulative mechanics summary first
+  - solved-level route explanations next
+  - frontier branch/mechanic message last
 - For the frontier, either choose the best current solve attempt or one short exploration branch for the most important unresolved feature.
 - Preserve explanations of known mechanics and logical choices in the synthetic seed messages.
 - If the frontier now has confirmed trigger/resource mechanics, rewrite the frontier seed message to name them explicitly.
@@ -30,5 +34,6 @@ Rules:
   - which trigger rotates a symbol and by how much
   - whether a HUD symbol must match an exit symbol
   - which trigger changes the HUD symbol color/state
+- Even if the frontier replay is still unstable, preserve any confirmed reusable mechanic from that level in the cumulative mechanic summary so the next solver can reason from it immediately.
 
 Return fresh `bootstrap_seed_decision_v1` JSON.
