@@ -25,6 +25,13 @@ Goals:
   - why solved-level actions are correct
   - what unresolved feature matters next
   - why the frontier branch is chosen
+- For the frontier level, if any trigger/resource mechanics are confirmed, name them explicitly in the seed message instead of burying them in generic prose.
+- Typical examples to surface when confirmed by evidence:
+  - a refill tile or region restores fuel or another budget
+  - a trigger rotates a HUD or goal symbol by a fixed amount
+  - a HUD symbol must match an exit/goal symbol before completion
+  - a trigger changes the HUD/goal symbol color or state
+- When such mechanics are known, the frontier message should say both what the mechanic does and why it matters for the next branch.
 - Do not write vague seed guidance like "keep exploring" or "make progress".
 - Do not anchor the seed on an older frontier if the accepted model already supports a better full-run opening from level 1.
 - Keep replay steps deterministic and minimal.

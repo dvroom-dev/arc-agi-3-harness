@@ -23,5 +23,11 @@ Rules:
 - Keep solved-level steps ideal and deterministic.
 - For the frontier, either choose the best current solve attempt or one short exploration branch for the most important unresolved feature.
 - Preserve explanations of known mechanics and logical choices in the synthetic seed messages.
+- If the frontier now has confirmed trigger/resource mechanics, rewrite the frontier seed message to name them explicitly.
+- Examples of the right level of specificity:
+  - which trigger refills fuel or budget
+  - which trigger rotates a symbol and by how much
+  - whether a HUD symbol must match an exit symbol
+  - which trigger changes the HUD symbol color/state
 
 Return fresh `bootstrap_seed_decision_v1` JSON.
