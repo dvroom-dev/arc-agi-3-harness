@@ -13,6 +13,27 @@ from common import (
 )
 
 
+def _classify_infrastructure_failure(message: str) -> dict | None:
+    text = str(message or "")
+    lowered = text.lower()
+    if "visible_sequence_surface.py" in text or "preserve_local_sequence_surface" in text:
+        return {
+            "type": "sequence_surface_race",
+            "message": text,
+        }
+    if "shutil.error" in lowered and "no such file or directory" in lowered:
+        return {
+            "type": "snapshot_copy_race",
+            "message": text,
+        }
+    if '"type": "missing_sequence"' in text or "sequence not found under:" in text:
+        return {
+            "type": "missing_sequence_surface",
+            "message": text,
+        }
+    return None
+
+
 def _read_frontier_level(model_workspace: Path) -> int:
     level_meta = model_workspace / "level_current" / "meta.json"
     try:
@@ -78,11 +99,13 @@ def main() -> None:
     try:
         _default_code, compare_payload = _run_compare(model_workspace, meta, child_env, frontier_level=None)
     except Exception as exc:
+        infra = _classify_infrastructure_failure(str(exc))
         write_json_stdout(
             {
                 "accepted": False,
                 "message": f"compare_sequences failed: {exc}",
                 "model_output": model_output,
+                "infrastructure_failure": infra,
             }
         )
         return
@@ -94,12 +117,14 @@ def main() -> None:
         try:
             _frontier_code, frontier_compare_payload = _run_compare(model_workspace, meta, child_env, frontier_level=frontier_level)
         except Exception as exc:
+            infra = _classify_infrastructure_failure(str(exc))
             write_json_stdout(
                 {
                     "accepted": False,
                     "message": f"frontier compare_sequences failed: {exc}",
                     "model_output": model_output,
                     "compare_payload": compare_payload,
+                    "infrastructure_failure": infra,
                 }
             )
             return
