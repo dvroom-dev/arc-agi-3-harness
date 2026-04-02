@@ -57,6 +57,9 @@ Rules:
 - Hard rule: after one blocked/no-op result, either switch actions, continue a different nearby branch, or explain why a reset is more informative. Do not spend multiple actions proving the same blockage.
 - Treat compare artifacts as diagnostic, not as direct action advice. A reference mismatch or `model_frame_diff = 0` does not mean the correct next real action is a no-op.
 - If a reference sequence diverges immediately, use it to identify which feature/mechanic is still unexplained, then run the shortest concrete probe for that feature. Do not copy its apparent no-op behavior blindly.
+- Treat BFS/reachability output as geometry only, not as proof that a long chained route is valid. Special tiles can reset, teleport, recolor, rotate, consume lives, or otherwise break naive composition.
+- Before trusting a long path that goes through a special marker, cross, doorway, or icon interaction, verify that trigger locally with a short stateful probe.
+- If a long route returns you to the start, consumes only bar/life pixels, or otherwise reveals a hidden reset/death mechanic, mark that branch invalid at the first trigger step and change the earliest branch choice. Do not rerun near-identical long scripts from the same opening.
 
 First-turn default plan:
 1. Run `arc_level --json`.
