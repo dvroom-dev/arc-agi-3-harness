@@ -5,6 +5,14 @@ Goals:
 - Your working directory is the run root.
 - The durable model workspace is under `agent/`.
 - Update `flux/seed/current.json` with synthetic messages and replay steps.
+- Write `flux/seed/current.json` using this exact structure:
+  - `version: 1`
+  - `generatedAt: "<iso8601>"`
+  - `syntheticMessages: [{ "role": "assistant" | "user", "text": "..." }]`
+  - `replayPlan: [{ "tool": "shell" | "write_file" | "read_file", "args": { ... } }]`
+  - `assertions: [ ... ]`
+- Do not use `role: "system"` inside `syntheticMessages`.
+- Do not use `content`; use `text`.
 - Do not edit the model itself.
 - Treat the seed as an ideal synthetic session from level 1 onward.
 - For every solved level, include the best known action sequence and explain the known mechanics and logic behind that sequence.

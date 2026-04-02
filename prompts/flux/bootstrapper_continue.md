@@ -12,6 +12,11 @@ Generic replay fallback:
 Re-read `flux/seed/current.json`.
 
 Rules:
+- Keep the seed JSON schema exact:
+  - `syntheticMessages` entries use `role` and `text`
+  - allowed roles are only `assistant` and `user`
+  - do not write `system`
+  - do not write `content`
 - If the seed changed and rehearsal exposed an error or weaker-than-expected branch, revise the seed and return `continue_refining`.
 - If rehearsal succeeded but the seed can still be improved into a better full-run level-1-to-frontier seed, revise it and return `continue_refining`.
 - Return `finalize_seed` only when the current seed is ready to be replayed from level 1 on a fresh real game.
