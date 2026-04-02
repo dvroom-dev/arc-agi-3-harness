@@ -14,7 +14,7 @@ from .visible_compare_surface import (
     overlay_latest_compare_artifacts,
     sync_workspace_compare_surface,
 )
-from .io_utils import write_json_atomic, write_text_atomic
+from .io_utils import copytree_stable, write_json_atomic, write_text_atomic
 from .visible_sequence_surface import preserve_local_sequence_surface
 
 from .visible_artifacts import (
@@ -360,7 +360,7 @@ def sync_workspace_level_view(
     level_current = game_dir / "level_current"
     temp = game_dir / ".level_current.tmp"
     _remove_path(temp)
-    shutil.copytree(src, temp)
+    copytree_stable(src, temp)
     preserve_local_sequence_surface(
         game_dir=game_dir,
         temp_level_current=temp,
@@ -416,7 +416,7 @@ def sync_workspace_level_view(
     try:
         compat_level.symlink_to(level_current.name, target_is_directory=True)
     except Exception:
-        shutil.copytree(level_current, compat_level)
+        copytree_stable(level_current, compat_level)
     rewrite_model_status_payload_for_visible_level(
         path=model_status_path(game_dir),
         frontier_level=int(frontier_level),

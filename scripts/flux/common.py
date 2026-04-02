@@ -11,6 +11,8 @@ from pathlib import Path
 from contextlib import contextmanager
 import fcntl
 
+from arc_model_runtime.io_utils import copytree_stable
+
 
 def read_json_stdin() -> dict:
     raw = sys.stdin.read().strip()
@@ -207,7 +209,7 @@ def sync_solver_artifacts_to_model_workspace(meta: dict, solver_dir: Path, state
             _cleanup_path(backup_target)
             try:
                 if child.is_dir():
-                    shutil.copytree(child, temp_target)
+                    copytree_stable(child, temp_target)
                 else:
                     shutil.copy2(child, temp_target)
                 if destination.exists() or destination.is_symlink():
@@ -285,7 +287,7 @@ def _ensure_sequence_surface(meta: dict, model_workspace: Path) -> None:
         level_num = 1
     level_dir = model_workspace / f"level_{level_num}"
     if not level_dir.exists():
-        shutil.copytree(level_current, level_dir)
+        copytree_stable(level_current, level_dir)
     elif not any(level_dir.iterdir()):
         for child in level_current.iterdir():
             destination = level_dir / child.name
@@ -295,7 +297,7 @@ def _ensure_sequence_surface(meta: dict, model_workspace: Path) -> None:
                 else:
                     destination.unlink(missing_ok=True)
             if child.is_dir():
-                shutil.copytree(child, destination)
+                copytree_stable(child, destination)
             else:
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(child, destination)

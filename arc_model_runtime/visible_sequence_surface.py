@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+from .io_utils import copytree_stable
 
 def preserve_local_sequence_surface(
     *,
@@ -24,5 +25,5 @@ def preserve_local_sequence_surface(
                 shutil.rmtree(destination, ignore_errors=True)
             else:
                 destination.unlink(missing_ok=True)
-        shutil.copytree(sequences_dir, destination)
+        copytree_stable(sequences_dir, destination)
         return
