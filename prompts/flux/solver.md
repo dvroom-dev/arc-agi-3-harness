@@ -53,6 +53,10 @@ Rules:
 - Once mechanics are clear, solve the game rather than staying in perpetual exploration.
 - If you already have a plausible solve path, attempt it before doing more analysis.
 - If you do not yet have a plausible solve path, choose the one visible feature most likely to unlock progress and probe it directly.
+- Hard rule: if an action from the current state produces no positional change, no meaningful state change, or only a repeated "bump into wall / blocked move" result, do not keep repeating that same action from the same state.
+- Hard rule: after one blocked/no-op result, either switch actions, continue a different nearby branch, or explain why a reset is more informative. Do not spend multiple actions proving the same blockage.
+- Treat compare artifacts as diagnostic, not as direct action advice. A reference mismatch or `model_frame_diff = 0` does not mean the correct next real action is a no-op.
+- If a reference sequence diverges immediately, use it to identify which feature/mechanic is still unexplained, then run the shortest concrete probe for that feature. Do not copy its apparent no-op behavior blindly.
 
 First-turn default plan:
 1. Run `arc_level --json`.
