@@ -14,6 +14,7 @@ from .visible_compare_surface import (
     overlay_latest_compare_artifacts,
     sync_workspace_compare_surface,
 )
+from .io_utils import write_json_atomic, write_text_atomic
 from .visible_sequence_surface import preserve_local_sequence_surface
 
 from .visible_artifacts import (
@@ -80,9 +81,7 @@ def write_analysis_level_pin(game_dir: Path, *, level: int, phase: str, reason: 
         "updated_at_utc": datetime.now(timezone.utc).isoformat(),
     }
     path = analysis_level_pin_path(game_dir)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2) + "\n")
-    tmp.replace(path)
+    write_json_atomic(path, payload)
 
 
 def update_analysis_level_pin(game_dir: Path, updates: dict) -> dict | None:
@@ -92,9 +91,7 @@ def update_analysis_level_pin(game_dir: Path, updates: dict) -> dict | None:
     current.update(dict(updates))
     current["updated_at_utc"] = datetime.now(timezone.utc).isoformat()
     path = analysis_level_pin_path(game_dir)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(current, indent=2) + "\n")
-    tmp.replace(path)
+    write_json_atomic(path, current)
     return current
 
 

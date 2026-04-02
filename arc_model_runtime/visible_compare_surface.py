@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import shutil
 from pathlib import Path
+from .io_utils import write_text_atomic
 
 
 def overlay_latest_compare_artifacts(
@@ -111,7 +112,7 @@ def sync_workspace_compare_surface(
     temp_compare_dir.mkdir(parents=True, exist_ok=True)
     for stale_report in temp_compare_dir.glob("seq_*.md"):
         stale_report.unlink(missing_ok=True)
-    temp_compare_json.write_text(json_text, encoding="utf-8")
-    temp_compare_md.write_text(md_text, encoding="utf-8")
-    root_compare_json.write_text(json_text, encoding="utf-8")
-    root_compare_md.write_text(md_text, encoding="utf-8")
+    write_text_atomic(temp_compare_json, json_text)
+    write_text_atomic(temp_compare_md, md_text)
+    write_text_atomic(root_compare_json, json_text)
+    write_text_atomic(root_compare_md, md_text)

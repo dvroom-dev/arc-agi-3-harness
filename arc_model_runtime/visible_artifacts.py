@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from .io_utils import write_json_atomic, write_jsonl_atomic, write_text_atomic
 
 ANALYSIS_LEVEL_STATUS_FILE = "analysis_level_status.json"
 LEVEL_TRANSITION_FILE = "level_transition.json"
@@ -64,25 +65,12 @@ def sanitize_visible_json_payload(payload: object, *, visible_level: int) -> obj
     return payload
 
 
-def _write_json_atomic(path: Path, payload: object) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(path)
-
-
-def _write_jsonl_atomic(path: Path, rows: list[object]) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    text = "".join(json.dumps(row, ensure_ascii=True) + "\n" for row in rows)
-    tmp.write_text(text, encoding="utf-8")
-    tmp.replace(path)
-
-
 def _load_hex_rows(path: Path) -> list[str]:
     return [line.rstrip("\n").upper() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def _write_hex_rows(path: Path, rows: list[str]) -> None:
-    path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+    write_text_atomic(path, "\n".join(rows) + "\n")
 
 
 def visible_level_status_payload(
@@ -189,9 +177,9 @@ def sanitize_visible_level_tree(level_root: Path, *, visible_level: int) -> None
                 redacted=True,
                 source_turn_dir=rel_step_dir,
             )
-            _write_json_atomic(step_dir / LEVEL_TRANSITION_FILE, transition_payload)
+            write_json_atomic(step_dir / LEVEL_TRANSITION_FILE, transition_payload)
             transition_redacted_paths.append(rel_step_dir)
-        _write_json_atomic(meta_path, sanitize_visible_json_payload(payload, visible_level=visible_level))
+        write_json_atomic(meta_path, sanitize_visible_json_payload(payload, visible_level=visible_level))
 
     for json_path in sorted(level_root.rglob("*.json")):
         if json_path.name == "meta.json" and json_path in meta_paths:
@@ -201,7 +189,7 @@ def sanitize_visible_level_tree(level_root: Path, *, visible_level: int) -> None
         payload = _read_json_if_exists(json_path)
         if payload is None:
             continue
-        _write_json_atomic(json_path, sanitize_visible_json_payload(payload, visible_level=visible_level))
+        write_json_atomic(json_path, sanitize_visible_json_payload(payload, visible_level=visible_level))
 
     for jsonl_path in sorted(level_root.rglob("*.jsonl")):
         rows: list[object] = []
@@ -218,17 +206,17 @@ def sanitize_visible_level_tree(level_root: Path, *, visible_level: int) -> None
             rows.append(sanitize_visible_json_payload(row, visible_level=visible_level))
             dirty = True
         if dirty:
-            _write_jsonl_atomic(jsonl_path, rows)
+            write_jsonl_atomic(jsonl_path, rows)
 
     if current_state_rows is not None:
         current_state_path = level_root / "current_state.hex"
         if current_state_path.exists():
             _write_hex_rows(current_state_path, current_state_rows)
 
-    _write_json_atomic(
-        level_root / ANALYSIS_LEVEL_STATUS_FILE,
-        visible_level_status_payload(
-            visible_level=visible_level,
+        write_json_atomic(
+            level_root / ANALYSIS_LEVEL_STATUS_FILE,
+            visible_level_status_payload(
+                visible_level=visible_level,
             frontier_hidden_by_pin=boundary_hidden,
             pin_phase=pin_phase,
             boundary_redacted=boundary_hidden,
@@ -236,7 +224,7 @@ def sanitize_visible_level_tree(level_root: Path, *, visible_level: int) -> None
         ),
     )
     if boundary_hidden:
-        _write_json_atomic(
+        write_json_atomic(
             level_root / LEVEL_TRANSITION_FILE,
             level_transition_payload(visible_level=visible_level, redacted=True),
         )

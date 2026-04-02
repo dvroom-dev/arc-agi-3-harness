@@ -8,6 +8,8 @@ import sys
 import time
 import uuid
 from pathlib import Path
+from contextlib import contextmanager
+import fcntl
 
 
 def read_json_stdin() -> dict:
@@ -33,6 +35,18 @@ def read_json_file_with_retry(path: Path, *, attempts: int = 4, delay_s: float =
     if last_error is not None:
         raise last_error
     raise RuntimeError(f"failed reading JSON from {path}")
+
+
+@contextmanager
+def workspace_sync_lock(model_workspace: Path):
+    lock_path = model_workspace / ".flux-sync.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def write_json_stdout(payload: dict) -> None:
@@ -188,19 +202,31 @@ def sync_solver_artifacts_to_model_workspace(meta: dict, solver_dir: Path, state
         last_error: BaseException | None = None
         for attempt in range(3):
             temp_target = destination.parent / f".{destination.name}.flux-sync-{uuid.uuid4().hex}"
+            backup_target = destination.parent / f".{destination.name}.flux-prev-{uuid.uuid4().hex}"
             _cleanup_path(temp_target)
+            _cleanup_path(backup_target)
             try:
                 if child.is_dir():
                     shutil.copytree(child, temp_target)
                 else:
                     shutil.copy2(child, temp_target)
-                _cleanup_path(destination)
+                if destination.exists() or destination.is_symlink():
+                    destination.replace(backup_target)
                 temp_target.replace(destination)
+                _cleanup_path(backup_target)
                 synced.append(str(destination))
                 return
             except BaseException as exc:
                 last_error = exc
                 _cleanup_path(temp_target)
+                if backup_target.exists() or backup_target.is_symlink():
+                    if not (destination.exists() or destination.is_symlink()):
+                        try:
+                            backup_target.replace(destination)
+                        except Exception:
+                            pass
+                    else:
+                        _cleanup_path(backup_target)
                 if not _is_retryable_copy_error(exc) or attempt == 2:
                     raise RuntimeError(
                         f"failed to sync artifact {child} -> {destination}: {exc}"
@@ -209,40 +235,41 @@ def sync_solver_artifacts_to_model_workspace(meta: dict, solver_dir: Path, state
         if last_error is not None:
             raise RuntimeError(f"failed to sync artifact {child} -> {destination}: {last_error}")
 
-    for child in solver_dir.iterdir():
-        name = child.name
-        should_sync = (
-            name == "level_current"
-            or name == "analysis_level"
-            or name.startswith("level_")
-            or name in {
-                "current_compare.json",
-                "current_compare.md",
-                "component_coverage.json",
-                "component_coverage.md",
-                "analysis_state.json",
-                ".analysis_level_pin.json",
-                "model_status.json",
-            }
-        )
-        if not should_sync:
-            continue
-        destination = model_workspace / name
-        _replace_copy(child, destination)
+    with workspace_sync_lock(model_workspace):
+        for child in solver_dir.iterdir():
+            name = child.name
+            should_sync = (
+                name == "level_current"
+                or name == "analysis_level"
+                or name.startswith("level_")
+                or name in {
+                    "current_compare.json",
+                    "current_compare.md",
+                    "component_coverage.json",
+                    "component_coverage.md",
+                    "analysis_state.json",
+                    ".analysis_level_pin.json",
+                    "model_status.json",
+                }
+            )
+            if not should_sync:
+                continue
+            destination = model_workspace / name
+            _replace_copy(child, destination)
 
-    if state_dir is not None:
-        game_artifacts_root = state_dir / "game_artifacts"
-        if game_artifacts_root.exists():
-            for game_root in sorted(game_artifacts_root.iterdir()):
-                if not game_root.is_dir():
-                    continue
-                for child in sorted(game_root.iterdir()):
-                    if not child.is_dir():
+        if state_dir is not None:
+            game_artifacts_root = state_dir / "game_artifacts"
+            if game_artifacts_root.exists():
+                for game_root in sorted(game_artifacts_root.iterdir()):
+                    if not game_root.is_dir():
                         continue
-                    if child.name.startswith("level_"):
-                        _replace_copy(child, model_workspace / child.name)
+                    for child in sorted(game_root.iterdir()):
+                        if not child.is_dir():
+                            continue
+                        if child.name.startswith("level_"):
+                            _replace_copy(child, model_workspace / child.name)
 
-    _ensure_sequence_surface(meta, model_workspace)
+        _ensure_sequence_surface(meta, model_workspace)
     return synced
 
 

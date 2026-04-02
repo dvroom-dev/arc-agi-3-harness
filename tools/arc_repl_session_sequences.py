@@ -6,6 +6,7 @@ import shutil
 from pathlib import Path
 
 import numpy as np
+from arc_model_runtime.io_utils import write_json_atomic, write_text_atomic
 
 CANONICAL_INITIAL_STATE_SOURCES = {
     "session_bootstrap_reset",
@@ -23,13 +24,13 @@ def grid_from_hex_rows(rows: list[str]) -> np.ndarray:
 def write_hex_grid(path: Path, grid: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = ["".join(f"{int(v):X}" for v in row) for row in grid]
-    path.write_text("\n".join(rows) + "\n")
+    write_text_atomic(path, "\n".join(rows) + "\n")
 
 
 def write_hex_rows(path: Path, rows: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     normalized = [str(row).strip().upper() for row in rows if str(row).strip()]
-    path.write_text("\n".join(normalized) + "\n")
+    write_text_atomic(path, "\n".join(normalized) + "\n")
 
 
 def _safe_action_slug(name: str) -> str:
@@ -307,7 +308,7 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
             init_meta["reset_source_action_index"] = int(
                 reset_observed.get("source_action_index", 0) or 0
             )
-        (level_dir / "initial_state.meta.json").write_text(json.dumps(init_meta, indent=2) + "\n")
+        write_json_atomic(level_dir / "initial_state.meta.json", init_meta)
 
     for seq in sequences:
         level = int(seq["level"])
@@ -369,7 +370,7 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
                     "frame_sequence_hex": frame_files,
                 },
             }
-            (step_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+            write_json_atomic(step_dir / "meta.json", meta)
 
             action["files"] = {
                 "before_state_hex": str(step_dir.relative_to(level_dir) / "before_state.hex"),
@@ -396,4 +397,4 @@ def sync_level_sequences(*, session, game_dir: Path) -> None:
             "action_count": int(seq["action_count"]),
             "actions": seq["actions"],
         }
-        (seq_root / f"{seq_id}.json").write_text(json.dumps(seq_payload, indent=2) + "\n")
+        write_json_atomic(seq_root / f"{seq_id}.json", seq_payload)

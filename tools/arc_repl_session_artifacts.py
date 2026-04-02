@@ -8,6 +8,7 @@ import shutil
 import numpy as np
 from arc_model_runtime.utils import effective_analysis_level, sanitize_visible_level_tree
 from arc_model_runtime.visible_artifacts import LEVEL_TRANSITION_FILE, level_transition_payload
+from arc_model_runtime.io_utils import write_json_atomic, write_text_atomic
 
 try:
     from arc_repl_session_sequences import (
@@ -198,18 +199,14 @@ def _materialize_level_current_view(
     _remove_path(temp)
     shutil.copytree(src, temp)
     sanitize_visible_level_tree(temp, visible_level=int(visible_level))
-    (temp / "meta.json").write_text(
-        json.dumps(
-            {
-                "schema_version": "arc_repl.level_current.v1",
-                "game_id": str(session.game_id),
-                "level": int(visible_level),
-                "analysis_level_pinned": int(visible_level) != int(current_level),
-            },
-            indent=2,
-        )
-        + "\n",
-        encoding="utf-8",
+    write_json_atomic(
+        temp / "meta.json",
+        {
+            "schema_version": "arc_repl.level_current.v1",
+            "game_id": str(session.game_id),
+            "level": int(visible_level),
+            "analysis_level_pinned": int(visible_level) != int(current_level),
+        },
     )
     _remove_path(level_current)
     temp.rename(level_current)
@@ -319,30 +316,27 @@ def _write_level_turn_files(
             "meta_json": "meta.json",
         },
     }
-    (turn_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+    write_json_atomic(turn_dir / "meta.json", meta)
     if int(meta["level_after"]) > int(meta["level_before"]):
-        (turn_dir / LEVEL_TRANSITION_FILE).write_text(
-            json.dumps(
-                {
-                    **level_transition_payload(
-                        visible_level=int(level_number),
-                        redacted=False,
-                        source_turn_dir=f"level_{level_number}/turn_{int(session.turn):04d}",
-                    ),
-                    "level_before": int(meta["level_before"]),
-                    "level_after": int(meta["level_after"]),
-                    "levels_completed_before": int(meta["levels_completed_before"]),
-                    "levels_completed_after": int(meta["levels_completed_after"]),
-                    "level_complete_before": bool(meta["level_complete_before"]),
-                    "level_complete_after": bool(meta["level_complete_after"]),
-                    "game_over_before": bool(meta["game_over_before"]),
-                    "game_over_after": bool(meta["game_over_after"]),
-                    "state_before_action": str(meta["state_before_action"]),
-                    "state_after_action": str(meta["state_after_action"]),
-                },
-                indent=2,
-            )
-            + "\n"
+        write_json_atomic(
+            turn_dir / LEVEL_TRANSITION_FILE,
+            {
+                **level_transition_payload(
+                    visible_level=int(level_number),
+                    redacted=False,
+                    source_turn_dir=f"level_{level_number}/turn_{int(session.turn):04d}",
+                ),
+                "level_before": int(meta["level_before"]),
+                "level_after": int(meta["level_after"]),
+                "levels_completed_before": int(meta["levels_completed_before"]),
+                "levels_completed_after": int(meta["levels_completed_after"]),
+                "level_complete_before": bool(meta["level_complete_before"]),
+                "level_complete_after": bool(meta["level_complete_after"]),
+                "game_over_before": bool(meta["game_over_before"]),
+                "game_over_after": bool(meta["game_over_after"]),
+                "state_before_action": str(meta["state_before_action"]),
+                "state_after_action": str(meta["state_after_action"]),
+            },
         )
 
     # Per-level append-only index, plus game-wide index for quick scan.
@@ -360,8 +354,8 @@ def _write_level_turn_files(
     }
     for idx in (level_index, game_index):
         idx.parent.mkdir(parents=True, exist_ok=True)
-        with idx.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=True) + "\n")
+        existing = idx.read_text(encoding="utf-8") if idx.exists() else ""
+        write_text_atomic(idx, existing + json.dumps(entry, ensure_ascii=True) + "\n")
 
     sync_level_sequences(session=session, game_dir=artifacts_game_dir)
     current_level = int(session.frame.levels_completed) + 1
@@ -406,7 +400,7 @@ def save_level_completion_records(
     scripts_dir = session.arc_dir / "script-history"
     scripts_dir.mkdir(parents=True, exist_ok=True)
     script_file = scripts_dir / f"turn_{session.turn:03d}_script.py"
-    script_file.write_text(script_source)
+    write_text_atomic(script_file, script_source)
 
     max_recorded = session.deps._read_max_recorded_completion_level(session.completions_path)
     completion_windows = session.deps._completion_action_windows_by_level(session.events)

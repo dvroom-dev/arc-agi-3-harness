@@ -31,6 +31,7 @@ from .utils import (
     to_jsonable,
 )
 from .sequence_compare import compare_sequences as compare_sequences_impl
+from .io_utils import write_json_atomic
 
 MODEL_SESSION_SCHEMA_VERSION = 1
 MODEL_STATUS_SCHEMA_VERSION = 1
@@ -220,9 +221,7 @@ class ModelSession:
 
     def persist_model_status(self, payload: dict[str, Any], *, action_name: str, exit_code: int) -> None:
         summary = self._model_status_summary(payload, action_name=action_name, exit_code=exit_code)
-        tmp = self.model_status_path.with_suffix(self.model_status_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(summary, indent=2) + "\n")
-        tmp.replace(self.model_status_path)
+        write_json_atomic(self.model_status_path, summary)
 
     def _load_helper_file(self, path: Path, *, required: bool) -> None:
         if not path.exists():
@@ -265,9 +264,7 @@ class ModelSession:
             "last_action_name": str(action_name),
             "env": to_jsonable(self._persist_env_dict()),
         }
-        tmp = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, indent=2))
-        tmp.replace(self.state_path)
+        write_json_atomic(self.state_path, payload)
 
     def _restore_from_disk(self) -> bool:
         if not self.state_path.exists():

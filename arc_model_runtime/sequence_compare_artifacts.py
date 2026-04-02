@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .sequence_compare_render import current_compare_markdown, report_md
+from .io_utils import write_text_atomic
 from .utils import (
     load_analysis_state,
     canonical_game_artifacts_dir,
@@ -19,14 +20,6 @@ def _redact_payload_for_pinned_level(payload: dict, *, pinned_level: int | None)
         return payload
     sanitized = sanitize_visible_json_payload(payload, visible_level=int(pinned_level))
     return sanitized if isinstance(sanitized, dict) else payload
-
-
-def _write_text_atomic(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(text)
-    tmp.replace(path)
-
 
 def _export_compare_reports(reports: list[dict[str, Any]]) -> list[dict[str, Any]]:
     exported: list[dict[str, Any]] = []
@@ -87,8 +80,8 @@ def persist_current_compare(session, payload: dict[str, Any]) -> None:
     }
     json_text = json.dumps(summary_payload, indent=2) + "\n"
     md_text = current_compare_markdown(summary_payload)
-    _write_text_atomic(session.game_dir / "current_compare.json", json_text)
-    _write_text_atomic(session.game_dir / "current_compare.md", md_text)
+    write_text_atomic(session.game_dir / "current_compare.json", json_text)
+    write_text_atomic(session.game_dir / "current_compare.md", md_text)
     analysis_state = load_analysis_state(session.game_dir)
     analysis_level = None
     frontier_level = None
@@ -109,45 +102,45 @@ def persist_current_compare(session, payload: dict[str, Any]) -> None:
     )
     if not write_to_analysis_surface:
         level_current = session.game_dir / "level_current" / "sequence_compare"
-        _write_text_atomic(level_current / "current_compare.json", json_text)
-        _write_text_atomic(level_current / "current_compare.md", md_text)
+        write_text_atomic(level_current / "current_compare.json", json_text)
+        write_text_atomic(level_current / "current_compare.md", md_text)
         for report in reports:
             if not isinstance(report, dict):
                 continue
             sequence_id = str(report.get("sequence_id") or "").strip()
             if sequence_id:
-                _write_text_atomic(level_current / f"{sequence_id}.md", report_md(report))
+                write_text_atomic(level_current / f"{sequence_id}.md", report_md(report))
     analysis_level_dir = session.game_dir / "analysis_level" / "sequence_compare"
     if write_to_analysis_surface or compare_level != int(session.env.current_level):
-        _write_text_atomic(analysis_level_dir / "current_compare.json", json_text)
-        _write_text_atomic(analysis_level_dir / "current_compare.md", md_text)
+        write_text_atomic(analysis_level_dir / "current_compare.json", json_text)
+        write_text_atomic(analysis_level_dir / "current_compare.md", md_text)
         for report in reports:
             if not isinstance(report, dict):
                 continue
             sequence_id = str(report.get("sequence_id") or "").strip()
             if sequence_id:
-                _write_text_atomic(analysis_level_dir / f"{sequence_id}.md", report_md(report))
+                write_text_atomic(analysis_level_dir / f"{sequence_id}.md", report_md(report))
 
     level_compare = resolve_level_dir(session.game_dir, compare_level)
     if level_compare is not None:
         compare_dir = level_compare / "sequence_compare"
-        _write_text_atomic(compare_dir / "current_compare.json", json_text)
-        _write_text_atomic(compare_dir / "current_compare.md", md_text)
+        write_text_atomic(compare_dir / "current_compare.json", json_text)
+        write_text_atomic(compare_dir / "current_compare.md", md_text)
         for report in reports:
             if not isinstance(report, dict):
                 continue
             sequence_id = str(report.get("sequence_id") or "").strip()
             if sequence_id:
-                _write_text_atomic(compare_dir / f"{sequence_id}.md", report_md(report))
+                write_text_atomic(compare_dir / f"{sequence_id}.md", report_md(report))
 
     canonical_artifacts = canonical_game_artifacts_dir(session.game_dir)
     if canonical_artifacts is not None:
         canonical_compare_dir = canonical_artifacts / f"level_{compare_level}" / "sequence_compare"
-        _write_text_atomic(canonical_compare_dir / "current_compare.json", json_text)
-        _write_text_atomic(canonical_compare_dir / "current_compare.md", md_text)
+        write_text_atomic(canonical_compare_dir / "current_compare.json", json_text)
+        write_text_atomic(canonical_compare_dir / "current_compare.md", md_text)
         for report in reports:
             if not isinstance(report, dict):
                 continue
             sequence_id = str(report.get("sequence_id") or "").strip()
             if sequence_id:
-                _write_text_atomic(canonical_compare_dir / f"{sequence_id}.md", report_md(report))
+                write_text_atomic(canonical_compare_dir / f"{sequence_id}.md", report_md(report))
