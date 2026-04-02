@@ -21,6 +21,7 @@ Rules:
 - If rehearsal succeeded but the seed can still be improved into a better full-run level-1-to-frontier seed, revise it and return `continue_refining`.
 - Return `finalize_seed` only when the current seed is ready to be replayed from level 1 on a fresh real game.
 - Keep solved-level steps ideal and deterministic.
+- Keep the mechanic explanation cumulative across levels. Preserve confirmed rules from solved levels and add later confirmed mechanics that matter for future reasoning.
 - For the frontier, either choose the best current solve attempt or one short exploration branch for the most important unresolved feature.
 - Preserve explanations of known mechanics and logical choices in the synthetic seed messages.
 - If the frontier now has confirmed trigger/resource mechanics, rewrite the frontier seed message to name them explicitly.
