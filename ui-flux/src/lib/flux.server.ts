@@ -105,6 +105,11 @@ async function readActiveSessionRecords(runRoot: string, state: JsonRecord | nul
   return records;
 }
 
+async function readAttemptArcState(attemptRoot: string | null): Promise<JsonRecord | null> {
+  if (!attemptRoot) return null;
+  return await readJson<JsonRecord>(path.join(attemptRoot, "supervisor", "arc", "state.json"));
+}
+
 async function listSessionSummaries(baseDir: string, sessionType: FluxSessionType): Promise<FluxSessionSummary[]> {
   const sessionRoot = path.join(baseDir, ".ai-flux", "sessions", sessionType);
   const entries = await fs.readdir(sessionRoot, { withFileTypes: true }).catch(() => []);
@@ -129,7 +134,7 @@ async function latestAttemptDir(runRoot: string): Promise<string | null> {
   return sorted[0]?.fullPath ?? null;
 }
 
-async function pickGameDirForRun(runId: string, state: JsonRecord | null): Promise<{ gameDir: string | null; attemptId: string | null }> {
+async function pickGameDirForRun(runId: string, state: JsonRecord | null): Promise<{ gameDir: string | null; attemptId: string | null; attemptRoot: string | null }> {
   const root = runDir(runId);
   const active = (state?.active as JsonRecord | undefined)?.solver as JsonRecord | undefined;
   const activeAttemptId = typeof active?.attemptId === "string" ? String(active.attemptId) : null;
@@ -138,7 +143,11 @@ async function pickGameDirForRun(runId: string, state: JsonRecord | null): Promi
     const entries = await fs.readdir(candidate, { withFileTypes: true }).catch(() => []);
     const game = entries.find((entry) => entry.isDirectory() && entry.name.startsWith("game_"));
     if (game) {
-      return { gameDir: path.join(candidate, game.name), attemptId: activeAttemptId };
+      return {
+        gameDir: path.join(candidate, game.name),
+        attemptId: activeAttemptId,
+        attemptRoot: path.join(root, "flux_instances", activeAttemptId),
+      };
     }
   }
   const latestAttempt = await latestAttemptDir(root);
@@ -147,16 +156,20 @@ async function pickGameDirForRun(runId: string, state: JsonRecord | null): Promi
     const entries = await fs.readdir(agentDir, { withFileTypes: true }).catch(() => []);
     const game = entries.find((entry) => entry.isDirectory() && entry.name.startsWith("game_"));
     if (game) {
-      return { gameDir: path.join(agentDir, game.name), attemptId: path.basename(latestAttempt) };
+      return {
+        gameDir: path.join(agentDir, game.name),
+        attemptId: path.basename(latestAttempt),
+        attemptRoot: latestAttempt,
+      };
     }
   }
   const durableAgentDir = path.join(root, "agent");
   const durableEntries = await fs.readdir(durableAgentDir, { withFileTypes: true }).catch(() => []);
   const durableGame = durableEntries.find((entry) => entry.isDirectory() && entry.name.startsWith("game_"));
   if (durableGame) {
-    return { gameDir: path.join(durableAgentDir, durableGame.name), attemptId: null };
+    return { gameDir: path.join(durableAgentDir, durableGame.name), attemptId: null, attemptRoot: null };
   }
-  return { gameDir: null, attemptId: null };
+  return { gameDir: null, attemptId: null, attemptRoot: null };
 }
 
 async function readFrameSnapshots(gameDir: string): Promise<{ frames: FluxFrameSnapshot[]; actions: FluxActionSummary[]; currentLevel: number | null }> {
@@ -291,12 +304,17 @@ function toRunSummary(
   runId: string,
   state: JsonRecord | null,
   runtimeMeta: JsonRecord | null,
+  gameState: JsonRecord | null,
   activeSessionRecords: Partial<Record<FluxSessionType, JsonRecord | null>> = {},
   latestSessionSummaries: Partial<Record<FluxSessionType, FluxSessionSummary[]>> = {},
 ): FluxRunSummary {
   const activeRaw = (state?.active as JsonRecord | undefined) ?? {};
   const status = typeof state?.status === "string" ? String(state.status) : "missing";
   const pid = typeof state?.pid === "number" ? Number(state.pid) : null;
+  const gameStatus = typeof gameState?.state === "string" ? String(gameState.state) : null;
+  const levelsCompleted = typeof gameState?.levels_completed === "number" ? Number(gameState.levels_completed) : null;
+  const winLevels = typeof gameState?.win_levels === "number" ? Number(gameState.win_levels) : null;
+  const solved = gameStatus === "WIN" || (levelsCompleted !== null && winLevels !== null && winLevels > 0 && levelsCompleted >= winLevels);
   const isLive = status === "running" && isPidAlive(pid);
   const active = Object.fromEntries(
     SESSION_TYPES.map((sessionType) => {
@@ -312,8 +330,9 @@ function toRunSummary(
       const resolvedStatus = latestRunningSession && sessionStatus !== "running"
         ? latestRunningSession.status
         : sessionStatus;
+      const effectiveStatus = solved ? "idle" : (isLive ? resolvedStatus : "idle");
       return [sessionType, {
-        status: isLive ? resolvedStatus : "idle",
+        status: effectiveStatus,
         sessionId: resolvedSessionId,
       }];
     }),
@@ -323,8 +342,8 @@ function toRunSummary(
     gameId: typeof runtimeMeta?.game_id === "string" ? String(runtimeMeta.game_id) : null,
     updatedAt: typeof state?.updatedAt === "string" ? String(state.updatedAt) : null,
     startedAt: typeof state?.startedAt === "string" ? String(state.startedAt) : null,
-    status,
-    liveStatus: status === "running" ? (isLive ? "running" : "stale") : (status === "missing" ? "missing" : "stopped"),
+    status: solved ? "WIN" : status,
+    liveStatus: solved ? "stopped" : (status === "running" ? (isLive ? "running" : "stale") : (status === "missing" ? "missing" : "stopped")),
     active,
   };
 }
@@ -336,11 +355,13 @@ export async function listFluxRuns(): Promise<FluxRunSummary[]> {
     const fluxState = await readJson<JsonRecord>(path.join(root, "flux", "state.json"));
     if (!fluxState) return null;
     const runtimeMeta = await readJson<JsonRecord>(path.join(root, "flux_runtime.json"));
+    const { attemptRoot } = await pickGameDirForRun(entry.name, fluxState);
+    const gameState = await readAttemptArcState(attemptRoot);
     const activeSessionRecords = await readActiveSessionRecords(root, fluxState);
     const latestSessionSummaries = Object.fromEntries(await Promise.all(
       SESSION_TYPES.map(async (sessionType) => [sessionType, await listSessionSummaries(root, sessionType)]),
     )) as Partial<Record<FluxSessionType, FluxSessionSummary[]>>;
-    return toRunSummary(entry.name, fluxState, runtimeMeta, activeSessionRecords, latestSessionSummaries);
+    return toRunSummary(entry.name, fluxState, runtimeMeta, gameState, activeSessionRecords, latestSessionSummaries);
   }));
   return runs.filter(Boolean).sort((left, right) => (right?.updatedAt || "").localeCompare(left?.updatedAt || "")) as FluxRunSummary[];
 }
@@ -354,13 +375,14 @@ export async function readFluxRunDetail(runId: string): Promise<FluxRunDetail | 
   const sessionHistory = Object.fromEntries(await Promise.all(SESSION_TYPES.map(async (sessionType) => {
     return [sessionType, await listSessionSummaries(root, sessionType)];
   }))) as FluxRunDetail["sessionHistory"];
-  const summary = toRunSummary(runId, state, runtimeMeta, activeSessionRecords, sessionHistory);
-  const currentState = await readJson<JsonRecord>(path.join(root, "supervisor", "arc", "state.json"));
+  const { gameDir, attemptId, attemptRoot } = await pickGameDirForRun(runId, state);
+  const currentState = await readAttemptArcState(attemptRoot)
+    ?? await readJson<JsonRecord>(path.join(root, "supervisor", "arc", "state.json"));
+  const summary = toRunSummary(runId, state, runtimeMeta, currentState, activeSessionRecords, sessionHistory);
   const queues = Object.fromEntries(await Promise.all(SESSION_TYPES.map(async (sessionType) => {
     const queue = await readJson<{ items?: unknown[] }>(path.join(root, "flux", "queues", `${sessionType}.json`));
     return [sessionType, { length: Array.isArray(queue?.items) ? queue.items.length : 0 }];
   }))) as FluxRunDetail["queues"];
-  const { gameDir, attemptId } = await pickGameDirForRun(runId, state);
   const timeline = gameDir ? await readFrameSnapshots(gameDir) : { frames: [], actions: [], currentLevel: null };
   return {
     ...summary,

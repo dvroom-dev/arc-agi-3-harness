@@ -57,6 +57,37 @@ def _run_shell(cmd: list[str], cwd: Path, env: dict[str, str]) -> dict:
     }
 
 
+def _resolve_rehearsal_path(model_workspace: Path, raw_path: str) -> Path:
+    raw_text = str(raw_path or "").strip()
+    raw = Path(raw_text)
+    if raw.is_absolute():
+        return raw
+    workspace_name = model_workspace.name
+    parts = [part for part in raw.parts if part not in {"", "."}]
+    candidates: list[list[str]] = [parts]
+    if len(parts) >= 2 and parts[0] == "agent":
+        if parts[1] == workspace_name:
+            candidates.append(parts[2:])
+        else:
+            candidates.append(parts[1:])
+    if parts and parts[0] == workspace_name:
+        candidates.append(parts[1:])
+    seen: set[tuple[str, ...]] = set()
+    for candidate in candidates:
+        key = tuple(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        target = model_workspace.joinpath(*candidate).resolve()
+        if target.exists():
+            return target
+    if parts[:2] == ["agent", workspace_name]:
+        return model_workspace.joinpath(*parts[2:]).resolve()
+    if parts[:1] == [workspace_name]:
+        return model_workspace.joinpath(*parts[1:]).resolve()
+    return model_workspace.joinpath(*parts).resolve()
+
+
 def _translated_model_step(model_workspace: Path, env: dict[str, str], cmd: list[str]) -> dict:
     if cmd and cmd[0] == "arc_action" and len(cmd) >= 2:
         action_name = str(cmd[1]).strip().upper()
@@ -136,13 +167,17 @@ def main() -> None:
                 break
             continue
         if tool == "write_file":
-            target = (model_workspace / str(args.get("path", ""))).resolve()
+            target = _resolve_rehearsal_path(model_workspace, str(args.get("path", "")))
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(str(args.get("content", "")), encoding="utf-8")
             tool_results.append({"tool": "write_file", "path": str(target), "bytes": len(str(args.get("content", "")).encode("utf-8"))})
             continue
         if tool == "read_file":
-            target = (model_workspace / str(args.get("path", ""))).resolve()
+            target = _resolve_rehearsal_path(model_workspace, str(args.get("path", "")))
+            if not target.exists():
+                raise FileNotFoundError(
+                    f"rehearsal path missing: requested={args.get('path', '')!r} resolved={str(target)!r}"
+                )
             tool_results.append({"tool": "read_file", "path": str(target), "content": target.read_text(encoding="utf-8")})
             continue
         rehearsal_ok = False

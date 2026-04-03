@@ -416,6 +416,7 @@ def sync_workspace_level_view(
     try:
         compat_level.symlink_to(level_current.name, target_is_directory=True)
     except Exception:
+        _remove_path(compat_level)
         copytree_stable(level_current, compat_level)
     rewrite_model_status_payload_for_visible_level(
         path=model_status_path(game_dir),
