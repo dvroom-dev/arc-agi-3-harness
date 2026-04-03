@@ -38,6 +38,28 @@ def _read_json(path: Path) -> dict[str, Any] | None:
         return None
 
 
+def _latest_flux_attempt_dir(run_dir: Path) -> Path | None:
+    attempts_root = run_dir / "flux_instances"
+    if not attempts_root.exists():
+        return None
+    attempts = [path for path in attempts_root.iterdir() if path.is_dir() and path.name.startswith("attempt_")]
+    if not attempts:
+        return None
+    return max(attempts, key=lambda path: path.stat().st_mtime)
+
+
+def _resolve_score_artifact_paths(run_dir: Path) -> tuple[Path, Path]:
+    latest_attempt = _latest_flux_attempt_dir(run_dir)
+    if latest_attempt is not None:
+        attempt_arc_dir = latest_attempt / "supervisor" / "arc"
+        state_path = attempt_arc_dir / "state.json"
+        history_path = attempt_arc_dir / "tool-engine-history.json"
+        if state_path.exists() and history_path.exists():
+            return state_path, history_path
+    arc_dir = run_dir / "supervisor" / "arc"
+    return arc_dir / "state.json", arc_dir / "tool-engine-history.json"
+
+
 def _arcade_logger() -> logging.Logger:
     logger = logging.getLogger("ui_run_scores.arcade")
     logger.handlers = []
@@ -352,9 +374,10 @@ def _load_live_scorecard(
 
 
 def compute_run_score_payload(project_root: Path, run_id: str) -> dict[str, Any]:
-    arc_dir = _run_dir(project_root, run_id) / "supervisor" / "arc"
-    state_payload = _read_json(arc_dir / "state.json")
-    history_payload = _read_json(arc_dir / "tool-engine-history.json")
+    run_dir = _run_dir(project_root, run_id)
+    state_path, history_path = _resolve_score_artifact_paths(run_dir)
+    state_payload = _read_json(state_path)
+    history_payload = _read_json(history_path)
     if state_payload is None or history_payload is None:
         raise RuntimeError("missing state.json or tool-engine-history.json")
 

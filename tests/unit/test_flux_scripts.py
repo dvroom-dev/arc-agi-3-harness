@@ -100,3 +100,37 @@ def test_check_model_skips_frontier_compare_until_frontier_level_is_ready(
     assert payloads
     assert payloads[0]["accepted"] is False
     assert payloads[0]["compare_payload"]["frontier_sync_pending"] is True
+
+
+def test_rehearse_seed_on_model_resolves_agent_prefixed_paths(tmp_path: Path) -> None:
+    _load_module("common", "scripts/flux/common.py")
+    rehearse = _load_module("flux_rehearse_seed_test", "scripts/flux/rehearse_seed_on_model.py")
+    model_workspace = tmp_path / "game_ls20"
+    target = model_workspace / "level_1" / "sequences" / "seq_0007.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('{"ok":true}\n', encoding="utf-8")
+
+    resolved = rehearse._resolve_rehearsal_path(
+        model_workspace,
+        "agent/game_ls20/level_1/sequences/seq_0007.json",
+    )
+    assert resolved == target.resolve()
+
+
+def test_copy_model_workspace_ignores_transient_flux_artifacts(tmp_path: Path) -> None:
+    common = _load_module("flux_common_snapshot_test", "scripts/flux/common.py")
+    source = tmp_path / "agent" / "game_ls20"
+    destination = tmp_path / "snapshot" / "game_ls20"
+    (source / "level_1").mkdir(parents=True, exist_ok=True)
+    (source / "level_1" / "meta.json").write_text("{}\n", encoding="utf-8")
+    (source / ".level_6.flux-prev-deadbeef").mkdir(parents=True, exist_ok=True)
+    (source / ".level_current.tmp").mkdir(parents=True, exist_ok=True)
+    (source / ".workspace-tree.lock").write_text("", encoding="utf-8")
+    meta = {"model_workspace_dir": str(source)}
+
+    common.copy_model_workspace(meta, destination)
+
+    assert (destination / "level_1" / "meta.json").exists()
+    assert not (destination / ".level_6.flux-prev-deadbeef").exists()
+    assert not (destination / ".level_current.tmp").exists()
+    assert not (destination / ".workspace-tree.lock").exists()

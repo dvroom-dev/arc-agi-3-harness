@@ -1,11 +1,27 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shutil
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+
+_TRANSIENT_COPY_PREFIXES = (
+    ".level_",
+)
+_TRANSIENT_COPY_FRAGMENTS = (
+    ".flux-sync-",
+    ".flux-prev-",
+    ".tmp-",
+)
+_TRANSIENT_COPY_NAMES = {
+    ".flux-sync.lock",
+    ".workspace-tree.lock",
+    ".level_current.tmp",
+}
 
 
 def _tmp_path(path: Path) -> Path:
@@ -36,6 +52,18 @@ def _remove_path(path: Path) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
+def _should_ignore_transient_name(name: str) -> bool:
+    if name in _TRANSIENT_COPY_NAMES:
+        return True
+    if any(fragment in name for fragment in _TRANSIENT_COPY_FRAGMENTS):
+        return True
+    return any(name.startswith(prefix) and ".flux-" in name for prefix in _TRANSIENT_COPY_PREFIXES)
+
+
+def _ignore_transient_entries(_src: str, names: list[str]) -> list[str]:
+    return [name for name in names if _should_ignore_transient_name(name)]
+
+
 def _is_retryable_copy_error(error: BaseException) -> bool:
     if isinstance(error, FileNotFoundError):
         return True
@@ -49,7 +77,7 @@ def copytree_stable(src: Path, dst: Path, *, attempts: int = 8, delay_s: float =
     for _ in range(max(1, int(attempts))):
         _remove_path(dst)
         try:
-            shutil.copytree(src, dst)
+            shutil.copytree(src, dst, ignore=_ignore_transient_entries)
             return
         except BaseException as error:
             if not _is_retryable_copy_error(error):
@@ -58,3 +86,15 @@ def copytree_stable(src: Path, dst: Path, *, attempts: int = 8, delay_s: float =
             time.sleep(delay_s)
     if last_error is not None:
         raise last_error
+
+
+@contextmanager
+def workspace_tree_lock(root: Path):
+    lock_path = root / ".workspace-tree.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)

@@ -8,14 +8,12 @@ import sys
 import time
 import uuid
 from pathlib import Path
-from contextlib import contextmanager
-import fcntl
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from arc_model_runtime.io_utils import copytree_stable
+from arc_model_runtime.io_utils import copytree_stable, workspace_tree_lock
 
 
 def read_json_stdin() -> dict:
@@ -43,16 +41,8 @@ def read_json_file_with_retry(path: Path, *, attempts: int = 4, delay_s: float =
     raise RuntimeError(f"failed reading JSON from {path}")
 
 
-@contextmanager
 def workspace_sync_lock(model_workspace: Path):
-    lock_path = model_workspace / ".flux-sync.lock"
-    lock_path.parent.mkdir(parents=True, exist_ok=True)
-    with lock_path.open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+    return workspace_tree_lock(model_workspace)
 
 
 def write_json_stdout(payload: dict) -> None:
@@ -124,10 +114,11 @@ def copy_solver_template(meta: dict, destination: Path) -> Path:
 
 def copy_model_workspace(meta: dict, destination: Path) -> Path:
     source = Path(str(meta["model_workspace_dir"]))
-    if destination.exists():
-        shutil.rmtree(destination, ignore_errors=True)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source, destination)
+    with workspace_tree_lock(source):
+        if destination.exists():
+            shutil.rmtree(destination, ignore_errors=True)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        copytree_stable(source, destination)
     return destination
 
 

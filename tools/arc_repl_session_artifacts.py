@@ -8,7 +8,7 @@ import shutil
 import numpy as np
 from arc_model_runtime.utils import effective_analysis_level, sanitize_visible_level_tree
 from arc_model_runtime.visible_artifacts import LEVEL_TRANSITION_FILE, level_transition_payload
-from arc_model_runtime.io_utils import write_json_atomic, write_text_atomic
+from arc_model_runtime.io_utils import copytree_stable, workspace_tree_lock, write_json_atomic, write_text_atomic
 
 try:
     from arc_repl_session_sequences import (
@@ -196,33 +196,35 @@ def _materialize_level_current_view(
     agent_game_dir.mkdir(parents=True, exist_ok=True)
     level_current = agent_game_dir / "level_current"
     temp = agent_game_dir / ".level_current.tmp"
-    _remove_path(temp)
-    shutil.copytree(src, temp)
-    sanitize_visible_level_tree(temp, visible_level=int(visible_level))
-    write_json_atomic(
-        temp / "meta.json",
-        {
-            "schema_version": "arc_repl.level_current.v1",
-            "game_id": str(session.game_id),
-            "level": int(visible_level),
-            "analysis_level_pinned": int(visible_level) != int(current_level),
-        },
-    )
-    _remove_path(level_current)
-    temp.rename(level_current)
+    with workspace_tree_lock(agent_game_dir):
+        _remove_path(temp)
+        copytree_stable(src, temp)
+        sanitize_visible_level_tree(temp, visible_level=int(visible_level))
+        write_json_atomic(
+            temp / "meta.json",
+            {
+                "schema_version": "arc_repl.level_current.v1",
+                "game_id": str(session.game_id),
+                "level": int(visible_level),
+                "analysis_level_pinned": int(visible_level) != int(current_level),
+            },
+        )
+        _remove_path(level_current)
+        temp.rename(level_current)
 
-    for child in agent_game_dir.iterdir():
-        if child.name == "level_current":
-            continue
-        if child.name.startswith("level_"):
-            _remove_path(child)
+        for child in agent_game_dir.iterdir():
+            if child.name == "level_current":
+                continue
+            if child.name.startswith("level_"):
+                _remove_path(child)
 
-    compat_level = agent_game_dir / f"level_{int(visible_level)}"
-    _remove_path(compat_level)
-    try:
-        compat_level.symlink_to(level_current.name, target_is_directory=True)
-    except Exception:
-        shutil.copytree(level_current, compat_level)
+        compat_level = agent_game_dir / f"level_{int(visible_level)}"
+        _remove_path(compat_level)
+        try:
+            compat_level.symlink_to(level_current.name, target_is_directory=True)
+        except Exception:
+            _remove_path(compat_level)
+            copytree_stable(level_current, compat_level)
 
     stale_turn_index = agent_game_dir / "turn_index.jsonl"
     if stale_turn_index.exists():

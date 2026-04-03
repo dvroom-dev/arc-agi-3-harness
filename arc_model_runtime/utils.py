@@ -14,7 +14,7 @@ from .visible_compare_surface import (
     overlay_latest_compare_artifacts,
     sync_workspace_compare_surface,
 )
-from .io_utils import copytree_stable, write_json_atomic, write_text_atomic
+from .io_utils import copytree_stable, workspace_tree_lock, write_json_atomic, write_text_atomic
 from .visible_sequence_surface import preserve_local_sequence_surface
 
 from .visible_artifacts import (
@@ -359,65 +359,58 @@ def sync_workspace_level_view(
 
     level_current = game_dir / "level_current"
     temp = game_dir / ".level_current.tmp"
-    _remove_path(temp)
-    copytree_stable(src, temp)
-    preserve_local_sequence_surface(
-        game_dir=game_dir,
-        temp_level_current=temp,
-        visible_level=int(visible_level),
-    )
-    sanitize_visible_level_tree(temp, visible_level=int(visible_level))
-    overlay_latest_compare_artifacts(
-        game_dir=game_dir,
-        temp_level_current=temp,
-        visible_level=int(visible_level),
-    )
-    sync_workspace_compare_surface(
-        game_dir=game_dir,
-        temp_level_current=temp,
-        visible_level=int(visible_level),
-    )
-    (temp / "meta.json").write_text(
-        json.dumps(
+    with workspace_tree_lock(game_dir):
+        _remove_path(temp)
+        copytree_stable(src, temp)
+        preserve_local_sequence_surface(
+            game_dir=game_dir,
+            temp_level_current=temp,
+            visible_level=int(visible_level),
+        )
+        sanitize_visible_level_tree(temp, visible_level=int(visible_level))
+        overlay_latest_compare_artifacts(
+            game_dir=game_dir,
+            temp_level_current=temp,
+            visible_level=int(visible_level),
+        )
+        sync_workspace_compare_surface(
+            game_dir=game_dir,
+            temp_level_current=temp,
+            visible_level=int(visible_level),
+        )
+        write_json_atomic(
+            temp / "meta.json",
             {
                 "schema_version": "arc_repl.level_current.v1",
                 "game_id": str(game_id),
                 "level": int(visible_level),
                 "analysis_level_pinned": int(visible_level) != int(frontier_level),
             },
-            indent=2,
         )
-        + "\n",
-        encoding="utf-8",
-    )
-    (temp / ANALYSIS_LEVEL_STATUS_FILE).write_text(
-        json.dumps(
+        write_json_atomic(
+            temp / ANALYSIS_LEVEL_STATUS_FILE,
             build_visible_level_status(
                 game_dir=game_dir,
                 frontier_level=int(frontier_level),
                 visible_level=int(visible_level),
             ),
-            indent=2,
         )
-        + "\n",
-        encoding="utf-8",
-    )
-    _remove_path(level_current)
-    temp.rename(level_current)
+        _remove_path(level_current)
+        temp.rename(level_current)
 
-    for child in game_dir.iterdir():
-        if child.name == "level_current":
-            continue
-        if child.name.startswith("level_"):
-            _remove_path(child)
+        for child in game_dir.iterdir():
+            if child.name == "level_current":
+                continue
+            if child.name.startswith("level_"):
+                _remove_path(child)
 
-    compat_level = game_dir / f"level_{int(visible_level)}"
-    _remove_path(compat_level)
-    try:
-        compat_level.symlink_to(level_current.name, target_is_directory=True)
-    except Exception:
+        compat_level = game_dir / f"level_{int(visible_level)}"
         _remove_path(compat_level)
-        copytree_stable(level_current, compat_level)
+        try:
+            compat_level.symlink_to(level_current.name, target_is_directory=True)
+        except Exception:
+            _remove_path(compat_level)
+            copytree_stable(level_current, compat_level)
     rewrite_model_status_payload_for_visible_level(
         path=model_status_path(game_dir),
         frontier_level=int(frontier_level),
