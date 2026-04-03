@@ -68,7 +68,7 @@ def _write_initial_seed_bundle(run_dir: Path) -> Path:
         json.dumps(
             {
                 "version": 1,
-                "generatedAt": "",
+                "generatedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                 "syntheticMessages": [],
                 "replayPlan": [],
                 "assertions": [],
