@@ -101,6 +101,24 @@ def copy_solver_template(meta: dict, destination: Path) -> Path:
     if destination.exists():
         shutil.rmtree(destination)
     shutil.copytree(source, destination)
+    for relative in [
+        "model.py",
+        "model_lib.py",
+        "components.py",
+        "artifact_helpers.py",
+        "inspect_components.py",
+        "inspect_model_sequence.py",
+        "inspect_sequence.py",
+        "current_compare.json",
+        "current_compare.md",
+        "model_status.json",
+        "analysis_level",
+    ]:
+        target = destination / relative
+        if target.is_dir():
+            shutil.rmtree(target, ignore_errors=True)
+        else:
+            target.unlink(missing_ok=True)
     return destination
 
 
