@@ -167,7 +167,7 @@ def test_model_compare_sequences_writes_markdown_report(tmp_path: Path) -> None:
     assert "available_actions" not in payload
 
 
-def test_model_compare_sequences_skips_reset_ended_sequences_by_default(tmp_path: Path) -> None:
+def test_model_compare_sequences_includes_reset_ended_sequences_by_default(tmp_path: Path) -> None:
     game_dir = tmp_path / "game_ls20"
     _copy_model_templates(game_dir)
 
@@ -242,21 +242,16 @@ def test_model_compare_sequences_skips_reset_ended_sequences_by_default(tmp_path
     payload = json.loads(proc.stdout)
     assert payload["ok"] is True
     assert payload["requested_sequences"] == 2
-    assert payload["eligible_sequences"] == 1
-    assert payload["compared_sequences"] == 1
-    skipped = payload["skipped_sequences"]
-    assert any(item.get("sequence_id") == "seq_0001" and item.get("reason") == "reset_ended" for item in skipped)
+    assert payload["eligible_sequences"] == 2
+    assert payload["compared_sequences"] == 2
+    assert payload["skipped_sequences"] == []
 
 
-def test_model_compare_sequences_returns_error_when_no_eligible_sequences(tmp_path: Path) -> None:
+def test_model_compare_sequences_returns_error_when_no_sequences_have_actions(tmp_path: Path) -> None:
     game_dir = tmp_path / "game_ls20"
     _copy_model_templates(game_dir)
     initial_rows = ["0000", "0000", "0000", "0000"]
     _write_hex(game_dir / "level_1" / "initial_state.hex", initial_rows)
-    step_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
-    _write_hex(step_dir / "before_state.hex", initial_rows)
-    _write_hex(step_dir / "after_state.hex", initial_rows)
-    (step_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
 
     seq_payload = {
         "schema_version": "arc_repl.level_sequence.v1",
@@ -269,30 +264,8 @@ def test_model_compare_sequences_returns_error_when_no_eligible_sequences(tmp_pa
         "start_recorded_at_utc": "",
         "end_recorded_at_utc": "",
         "end_reason": "reset_level",
-        "action_count": 1,
-        "actions": [
-            {
-                "local_step": 1,
-                "action_index": 1,
-                "tool_turn": 1,
-                "step_in_call": 1,
-                "call_action": "exec",
-                "action_name": "ACTION1",
-                "action_data": {},
-                "state_before": "NOT_FINISHED",
-                "state_after": "NOT_FINISHED",
-                "level_before": 1,
-                "level_after": 1,
-                "levels_completed_before": 0,
-                "levels_completed_after": 0,
-                "recorded_at_utc": "",
-                "files": {
-                    "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
-                    "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
-                    "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
-                },
-            }
-        ],
+        "action_count": 0,
+        "actions": [],
     }
     seq_root = game_dir / "level_1" / "sequences"
     seq_root.mkdir(parents=True, exist_ok=True)
@@ -305,7 +278,7 @@ def test_model_compare_sequences_returns_error_when_no_eligible_sequences(tmp_pa
     assert payload["error"]["type"] == "no_eligible_sequences"
     assert payload["requested_sequences"] == 1
     assert payload["eligible_sequences"] == 0
-    assert any(item.get("reason") == "reset_ended" for item in payload["skipped_sequences"])
+    assert any(item.get("reason") == "no_actions" for item in payload["skipped_sequences"])
 
 
 def test_model_lib_load_initial_grid_accepts_string_path(tmp_path: Path) -> None:

@@ -59,8 +59,7 @@ def _sequence_eligibility(
     if not actions:
         return False, "no_actions"
     end_reason = str(payload.get("end_reason", "")).strip().lower()
-    if end_reason == "reset_level" and not include_reset_ended:
-        return False, "reset_ended"
+    _ = end_reason, include_reset_ended
     if _sequence_has_level_regression(payload) and not include_level_regressions:
         return False, "level_regression"
     return True, "ok"
