@@ -4,14 +4,21 @@ import json
 from typing import Any
 
 
-def _append_diff_summary(lines: list[str], title: str, payload: object) -> None:
+def _append_diff_summary(
+    lines: list[str],
+    title: str,
+    payload: object,
+    *,
+    before_label: str = "before",
+    after_label: str = "after",
+) -> None:
     if not isinstance(payload, dict):
         return
     lines.extend(["", f"## {title}"])
     if bool(payload.get("shape_mismatch")):
         lines.append("- shape_mismatch: true")
-        lines.append(f"- before_shape: {payload.get('before_shape')}")
-        lines.append(f"- after_shape: {payload.get('after_shape')}")
+        lines.append(f"- {before_label}_shape: {payload.get('before_shape')}")
+        lines.append(f"- {after_label}_shape: {payload.get('after_shape')}")
         return
     lines.append(f"- changed_pixels: {payload.get('changed_pixels')}")
     changes = payload.get("changes")
@@ -23,7 +30,7 @@ def _append_diff_summary(lines: list[str], title: str, payload: object) -> None:
             lines.append(
                 "  - "
                 f"({change.get('row')},{change.get('col')}): "
-                f"{change.get('before')} -> {change.get('after')}"
+                f"{before_label}={change.get('before')} -> {after_label}={change.get('after')}"
             )
         remaining = max(0, len(changes) - 5)
         if remaining:
@@ -75,18 +82,18 @@ def report_md(report: dict[str, Any]) -> str:
     transition_mismatch = report.get("transition_mismatch")
     if transition_mismatch:
         lines.extend(["", "## Transition Mismatch", "```json", json.dumps(transition_mismatch, indent=2), "```"])
-    _append_diff_summary(lines, "Game Step Diff", report.get("game_step_diff"))
-    _append_diff_summary(lines, "Model Step Diff", report.get("model_step_diff"))
-    _append_diff_summary(lines, "State Diff (Game After vs Model After)", report.get("state_diff"))
+    _append_diff_summary(lines, "Game Step Diff", report.get("game_step_diff"), before_label="game_before", after_label="game_after")
+    _append_diff_summary(lines, "Model Step Diff", report.get("model_step_diff"), before_label="model_before", after_label="model_after")
+    _append_diff_summary(lines, "State Diff (Game After vs Model After)", report.get("state_diff"), before_label="game_value", after_label="model_value")
     frame_diffs = report.get("frame_diffs")
     if isinstance(frame_diffs, list):
         for frame_diff in frame_diffs:
             if not isinstance(frame_diff, dict):
                 continue
             lines.extend(["", f"## Intermediate Frame {int(frame_diff.get('frame_index', 0) or 0)}"])
-            _append_diff_summary(lines, "Game Frame Diff", frame_diff.get("game_frame_diff"))
-            _append_diff_summary(lines, "Model Frame Diff", frame_diff.get("model_frame_diff"))
-            _append_diff_summary(lines, "Frame State Diff (Game vs Model)", frame_diff.get("state_diff"))
+            _append_diff_summary(lines, "Game Frame Diff", frame_diff.get("game_frame_diff"), before_label="previous_game_frame", after_label="game_frame")
+            _append_diff_summary(lines, "Model Frame Diff", frame_diff.get("model_frame_diff"), before_label="previous_model_frame", after_label="model_frame")
+            _append_diff_summary(lines, "Frame State Diff (Game vs Model)", frame_diff.get("state_diff"), before_label="game_value", after_label="model_value")
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -151,9 +158,9 @@ def current_compare_markdown(summary_payload: dict[str, Any]) -> str:
             if str(report.get("comparison_stop_reason") or "") == "post_level_complete_state_diff_excluded":
                 lines.append("- boundary_note: level-completing action transition was compared, but post-completion next-level grid materialization was excluded")
             if report.get("matched") is False:
-                _append_diff_summary(lines, "Game Step Diff", report.get("game_step_diff"))
-                _append_diff_summary(lines, "Model Step Diff", report.get("model_step_diff"))
-                _append_diff_summary(lines, "State Diff (Game After vs Model After)", report.get("state_diff"))
+                _append_diff_summary(lines, "Game Step Diff", report.get("game_step_diff"), before_label="game_before", after_label="game_after")
+                _append_diff_summary(lines, "Model Step Diff", report.get("model_step_diff"), before_label="model_before", after_label="model_after")
+                _append_diff_summary(lines, "State Diff (Game After vs Model After)", report.get("state_diff"), before_label="game_value", after_label="model_value")
     lines.extend(
         [
             "",

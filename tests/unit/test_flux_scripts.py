@@ -134,3 +134,72 @@ def test_copy_model_workspace_ignores_transient_flux_artifacts(tmp_path: Path) -
     assert not (destination / ".level_6.flux-prev-deadbeef").exists()
     assert not (destination / ".level_current.tmp").exists()
     assert not (destination / ".workspace-tree.lock").exists()
+
+
+def test_inspect_current_mismatch_falls_back_to_first_report(tmp_path: Path) -> None:
+    artifact_helpers = _load_module("artifact_helpers_fallback_test", "templates/agent_workspace/artifact_helpers.py")
+    game_dir = tmp_path / "game_ls20"
+    (game_dir / "level_1" / "sequences").mkdir(parents=True, exist_ok=True)
+    sequence = {
+        "schema_version": "arc_repl.level_sequence.v1",
+        "game_id": "ls20",
+        "level": 1,
+        "sequence_id": "seq_0001",
+        "sequence_number": 1,
+        "start_action_index": 1,
+        "end_action_index": 1,
+        "start_recorded_at_utc": "",
+        "end_recorded_at_utc": "",
+        "end_reason": "open",
+        "action_count": 1,
+        "actions": [
+            {
+                "local_step": 1,
+                "action_index": 1,
+                "tool_turn": 1,
+                "step_in_call": 1,
+                "call_action": "exec",
+                "action_name": "ACTION1",
+                "action_data": {},
+                "state_before": "NOT_FINISHED",
+                "state_after": "NOT_FINISHED",
+                "level_before": 1,
+                "level_after": 1,
+                "levels_completed_before": 0,
+                "levels_completed_after": 0,
+                "recorded_at_utc": "",
+                "files": {
+                    "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
+                    "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
+                    "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
+                },
+            }
+        ],
+    }
+    step_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
+    step_dir.mkdir(parents=True, exist_ok=True)
+    (step_dir / "before_state.hex").write_text("0\n", encoding="utf-8")
+    (step_dir / "after_state.hex").write_text("1\n", encoding="utf-8")
+    (step_dir / "meta.json").write_text("{}\n", encoding="utf-8")
+    (game_dir / "level_1" / "sequences" / "seq_0001.json").write_text(json.dumps(sequence, indent=2), encoding="utf-8")
+    compare_payload = {
+        "status": "mismatch",
+        "all_match": False,
+        "level": 1,
+        "reports": [
+            {
+                "level": 1,
+                "sequence_id": "seq_0001",
+                "divergence_step": 1,
+                "divergence_reason": "intermediate_frame_mismatch",
+                "report_file": "level_1/sequence_compare/seq_0001.md",
+            }
+        ],
+    }
+    (game_dir / "current_compare.json").write_text(json.dumps(compare_payload, indent=2), encoding="utf-8")
+    (game_dir / "current_compare.md").write_text("# Current Compare\n", encoding="utf-8")
+
+    payload = artifact_helpers.inspect_current_mismatch(game_dir)
+
+    assert payload["sequence_id"] == "seq_0001"
+    assert payload["compare"]["warning"] == "fell back to first report because no explicit mismatched report was marked"

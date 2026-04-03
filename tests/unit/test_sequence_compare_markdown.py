@@ -109,6 +109,8 @@ def test_model_compare_report_markdown_summarizes_large_diffs(tmp_path: Path) ->
     assert "remaining_changes_not_shown" not in report_text
     assert '"row":' not in report_text
     assert "## Diff Legend" in report_text
+    assert "game_value=" in report_text
+    assert "model_value=" in report_text
     assert "- start_action_index: 1" in report_text
     assert "- sequence_end_reason: open" in report_text
     assert "report_file: level_1/sequence_compare/seq_0001.md" in current_compare_text

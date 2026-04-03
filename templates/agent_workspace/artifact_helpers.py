@@ -359,21 +359,30 @@ def inspect_current_mismatch(game_dir: str | Path) -> dict[str, Any]:
     game_dir = coerce_path(game_dir)
     compare_payload = load_current_compare(game_dir)
     mismatch = first_mismatch_report(compare_payload)
+    compare_summary = summarize_current_compare(game_dir)
     if not mismatch:
-        compare_summary = summarize_current_compare(game_dir)
-        if not bool(compare_summary.get("all_match")):
+        if bool(compare_summary.get("all_match")):
             return {
-                "status": "error",
-                "message": "current_compare.json is not clean but has no mismatched report",
+                "status": "clean",
+                "message": "current_compare.json has no mismatched report",
                 "compare": compare_summary,
                 "mismatch": None,
             }
-        return {
-            "status": "clean",
-            "message": "current_compare.json has no mismatched report",
-            "compare": compare_summary,
-            "mismatch": None,
-        }
+        reports = compare_payload.get("reports")
+        if isinstance(reports, list):
+            for report in reports:
+                if isinstance(report, dict):
+                    mismatch = report
+                    break
+        if mismatch:
+            compare_summary["warning"] = "fell back to first report because no explicit mismatched report was marked"
+        else:
+            return {
+                "status": "error",
+                "message": "current_compare.json is not clean and has no usable report",
+                "compare": compare_summary,
+                "mismatch": None,
+            }
     level = int(mismatch.get("level") or compare_payload.get("level") or 0)
     sequence_id = str(mismatch.get("sequence_id") or "").strip()
     if not sequence_id:
@@ -385,7 +394,7 @@ def inspect_current_mismatch(game_dir: str | Path) -> dict[str, Any]:
         divergence_step=int(mismatch.get("divergence_step") or 1),
     )
     summary["compare"] = {
-        **summarize_current_compare(game_dir),
+        **compare_summary,
         "status": "mismatch",
         "divergence_step": mismatch.get("divergence_step"),
         "divergence_reason": mismatch.get("divergence_reason"),

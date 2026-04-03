@@ -22,8 +22,13 @@ Goals:
 - Hard rule: after one compact read pass, either patch the model or explicitly declare a concrete blocked reason.
 - For the earliest failing sequence, assume the first useful patch is local: direct action effect, collision/blocking rule, state update, or budget/cost update.
 - Do not start by debugging the compare tool, loader path, or whether your code was imported unless a rerun after a local patch still shows contradictory evidence.
+- Do not inspect `arc_model_runtime/*`, `inspect_sequence.py`, or other compare/runtime source before making one local patch in `model_lib.py` or `components.py`.
+- Treat compare/runtime helpers as trusted unless a rerun after your local patch shows a concrete contradiction between the sequence files, the compare report, and the rerun output.
 - The first failing sequence is usually just the starting state plus a short action chain. Read the earliest failing step's `before_state`, `after_state`, and `meta.json`, patch the direct mechanic, and rerun compare.
 - Treat `action_input_name` / `last_action_name` / sequence `action_name` as the canonical action labels. Ignore wrapped tool labels like `exec(<...>)`.
+- For game-vs-model diffs, read them literally as `game_value -> model_value`. Do not mentally flip the direction.
+- If a step has `frame_sequence_hex` files and `frame_0001.hex` equals `after_state.hex`, emit the same post-action frame from your model before investigating anything else.
+- For `intermediate_frame_mismatch`, default assumption is that your model's direct action effect or `last_step_frames` emission is wrong. Patch `model_lib.py` first, then rerun compare.
 - Make one focused patch, then immediately rerun `python3 model.py compare_sequences --game-id ...`.
 - Repeat patch/compare until `all_match` is true or you hit a concrete blocked diagnosis.
 - When multiple sequences exist, focus on them in order. Fix the earliest failing or unmodeled sequence first before spending time on later sequences.
