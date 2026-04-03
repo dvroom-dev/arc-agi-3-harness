@@ -23,3 +23,5 @@ $RUN_DIR/
 
 # Stray local game artifact roots (generated outside run dirs)
 game_*/
+
+.coverage
