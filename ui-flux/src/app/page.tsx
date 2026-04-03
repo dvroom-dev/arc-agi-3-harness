@@ -258,7 +258,7 @@ export default function Home() {
   const [mobileSection, setMobileSection] = useState<MobileSection>("runs");
   const [form, setForm] = useState<FluxRunStartRequest>({
     gameId: "ls20",
-    provider: "claude",
+    provider: "codex",
     operationMode: "OFFLINE",
     sessionName: "flux-ui",
   });

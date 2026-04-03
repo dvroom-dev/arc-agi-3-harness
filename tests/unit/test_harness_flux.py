@@ -28,6 +28,21 @@ def test_render_flux_config_includes_durable_workspace() -> None:
     assert "rehearse_seed_on_model.py" in text
     assert "replay_seed_on_real_game.py" in text
     assert "output_schema: bootstrap_seed_decision_v1" in text
+    assert "runtime_defaults:\n  provider: codex" in text
+    assert "modeler:\n  prompt_file:" in text
+    assert "  provider: codex" in text
+
+
+def test_render_flux_config_keeps_mock_provider_coherent() -> None:
+    runtime = SimpleNamespace(
+        args=SimpleNamespace(provider="mock"),
+        run_dir=Path("/tmp/flux-run"),
+        active_agent_dir=lambda: Path("/tmp/flux-run/agent/game_ls20"),
+    )
+    text = _render_flux_config(runtime)
+    assert "runtime_defaults:\n  provider: mock" in text
+    assert "modeler:\n  prompt_file:" in text
+    assert "  provider: mock" in text
 
 
 def test_flux_yaml_template_exists() -> None:
