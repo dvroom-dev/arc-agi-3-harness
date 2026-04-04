@@ -31,6 +31,8 @@ Rules:
   - frontier branch/mechanic message last
 - For the frontier, either choose the best current solve attempt or one short exploration branch for the most important unresolved feature.
 - Preserve explanations of known mechanics and logical choices in the synthetic seed messages.
+- Keep `replayPlan` scoped to the fresh solver/game workspace only. Never reference `flux/*`, `.ai-flux/*`, `config/*`, or other run bookkeeping files there.
+- For `shell` replay steps, use `args.cmd` as a string array.
 - If the frontier now has confirmed trigger/resource mechanics, rewrite the frontier seed message to name them explicitly.
 - Examples of the right level of specificity:
   - which trigger refills fuel or budget
