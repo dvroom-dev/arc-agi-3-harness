@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import codecs
 import json
+import os
 import selectors
 import signal
 import subprocess
@@ -16,6 +18,8 @@ from harness_runtime import HarnessRuntime
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 SUPER_FLUX_ENTRYPOINT = Path("/home/dvroom/projs/super/src/bin/flux.ts")
+FLUX_STOP_TERMINATE_GRACE_SECONDS = 10.0
+FLUX_STOP_KILL_GRACE_SECONDS = 5.0
 
 
 def _safe_relpath(base: Path, child: Path) -> str:
@@ -151,54 +155,93 @@ def _launch_flux(runtime: HarnessRuntime, config_path: Path) -> int:
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=1,
+        bufsize=0,
+        start_new_session=True,
     )
     assert proc.stdout is not None
+    stdout_fd = proc.stdout.fileno()
+    os.set_blocking(stdout_fd, False)
     selector = selectors.DefaultSelector()
-    selector.register(proc.stdout, selectors.EVENT_READ)
+    selector.register(stdout_fd, selectors.EVENT_READ)
     state_path = runtime.run_dir / "flux" / "state.json"
     stop_seen_at: float | None = None
     terminate_sent_at: float | None = None
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    pending_text = ""
+
+    def _write_output(text: str, *, final: bool = False) -> None:
+        nonlocal pending_text
+        if text:
+            pending_text += text
+        while True:
+            newline_index = pending_text.find("\n")
+            if newline_index < 0:
+                break
+            line = pending_text[: newline_index + 1]
+            pending_text = pending_text[newline_index + 1 :]
+            log_file.write(line)
+            log_file.flush()
+            sys.stdout.write(line)
+            sys.stdout.flush()
+        if final and pending_text:
+            log_file.write(pending_text)
+            log_file.flush()
+            sys.stdout.write(pending_text)
+            sys.stdout.flush()
+            pending_text = ""
+
+    def _signal_child(sig: signal.Signals, message: str) -> None:
+        if proc.poll() is not None:
+            return
+        log_file.write(message + "\n")
+        log_file.flush()
+        try:
+            os.killpg(proc.pid, sig)
+        except Exception:
+            if sig == signal.SIGTERM:
+                proc.terminate()
+            else:
+                proc.kill()
+
     with launcher_log_path.open("a", encoding="utf-8") as log_file:
         while True:
             if proc.poll() is not None:
                 break
             events = selector.select(timeout=0.5)
             for key, _mask in events:
-                line = key.fileobj.readline()
-                if not line:
+                try:
+                    chunk = os.read(int(key.fd), 4096)
+                except BlockingIOError:
+                    continue
+                if not chunk:
                     try:
-                        selector.unregister(key.fileobj)
+                        selector.unregister(key.fd)
                     except Exception:
                         pass
                     continue
-                log_file.write(line)
-                log_file.flush()
-                sys.stdout.write(line)
-                sys.stdout.flush()
+                _write_output(decoder.decode(chunk))
             status, stop_requested = _read_flux_state_status(state_path)
             if status in {"stopped", "stopping"} or (stop_requested and status == "running"):
                 if stop_seen_at is None:
                     stop_seen_at = time.monotonic()
                 elapsed = time.monotonic() - stop_seen_at
-                if terminate_sent_at is None and elapsed >= 10:
-                    log_file.write("[launcher] flux child still alive after stop state; sending SIGTERM\n")
-                    log_file.flush()
-                    proc.terminate()
+                if terminate_sent_at is None and elapsed >= FLUX_STOP_TERMINATE_GRACE_SECONDS:
+                    _signal_child(signal.SIGTERM, "[launcher] flux child still alive after stop state; sending SIGTERM")
                     terminate_sent_at = time.monotonic()
-                elif terminate_sent_at is not None and (time.monotonic() - terminate_sent_at) >= 5 and proc.poll() is None:
-                    log_file.write("[launcher] flux child ignored SIGTERM after stop state; sending SIGKILL\n")
-                    log_file.flush()
-                    proc.kill()
+                elif terminate_sent_at is not None and (time.monotonic() - terminate_sent_at) >= FLUX_STOP_KILL_GRACE_SECONDS and proc.poll() is None:
+                    _signal_child(signal.SIGKILL, "[launcher] flux child ignored SIGTERM after stop state; sending SIGKILL")
             else:
                 stop_seen_at = None
                 terminate_sent_at = None
-        for line in proc.stdout:
-            log_file.write(line)
-            log_file.flush()
-            sys.stdout.write(line)
-            sys.stdout.flush()
+        while True:
+            try:
+                chunk = os.read(stdout_fd, 4096)
+            except BlockingIOError:
+                break
+            if not chunk:
+                break
+            _write_output(decoder.decode(chunk))
+        _write_output(decoder.decode(b"", final=True), final=True)
     try:
         selector.close()
     except Exception:
