@@ -16,7 +16,16 @@ export function SessionsView({
     <div className="space-y-4">
       {SESSION_TYPES.map((sessionType) => (
         <section key={sessionType} className="rounded-[24px] border border-white/10 bg-[var(--panel)] p-4">
-          <div className="mb-3 text-xs uppercase tracking-[0.16em] text-white/40">{sessionType}</div>
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="text-xs uppercase tracking-[0.16em] text-white/40">{sessionType}</div>
+            <span className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.14em] ${
+              detail.queues[sessionType].length > 0
+                ? "border-[var(--accent)]/40 bg-[var(--accent)]/15 text-[var(--accent)]"
+                : "border-white/10 bg-white/5 text-white/45"
+            }`}>
+              {detail.queues[sessionType].length > 0 ? "queued" : "clear"}
+            </span>
+          </div>
           <div className="space-y-2">
             {(detail.sessionHistory[sessionType] ?? []).map((session) => {
               const key = `${session.sessionType}:${session.sessionId}`;

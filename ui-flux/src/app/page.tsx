@@ -160,7 +160,16 @@ function StateView({
             <div key={sessionType} className="rounded-2xl border border-white/10 bg-white/4 p-4">
               <div className="text-sm font-semibold capitalize">{sessionType}</div>
               <div className="mt-2 text-2xl font-semibold text-white">{detail.active[sessionType].status}</div>
-              <div className="mt-2 text-xs text-[var(--muted)]">queue {detail.queues[sessionType].length}</div>
+              <div className="mt-2 flex items-center justify-between gap-2 text-xs text-[var(--muted)]">
+                <span>queue {detail.queues[sessionType].length}</span>
+                <span className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.14em] ${
+                  detail.queues[sessionType].length > 0
+                    ? "border-[var(--accent)]/40 bg-[var(--accent)]/15 text-[var(--accent)]"
+                    : "border-white/10 bg-white/5 text-white/45"
+                }`}>
+                  {detail.queues[sessionType].length > 0 ? "queued" : "clear"}
+                </span>
+              </div>
             </div>
           ))}
         </div>
