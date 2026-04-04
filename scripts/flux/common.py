@@ -59,6 +59,24 @@ def safe_instance_name(value: str) -> str:
     return out.strip("._") or "instance"
 
 
+ALLOWED_REPLAY_SHELL_PROGRAMS = {"arc_action", "arc_repl", "arc_level"}
+
+
+def validate_replay_shell_cmd(cmd: object) -> list[str]:
+    if not isinstance(cmd, list) or not cmd or not all(isinstance(item, str) and item for item in cmd):
+        raise RuntimeError("replay shell step must use args.cmd as a non-empty string array")
+    argv = [str(item) for item in cmd]
+    program = argv[0].strip()
+    if not program:
+        raise RuntimeError("replay shell step args.cmd[0] must be a non-empty program name")
+    if any(ch.isspace() for ch in program):
+        raise RuntimeError("replay shell step args.cmd[0] must be a direct program token, not a shell snippet")
+    if program not in ALLOWED_REPLAY_SHELL_PROGRAMS:
+        allowed = ", ".join(sorted(ALLOWED_REPLAY_SHELL_PROGRAMS))
+        raise RuntimeError(f"replay shell step args.cmd[0] must be one of {allowed}")
+    return argv
+
+
 def instance_root(workspace_root: str, instance_id: str) -> Path:
     return Path(workspace_root) / "flux_instances" / safe_instance_name(instance_id)
 

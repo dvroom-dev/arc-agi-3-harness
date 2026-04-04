@@ -6,7 +6,14 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from common import copy_model_workspace, load_runtime_meta, read_json_stdin, safe_instance_name, write_json_stdout
+from common import (
+    copy_model_workspace,
+    load_runtime_meta,
+    read_json_stdin,
+    safe_instance_name,
+    validate_replay_shell_cmd,
+    write_json_stdout,
+)
 
 
 def _model_env(meta: dict, model_workspace: Path, arc_state_dir: Path) -> dict[str, str]:
@@ -153,12 +160,13 @@ def main() -> None:
         tool = str(step.get("tool", "")).strip()
         args = step.get("args") if isinstance(step.get("args"), dict) else {}
         if tool == "shell":
-            cmd = args.get("cmd")
-            if not isinstance(cmd, list) or not all(isinstance(item, str) for item in cmd):
+            try:
+                cmd = validate_replay_shell_cmd(args.get("cmd"))
+            except RuntimeError as exc:
                 rehearsal_ok = False
-                error = {"type": "invalid_shell_step", "step": step}
+                error = {"type": "invalid_shell_step", "step": step, "message": str(exc)}
                 break
-            result = _translated_model_step(model_workspace, env, list(cmd))
+            result = _translated_model_step(model_workspace, env, cmd)
             tool_results.append({"tool": "shell", **result})
             parsed = result.get("parsed") if isinstance(result.get("parsed"), dict) else {}
             if int(result["returncode"]) != 0 or (parsed and not bool(parsed.get("ok", True))):

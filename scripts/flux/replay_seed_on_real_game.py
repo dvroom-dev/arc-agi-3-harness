@@ -8,6 +8,7 @@ from common import (
     read_json_stdin,
     summarize_instance_state,
     sync_solver_artifacts_to_model_workspace,
+    validate_replay_shell_cmd,
     write_json_stdout,
 )
 
@@ -84,11 +85,11 @@ def main() -> None:
         args = step.get("args") if isinstance(step.get("args"), dict) else {}
         result = None
         if tool == "shell":
-            cmd = args.get("cmd")
-            if isinstance(cmd, list) and all(isinstance(item, str) for item in cmd):
-                result = _run_shell(list(cmd), working_directory, env)
-            else:
-                result = {"tool": "shell", "returncode": 1, "stdout": "", "stderr": "invalid shell cmd"}
+            try:
+                cmd = validate_replay_shell_cmd(args.get("cmd"))
+                result = _run_shell(cmd, working_directory, env)
+            except RuntimeError as exc:
+                result = {"tool": "shell", "returncode": 1, "stdout": "", "stderr": str(exc)}
         elif tool == "write_file":
             result = _write_file(working_directory, str(args.get("path", "")), str(args.get("content", "")))
         elif tool == "read_file":

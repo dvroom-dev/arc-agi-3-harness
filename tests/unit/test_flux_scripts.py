@@ -132,6 +132,28 @@ def test_replay_seed_on_real_game_resolves_agent_prefixed_paths(tmp_path: Path) 
     assert resolved == target.resolve()
 
 
+def test_validate_replay_shell_cmd_rejects_shell_snippet_array() -> None:
+    common = _load_module("flux_common_replay_shell_test", "scripts/flux/common.py")
+
+    try:
+        common.validate_replay_shell_cmd(["cd agent/game_ls20 && python - <<'PY'"])
+    except RuntimeError as exc:
+        assert "direct program token, not a shell snippet" in str(exc)
+    else:
+        raise AssertionError("expected replay shell validation to reject shell snippet array")
+
+
+def test_validate_replay_shell_cmd_rejects_non_replayable_program() -> None:
+    common = _load_module("flux_common_replay_shell_allowlist_test", "scripts/flux/common.py")
+
+    try:
+        common.validate_replay_shell_cmd(["python3", "-c", "print('hi')"])
+    except RuntimeError as exc:
+        assert "must be one of arc_action, arc_level, arc_repl" in str(exc)
+    else:
+        raise AssertionError("expected replay shell validation to reject non-replayable program")
+
+
 def test_copy_model_workspace_ignores_transient_flux_artifacts(tmp_path: Path) -> None:
     common = _load_module("flux_common_snapshot_test", "scripts/flux/common.py")
     source = tmp_path / "agent" / "game_ls20"
