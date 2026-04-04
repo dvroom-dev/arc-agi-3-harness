@@ -40,6 +40,9 @@ export interface FluxSessionSummary {
   model: string | null;
   stopReason: string | null;
   latestAssistantText: string | null;
+  promptCount: number;
+  userMessageCount: number;
+  assistantMessageCount: number;
 }
 
 export interface FluxRunDetail extends FluxRunSummary {

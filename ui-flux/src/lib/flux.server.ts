@@ -85,7 +85,29 @@ function normalizeSessionSummary(payload: JsonRecord | null, sessionType: FluxSe
     model: typeof payload?.model === "string" ? String(payload.model) : null,
     stopReason: typeof payload?.stopReason === "string" ? String(payload.stopReason) : null,
     latestAssistantText: typeof payload?.latestAssistantText === "string" ? String(payload.latestAssistantText) : null,
+    promptCount: 0,
+    userMessageCount: 0,
+    assistantMessageCount: 0,
   };
+}
+
+async function readSessionActivityCounts(sessionRoot: string): Promise<{
+  promptCount: number;
+  userMessageCount: number;
+  assistantMessageCount: number;
+}> {
+  const promptDir = path.join(sessionRoot, "prompts");
+  const promptEntries = await fs.readdir(promptDir, { withFileTypes: true }).catch(() => []);
+  const promptCount = promptEntries.filter((entry) => entry.isFile()).length;
+  const messages = await readJsonLines(path.join(sessionRoot, "messages.jsonl"));
+  let userMessageCount = 0;
+  let assistantMessageCount = 0;
+  for (const message of messages) {
+    const kind = typeof message.kind === "string" ? String(message.kind) : "";
+    if (kind === "user") userMessageCount += 1;
+    if (kind === "assistant") assistantMessageCount += 1;
+  }
+  return { promptCount, userMessageCount, assistantMessageCount };
 }
 
 async function readActiveSessionRecords(runRoot: string, state: JsonRecord | null): Promise<Partial<Record<FluxSessionType, JsonRecord | null>>> {
@@ -114,8 +136,12 @@ async function listSessionSummaries(baseDir: string, sessionType: FluxSessionTyp
   const sessionRoot = path.join(baseDir, ".ai-flux", "sessions", sessionType);
   const entries = await fs.readdir(sessionRoot, { withFileTypes: true }).catch(() => []);
   const sessions = await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
-    const sessionPath = path.join(sessionRoot, entry.name, "session.json");
-    return normalizeSessionSummary(await readJson(sessionPath), sessionType, entry.name);
+    const perSessionRoot = path.join(sessionRoot, entry.name);
+    const sessionPath = path.join(perSessionRoot, "session.json");
+    return {
+      ...normalizeSessionSummary(await readJson(sessionPath), sessionType, entry.name),
+      ...(await readSessionActivityCounts(perSessionRoot)),
+    };
   }));
   return sessions.sort((left, right) => (right.updatedAt || "").localeCompare(left.updatedAt || ""));
 }
