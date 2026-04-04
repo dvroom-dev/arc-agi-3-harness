@@ -30,8 +30,39 @@ def _write_file(cwd: Path, path_text: str, content: str) -> dict:
     return {"tool": "write_file", "path": str(target), "bytes": len(content.encode("utf-8"))}
 
 
+def _resolve_replay_path(working_directory: Path, raw_path: str) -> Path:
+    raw_text = str(raw_path or "").strip()
+    raw = Path(raw_text)
+    if raw.is_absolute():
+        return raw
+    workspace_name = working_directory.name
+    parts = [part for part in raw.parts if part not in {"", "."}]
+    candidates: list[list[str]] = [parts]
+    if len(parts) >= 2 and parts[0] == "agent":
+        if parts[1] == workspace_name:
+            candidates.append(parts[2:])
+        else:
+            candidates.append(parts[1:])
+    if parts[:1] == [workspace_name]:
+        candidates.append(parts[1:])
+    seen: set[tuple[str, ...]] = set()
+    for candidate in candidates:
+        key = tuple(candidate)
+        if key in seen:
+            continue
+        seen.add(key)
+        target = working_directory.joinpath(*candidate).resolve()
+        if target.exists():
+            return target
+    if parts[:2] == ["agent", workspace_name]:
+        return working_directory.joinpath(*parts[2:]).resolve()
+    if parts[:1] == [workspace_name]:
+        return working_directory.joinpath(*parts[1:]).resolve()
+    return working_directory.joinpath(*parts).resolve()
+
+
 def _read_file(cwd: Path, path_text: str) -> dict:
-    target = (cwd / path_text).resolve()
+    target = _resolve_replay_path(cwd, path_text)
     return {"tool": "read_file", "path": str(target), "content": target.read_text(encoding="utf-8")}
 
 

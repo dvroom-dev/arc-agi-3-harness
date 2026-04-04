@@ -117,6 +117,21 @@ def test_rehearse_seed_on_model_resolves_agent_prefixed_paths(tmp_path: Path) ->
     assert resolved == target.resolve()
 
 
+def test_replay_seed_on_real_game_resolves_agent_prefixed_paths(tmp_path: Path) -> None:
+    _load_module("common", "scripts/flux/common.py")
+    replay = _load_module("flux_replay_seed_real_test", "scripts/flux/replay_seed_on_real_game.py")
+    working_directory = tmp_path / "game_ls20"
+    target = working_directory / "level_1" / "sequences" / "seq_0001.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('{"ok":true}\n', encoding="utf-8")
+
+    resolved = replay._resolve_replay_path(
+        working_directory,
+        "agent/game_ls20/level_1/sequences/seq_0001.json",
+    )
+    assert resolved == target.resolve()
+
+
 def test_copy_model_workspace_ignores_transient_flux_artifacts(tmp_path: Path) -> None:
     common = _load_module("flux_common_snapshot_test", "scripts/flux/common.py")
     source = tmp_path / "agent" / "game_ls20"
