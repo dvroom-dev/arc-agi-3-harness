@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -288,6 +289,16 @@ def sync_solver_artifacts_to_model_workspace(meta: dict, solver_dir: Path, state
             if not should_sync:
                 continue
             destination = model_workspace / name
+            if (
+                child.is_dir()
+                and re.fullmatch(r"level_\d+", name)
+                and destination.exists()
+                and destination.is_dir()
+                and not (child / "sequences").exists()
+                and (destination / "sequences").exists()
+            ):
+                synced.append(str(destination))
+                continue
             _replace_copy(child, destination)
 
         if state_dir is not None:
@@ -304,6 +315,21 @@ def sync_solver_artifacts_to_model_workspace(meta: dict, solver_dir: Path, state
 
         _ensure_sequence_surface(meta, model_workspace)
     return synced
+
+
+def _instance_sequence_richness(instance_dir: Path, solver_dir_name: str) -> tuple[int, int]:
+    solver_dir = instance_dir / "agent" / solver_dir_name
+    sequence_dirs = 0
+    sequence_files = 0
+    if solver_dir.exists():
+        for level_dir in solver_dir.glob("level_*"):
+            if not level_dir.is_dir():
+                continue
+            seq_dir = level_dir / "sequences"
+            if seq_dir.exists() and seq_dir.is_dir():
+                sequence_dirs += 1
+                sequence_files += len(list(seq_dir.glob("seq_*.json")))
+    return sequence_dirs, sequence_files
 
 
 def _ensure_sequence_surface(meta: dict, model_workspace: Path) -> None:
@@ -426,9 +452,22 @@ def sync_latest_attempt_to_model_workspace(workspace_root: str, meta: dict) -> l
     attempts = [path for path in attempts_root.iterdir() if path.is_dir()]
     if not attempts:
         return []
+    solver_dir_name = Path(str(meta["solver_template_dir"])).name
     latest = max(attempts, key=lambda path: path.stat().st_mtime)
-    solver_dir = latest / "agent" / Path(str(meta["solver_template_dir"])).name
+    richest = max(
+        attempts,
+        key=lambda path: (
+            *_instance_sequence_richness(path, solver_dir_name),
+            path.stat().st_mtime,
+        ),
+    )
+    solver_dir = latest / "agent" / solver_dir_name
     state_dir = latest / "supervisor" / "arc"
     if not solver_dir.exists():
         return []
-    return sync_solver_artifacts_to_model_workspace(meta, solver_dir, state_dir=state_dir)
+    synced = sync_solver_artifacts_to_model_workspace(meta, solver_dir, state_dir=state_dir)
+    if richest != latest:
+        richest_solver_dir = richest / "agent" / solver_dir_name
+        if richest_solver_dir.exists():
+            synced.extend(sync_solver_artifacts_to_model_workspace(meta, richest_solver_dir, state_dir=None))
+    return synced

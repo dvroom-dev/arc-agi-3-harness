@@ -31,6 +31,11 @@ def _classify_infrastructure_failure(message: str) -> dict | None:
             "type": "missing_sequence_surface",
             "message": text,
         }
+    if '"type": "missing_sequences"' in text or "missing sequences dir:" in text:
+        return {
+            "type": "missing_sequence_surface",
+            "message": text,
+        }
     return None
 
 

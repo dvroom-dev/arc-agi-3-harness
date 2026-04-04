@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import shutil
 import sys
+import time
 from pathlib import Path
 
 
@@ -102,6 +104,39 @@ def test_check_model_skips_frontier_compare_until_frontier_level_is_ready(
     assert payloads[0]["compare_payload"]["frontier_sync_pending"] is True
 
 
+def test_check_model_classifies_missing_sequences_as_infrastructure_failure(tmp_path: Path, monkeypatch) -> None:
+    _load_module("common", "scripts/flux/common.py")
+    check_model = _load_module("flux_check_model_missing_sequences_test", "scripts/flux/check_model.py")
+    model_workspace = tmp_path / "agent" / "game_ls20"
+    model_workspace.mkdir(parents=True, exist_ok=True)
+    (model_workspace / "model.py").write_text("# stub\n", encoding="utf-8")
+
+    monkeypatch.setattr(check_model, "read_json_stdin", lambda: {"workspaceRoot": str(tmp_path), "modelOutput": {}})
+    monkeypatch.setattr(check_model, "load_runtime_meta", lambda _workspace: {
+        "model_workspace_dir": str(model_workspace),
+        "run_config_dir": str(tmp_path / "config"),
+        "run_bin_dir": str(tmp_path / "bin"),
+        "game_id": "ls20",
+    })
+    monkeypatch.setattr(check_model, "sync_latest_attempt_to_model_workspace", lambda _workspace, _meta: [])
+    monkeypatch.setattr(
+        check_model,
+        "_run_compare",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError('{"ok": false, "action": "compare_sequences", "error": {"type": "missing_sequences", "message": "missing sequences dir: /tmp/level_1/sequences"}}')
+        ),
+    )
+
+    payloads: list[dict] = []
+    monkeypatch.setattr(check_model, "write_json_stdout", lambda payload: payloads.append(payload))
+
+    check_model.main()
+
+    assert payloads
+    assert payloads[0]["accepted"] is False
+    assert payloads[0]["infrastructure_failure"]["type"] == "missing_sequence_surface"
+
+
 def test_rehearse_seed_on_model_resolves_agent_prefixed_paths(tmp_path: Path) -> None:
     _load_module("common", "scripts/flux/common.py")
     rehearse = _load_module("flux_rehearse_seed_test", "scripts/flux/rehearse_seed_on_model.py")
@@ -171,6 +206,48 @@ def test_copy_model_workspace_ignores_transient_flux_artifacts(tmp_path: Path) -
     assert not (destination / ".level_6.flux-prev-deadbeef").exists()
     assert not (destination / ".level_current.tmp").exists()
     assert not (destination / ".workspace-tree.lock").exists()
+
+
+def test_sync_latest_attempt_to_model_workspace_preserves_richer_level_sequences(tmp_path: Path) -> None:
+    common = _load_module("flux_common_latest_instance_test", "scripts/flux/common.py")
+    workspace_root = tmp_path / "run"
+    attempts_root = workspace_root / "flux_instances"
+    solver_name = "game_ls20"
+
+    rich_attempt = attempts_root / "attempt_older"
+    sparse_seed = attempts_root / "seed_rev_newer"
+    rich_solver = rich_attempt / "agent" / solver_name
+    sparse_solver = sparse_seed / "agent" / solver_name
+    rich_level = rich_solver / "level_1"
+    sparse_level = sparse_solver / "level_1"
+    rich_sequences = rich_level / "sequences"
+    rich_sequences.mkdir(parents=True, exist_ok=True)
+    (rich_sequences / "seq_0001.json").write_text("{}\n", encoding="utf-8")
+    (rich_level / "initial_state.hex").write_text("0\n", encoding="utf-8")
+    (rich_level / "initial_state.meta.json").write_text("{}\n", encoding="utf-8")
+
+    sparse_level.mkdir(parents=True, exist_ok=True)
+    (sparse_level / "initial_state.hex").write_text("0\n", encoding="utf-8")
+    (sparse_level / "initial_state.meta.json").write_text("{}\n", encoding="utf-8")
+    (sparse_solver / "level_current").mkdir(parents=True, exist_ok=True)
+    (sparse_solver / "level_current" / "meta.json").write_text(json.dumps({"level": 1}), encoding="utf-8")
+    (sparse_solver / "level_current" / "initial_state.hex").write_text("0\n", encoding="utf-8")
+    (sparse_solver / "level_current" / "initial_state.meta.json").write_text("{}\n", encoding="utf-8")
+
+    model_workspace = workspace_root / "agent" / solver_name
+    meta = {
+        "model_workspace_dir": str(model_workspace),
+        "solver_template_dir": str(workspace_root / "flux_seed" / "agent" / solver_name),
+    }
+
+    rich_mtime = time.time() - 10
+    sparse_mtime = time.time()
+    os.utime(rich_attempt, (rich_mtime, rich_mtime))
+    os.utime(sparse_seed, (sparse_mtime, sparse_mtime))
+
+    common.sync_latest_attempt_to_model_workspace(str(workspace_root), meta)
+
+    assert (model_workspace / "level_1" / "sequences" / "seq_0001.json").exists()
 
 
 def test_inspect_current_mismatch_falls_back_to_first_report(tmp_path: Path) -> None:
