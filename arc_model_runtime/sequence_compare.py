@@ -9,7 +9,6 @@ from typing import Any
 import numpy as np
 
 from .sequence_compare_artifacts import persist_current_compare
-from .sequence_compare_render import current_compare_markdown, report_md
 from .utils import (
     action_from_name,
     canonical_game_artifacts_dir,
@@ -363,8 +362,6 @@ def compare_sequences(
         err["include_level_regressions"] = bool(include_level_regressions)
         return err, code
 
-    compare_root = level_dir / "sequence_compare"
-    compare_root.mkdir(parents=True, exist_ok=True)
     if level_dir.name == "analysis_level":
         report_surface_dir = "analysis_level/sequence_compare"
     elif level_dir.name == "level_current":
@@ -378,8 +375,6 @@ def compare_sequences(
         report["start_action_index"] = int(payload.get("start_action_index", 0) or 0)
         report["end_action_index"] = int(payload.get("end_action_index", report["start_action_index"]) or report["start_action_index"])
         report["end_reason"] = str(payload.get("end_reason", "") or "")
-        report_file = compare_root / f"{report['sequence_id']}.md"
-        report_file.write_text(report_md(report))
         report["report_file"] = f"{report_surface_dir}/{report['sequence_id']}.md"
         reports.append(report)
         if not bool(report.get("matched", False)):
