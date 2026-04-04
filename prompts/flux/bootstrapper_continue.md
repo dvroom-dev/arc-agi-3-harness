@@ -19,7 +19,10 @@ Rules:
   - do not write `content`
 - If the seed changed and rehearsal exposed an error or weaker-than-expected branch, revise the seed and return `continue_refining`.
 - If rehearsal succeeded but the seed can still be improved into a better full-run level-1-to-frontier seed, revise it and return `continue_refining`.
-- Return `finalize_seed` only when the current seed is ready to be replayed from level 1 on a fresh real game.
+- Do not wait for the frontier to be solved before returning `finalize_seed`.
+- Return `finalize_seed` when the current seed is the best known level-1-to-frontier seed and is ready to be replayed from level 1 on a fresh real game for the next solver, even if the frontier branch is still unresolved.
+- If rehearsal passed and you are keeping the seed unchanged because it is already the best known seed, return `finalize_seed`, not `continue_refining`.
+- Use `continue_refining` only when you are making another seed edit now or when rehearsal/replay found a concrete issue that makes the current seed unfit for the next solver.
 - Keep solved-level steps ideal and deterministic.
 - Keep the mechanic explanation cumulative across levels. Preserve confirmed rules from solved levels and add later confirmed mechanics that matter for future reasoning.
 - Keep the seed message structure disciplined:

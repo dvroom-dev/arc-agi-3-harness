@@ -47,7 +47,10 @@ Goals:
 
 Critical workflow rules:
 - Flux will rehearse any changed seed on the model from a fresh level-1 start before it allows finalization.
-- Do not return `finalize_seed` unless the current seed is ready to be used on a fresh real game from level 1.
+- Do not treat `finalize_seed` as meaning "the frontier is solved".
+- `finalize_seed` means: the current seed is the best known fresh-run seed from level 1 and is ready to hand to a fresh solver on a fresh real game, even if the frontier is still unresolved.
+- If solved levels are encoded correctly, the frontier branch is the best known branch so far, rehearsal passed, and you are not making another seed edit right now, return `finalize_seed`.
+- Use `continue_refining` only when you are actually changing the seed now or when rehearsal/replay exposed a concrete problem that must be fixed before the next solver should use this seed.
 - If rehearsal or real replay feedback shows an error, mismatch, or weaker-than-expected branch, revise the seed and return `continue_refining`.
 - The seed should solve solved levels perfectly, then attempt to solve the frontier or probe the most important unresolved frontier feature.
 
