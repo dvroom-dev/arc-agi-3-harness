@@ -46,6 +46,8 @@ Goals:
 - Reuse the previous seed only if it is still the best known full-run seed from the start of the game.
 - Replay steps must target only solver/game-workspace artifacts and actions.
 - Do not put `flux/*`, `.ai-flux/*`, `config/*`, `prompts/*`, or other run-control bookkeeping paths into `replayPlan`.
+- Do not put generated evidence artifacts such as `level_*/sequences/*`, `level_*/sequence_compare/*`, `level_current/sequences/*`, or `current_compare.*` into `replayPlan`.
+- If a generated artifact teaches an important mechanic, summarize it in `syntheticMessages` or `assertions` instead of trying to replay-read it.
 - For `shell` replay steps, use the exact `args.cmd: ["..."]` array shape, not `command` or a shell string.
 
 Critical workflow rules:
