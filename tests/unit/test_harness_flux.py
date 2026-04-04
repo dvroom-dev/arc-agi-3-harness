@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from harness_flux import _render_flux_config, _write_initial_seed_bundle
+from harness_flux import _read_flux_state_status, _render_flux_config, _write_initial_seed_bundle
 
 
 def test_write_initial_seed_bundle_creates_empty_bundle(tmp_path: Path) -> None:
@@ -47,3 +47,19 @@ def test_render_flux_config_keeps_mock_provider_coherent() -> None:
 
 def test_flux_yaml_template_exists() -> None:
     assert Path("flux.yaml").exists()
+
+
+def test_read_flux_state_status_parses_stop_state(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(json.dumps({"status": "stopped", "stopRequested": True}), encoding="utf-8")
+    status, stop_requested = _read_flux_state_status(state_path)
+    assert status == "stopped"
+    assert stop_requested is True
+
+
+def test_read_flux_state_status_handles_bad_json(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text("{bad", encoding="utf-8")
+    status, stop_requested = _read_flux_state_status(state_path)
+    assert status is None
+    assert stop_requested is False

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import selectors
 import signal
 import subprocess
 import sys
 import shutil
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -81,6 +83,18 @@ def _write_initial_seed_bundle(run_dir: Path) -> Path:
     return seed_path
 
 
+def _read_flux_state_status(state_path: Path) -> tuple[str | None, bool]:
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return None, False
+    if not isinstance(payload, dict):
+        return None, False
+    status = payload.get("status")
+    stop_requested = bool(payload.get("stopRequested"))
+    return (str(status) if isinstance(status, str) else None), stop_requested
+
+
 def _render_flux_config(runtime: HarnessRuntime) -> str:
     template = (PROJECT_ROOT / "flux.yaml").read_text(encoding="utf-8")
     prompts_root = PROJECT_ROOT / "prompts" / "flux"
@@ -141,12 +155,54 @@ def _launch_flux(runtime: HarnessRuntime, config_path: Path) -> int:
         bufsize=1,
     )
     assert proc.stdout is not None
+    selector = selectors.DefaultSelector()
+    selector.register(proc.stdout, selectors.EVENT_READ)
+    state_path = runtime.run_dir / "flux" / "state.json"
+    stop_seen_at: float | None = None
+    terminate_sent_at: float | None = None
     with launcher_log_path.open("a", encoding="utf-8") as log_file:
+        while True:
+            if proc.poll() is not None:
+                break
+            events = selector.select(timeout=0.5)
+            for key, _mask in events:
+                line = key.fileobj.readline()
+                if not line:
+                    try:
+                        selector.unregister(key.fileobj)
+                    except Exception:
+                        pass
+                    continue
+                log_file.write(line)
+                log_file.flush()
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            status, stop_requested = _read_flux_state_status(state_path)
+            if status in {"stopped", "stopping"} or (stop_requested and status == "running"):
+                if stop_seen_at is None:
+                    stop_seen_at = time.monotonic()
+                elapsed = time.monotonic() - stop_seen_at
+                if terminate_sent_at is None and elapsed >= 10:
+                    log_file.write("[launcher] flux child still alive after stop state; sending SIGTERM\n")
+                    log_file.flush()
+                    proc.terminate()
+                    terminate_sent_at = time.monotonic()
+                elif terminate_sent_at is not None and (time.monotonic() - terminate_sent_at) >= 5 and proc.poll() is None:
+                    log_file.write("[launcher] flux child ignored SIGTERM after stop state; sending SIGKILL\n")
+                    log_file.flush()
+                    proc.kill()
+            else:
+                stop_seen_at = None
+                terminate_sent_at = None
         for line in proc.stdout:
             log_file.write(line)
             log_file.flush()
             sys.stdout.write(line)
             sys.stdout.flush()
+    try:
+        selector.close()
+    except Exception:
+        pass
     rc = int(proc.wait())
     event_path = runtime.run_dir / "flux" / "events.jsonl"
     if event_path.exists():
