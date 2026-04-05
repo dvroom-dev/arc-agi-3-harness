@@ -132,7 +132,7 @@ function StateView({
             className="w-full"
           />
           <div className="mt-2 flex items-center justify-between text-xs text-[var(--muted)]">
-            <span>{detail.frames[liveFrameIndex]?.label ?? "n/a"} · last action {detail.frames[liveFrameIndex]?.lastActionLabel ?? "none"}</span>
+            <span>{detail.frames[liveFrameIndex]?.label ?? "n/a"}</span>
             <button
               onClick={() => {
                 setFollowLive(true);

@@ -1,11 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { parseHexGrid } from "@/lib/grid";
+import { readFrameSnapshots } from "@/lib/flux.frames";
 import { HARNESS_FLUX_ENTRYPOINT, RUNS_DIR, SUPER_FLUX_ENTRYPOINT, runDir } from "@/lib/paths";
 import type {
-  FluxActionSummary,
-  FluxFrameSnapshot,
   FluxPromptPayload,
   FluxQueuePreview,
   FluxRunDetail,
@@ -203,107 +201,6 @@ async function pickGameDirForRun(runId: string, state: JsonRecord | null): Promi
   return { gameDir: null, attemptId: null, attemptRoot: null };
 }
 
-async function readFrameSnapshots(gameDir: string): Promise<{ frames: FluxFrameSnapshot[]; actions: FluxActionSummary[]; currentLevel: number | null }> {
-  const levelCurrentDir = path.join(gameDir, "level_current");
-  const meta = await readJson<JsonRecord>(path.join(levelCurrentDir, "meta.json"));
-  const currentLevel = typeof meta?.level === "number" ? Number(meta.level) : null;
-  const initialHex = await readText(path.join(levelCurrentDir, "initial_state.hex"));
-  const currentHex = await readText(path.join(levelCurrentDir, "current_state.hex"));
-  const frames: FluxFrameSnapshot[] = [];
-  const actions: FluxActionSummary[] = [];
-  let lastActionLabel: string | null = null;
-  if (initialHex) {
-    frames.push({
-      id: "initial",
-      label: "Initial",
-      grid: parseHexGrid(initialHex),
-      actionLabel: null,
-      lastActionLabel: null,
-      turnDir: null,
-      changedPixels: 0,
-      stepCount: 0,
-    });
-  }
-  type ActionRecord = {
-    actionIndex: number;
-    actionLabel: string;
-    changedPixels: number;
-    turnDir: string;
-    stateBefore: string;
-    stateAfter: string;
-    afterGrid: number[][];
-  };
-  const actionRecords: ActionRecord[] = [];
-  const turnEntries = await fs.readdir(levelCurrentDir, { withFileTypes: true }).catch(() => []);
-  const turnDirs = turnEntries
-    .filter((entry) => entry.isDirectory() && entry.name.startsWith("turn_"))
-    .map((entry) => entry.name)
-    .sort((left, right) => left.localeCompare(right))
-    .slice(-120);
-  for (const turnDirName of turnDirs) {
-    const turnDir = path.join(levelCurrentDir, turnDirName);
-    const turnMeta = await readJson<JsonRecord>(path.join(turnDir, "meta.json"));
-    const afterHex = await readText(path.join(turnDir, "after_state.hex"));
-    if (!turnMeta || !afterHex) continue;
-    const actionIndex = typeof turnMeta.tool_turn === "number"
-      ? Number(turnMeta.tool_turn)
-      : Number(String(turnDirName).split("_").pop() || actionRecords.length + 1);
-    const actionLabel = typeof turnMeta.action_input_name === "string" && String(turnMeta.action_input_name).trim().length > 0
-      ? String(turnMeta.action_input_name)
-      : (typeof turnMeta.action_label === "string" ? String(turnMeta.action_label) : "UNKNOWN");
-    actionRecords.push({
-      actionIndex,
-      actionLabel,
-      changedPixels: typeof turnMeta.changed_pixels === "number" ? Number(turnMeta.changed_pixels) : 0,
-      turnDir: path.relative(gameDir, turnDir),
-      stateBefore: typeof turnMeta.state_before_action === "string" ? String(turnMeta.state_before_action) : "",
-      stateAfter: typeof turnMeta.state_after_action === "string" ? String(turnMeta.state_after_action) : "",
-      afterGrid: parseHexGrid(afterHex),
-    });
-  }
-  actionRecords.sort((left, right) => left.actionIndex - right.actionIndex);
-  for (const action of actionRecords) {
-    lastActionLabel = action.actionLabel;
-    actions.push({
-      step: actions.length + 1,
-      actionLabel: action.actionLabel,
-      changedPixels: action.changedPixels,
-      turnDir: action.turnDir,
-      stateBefore: action.stateBefore,
-      stateAfter: action.stateAfter,
-    });
-    frames.push({
-      id: `action-${action.actionIndex}`,
-      label: `${actions.length}. ${action.actionLabel}`,
-      grid: action.afterGrid,
-      actionLabel: action.actionLabel,
-      lastActionLabel,
-      turnDir: action.turnDir,
-      changedPixels: action.changedPixels,
-      stepCount: actions.length,
-    });
-  }
-
-  if (currentHex) {
-    const currentGrid = parseHexGrid(currentHex);
-    const lastGrid = frames[frames.length - 1]?.grid;
-    const sameAsLast = JSON.stringify(lastGrid) === JSON.stringify(currentGrid);
-    if (!sameAsLast) {
-      frames.push({
-        id: "current",
-        label: "Current",
-        grid: currentGrid,
-        actionLabel: lastActionLabel,
-        lastActionLabel,
-        turnDir: null,
-        changedPixels: 0,
-        stepCount: actions.length,
-      });
-    }
-  }
-
-  return { frames, actions, currentLevel };
-}
 
 function summarizeQueueItem(queue: { items?: unknown[] } | null): FluxQueuePreview {
   const items = Array.isArray(queue?.items) ? queue.items : [];
