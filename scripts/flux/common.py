@@ -445,28 +445,40 @@ def _ensure_sequence_surface(meta: dict, model_workspace: Path) -> None:
     sequence_path.write_text(json.dumps(sequence_payload, indent=2) + "\n", encoding="utf-8")
 
 
-def sync_latest_attempt_to_model_workspace(workspace_root: str, meta: dict) -> list[str]:
+def _active_flux_instance_dir(workspace_root: Path) -> Path | None:
+    try:
+        solver = ((json.loads((workspace_root / "flux" / "state.json").read_text()).get("active") or {}).get("solver") or {})
+        instance_id = str(solver.get("instanceId", "") or "").strip()
+    except Exception:
+        return None
+    instance_dir = workspace_root / "flux_instances" / safe_instance_name(instance_id)
+    return instance_dir if instance_id and instance_dir.exists() else None
+
+
+def _selected_flux_instances(workspace_root: str, solver_dir_name: str) -> tuple[list[Path], Path | None, Path, Path] | None:
     attempts_root = Path(workspace_root) / "flux_instances"
-    if not attempts_root.exists():
-        return []
-    attempts = [path for path in attempts_root.iterdir() if path.is_dir()]
+    attempts = [path for path in attempts_root.iterdir() if path.is_dir()] if attempts_root.exists() else []
     if not attempts:
-        return []
-    solver_dir_name = Path(str(meta["solver_template_dir"])).name
+        return None
+    active = _active_flux_instance_dir(Path(workspace_root))
     latest = max(attempts, key=lambda path: path.stat().st_mtime)
-    richest = max(
-        attempts,
-        key=lambda path: (
-            *_instance_sequence_richness(path, solver_dir_name),
-            path.stat().st_mtime,
-        ),
-    )
-    solver_dir = latest / "agent" / solver_dir_name
-    state_dir = latest / "supervisor" / "arc"
+    richest = max(attempts, key=lambda path: (*_instance_sequence_richness(path, solver_dir_name), path.stat().st_mtime))
+    return attempts, active if active and active in attempts else None, latest, richest
+
+
+def sync_latest_attempt_to_model_workspace(workspace_root: str, meta: dict) -> list[str]:
+    solver_dir_name = Path(str(meta.get("solver_template_dir") or meta.get("model_workspace_dir") or "game_ls20")).name
+    selected = _selected_flux_instances(workspace_root, solver_dir_name)
+    if not selected:
+        return []
+    _attempts, active, latest, richest = selected
+    primary = active or latest
+    solver_dir = primary / "agent" / solver_dir_name
+    state_dir = primary / "supervisor" / "arc"
     if not solver_dir.exists():
         return []
     synced = sync_solver_artifacts_to_model_workspace(meta, solver_dir, state_dir=state_dir)
-    if richest != latest:
+    if richest != primary:
         richest_solver_dir = richest / "agent" / solver_dir_name
         if richest_solver_dir.exists():
             synced.extend(sync_solver_artifacts_to_model_workspace(meta, richest_solver_dir, state_dir=None))
@@ -474,21 +486,14 @@ def sync_latest_attempt_to_model_workspace(workspace_root: str, meta: dict) -> l
 
 
 def latest_flux_instance_state_dir(workspace_root: str, meta: dict) -> Path | None:
-    attempts_root = Path(workspace_root) / "flux_instances"
-    if not attempts_root.exists():
+    solver_dir_name = Path(str(meta.get("solver_template_dir") or meta.get("model_workspace_dir") or "game_ls20")).name
+    selected = _selected_flux_instances(workspace_root, solver_dir_name)
+    if not selected:
         return None
-    instances = [path for path in attempts_root.iterdir() if path.is_dir()]
-    if not instances:
-        return None
-    solver_dir_name = Path(str(meta["solver_template_dir"])).name
-    latest = max(instances, key=lambda path: path.stat().st_mtime)
-    richest = max(
-        instances,
-        key=lambda path: (
-            *_instance_sequence_richness(path, solver_dir_name),
-            path.stat().st_mtime,
-        ),
-    )
+    _instances, active, latest, richest = selected
+    if active:
+        state_dir = active / "supervisor" / "arc"
+        return state_dir if state_dir.exists() else None
     chosen = richest if _instance_sequence_richness(richest, solver_dir_name) > _instance_sequence_richness(latest, solver_dir_name) else latest
     state_dir = chosen / "supervisor" / "arc"
     return state_dir if state_dir.exists() else None

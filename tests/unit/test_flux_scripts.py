@@ -178,6 +178,94 @@ def test_check_model_uses_latest_flux_instance_state_dir_for_compare_env(tmp_pat
     assert seen_envs[0]["ARC_STATE_DIR"] == str(active_state_dir)
 
 
+def test_latest_flux_instance_state_dir_prefers_active_solver_instance(tmp_path: Path) -> None:
+    common = _load_module("flux_common_active_instance_test", "scripts/flux/common.py")
+    workspace_root = tmp_path
+    solver_template_dir = workspace_root / "templates" / "game_ls20"
+    solver_template_dir.mkdir(parents=True, exist_ok=True)
+
+    stale = workspace_root / "flux_instances" / "attempt_stale"
+    active = workspace_root / "flux_instances" / "seed_rev_live"
+    (stale / "agent" / "game_ls20" / "level_1" / "sequences").mkdir(parents=True, exist_ok=True)
+    (stale / "agent" / "game_ls20" / "level_1" / "sequences" / "seq_0001.json").write_text("{}\n", encoding="utf-8")
+    (stale / "supervisor" / "arc").mkdir(parents=True, exist_ok=True)
+    (active / "agent" / "game_ls20").mkdir(parents=True, exist_ok=True)
+    (active / "supervisor" / "arc").mkdir(parents=True, exist_ok=True)
+    (workspace_root / "flux").mkdir(parents=True, exist_ok=True)
+    (workspace_root / "flux" / "state.json").write_text(
+        json.dumps(
+            {
+                "active": {
+                    "solver": {
+                        "instanceId": "seed_rev_live",
+                        "status": "running",
+                    }
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    resolved = common.latest_flux_instance_state_dir(
+        str(workspace_root),
+        {"solver_template_dir": str(solver_template_dir)},
+    )
+
+    assert resolved == (active / "supervisor" / "arc")
+
+
+def test_sync_latest_attempt_to_model_workspace_prefers_active_instance_before_richest_merge(tmp_path: Path, monkeypatch) -> None:
+    common = _load_module("flux_common_active_sync_test", "scripts/flux/common.py")
+    workspace_root = tmp_path
+    solver_template_dir = workspace_root / "templates" / "game_ls20"
+    solver_template_dir.mkdir(parents=True, exist_ok=True)
+
+    stale = workspace_root / "flux_instances" / "attempt_stale"
+    active = workspace_root / "flux_instances" / "seed_rev_live"
+    (stale / "agent" / "game_ls20" / "level_1" / "sequences").mkdir(parents=True, exist_ok=True)
+    (stale / "agent" / "game_ls20" / "level_1" / "sequences" / "seq_0001.json").write_text("{}\n", encoding="utf-8")
+    (stale / "agent" / "game_ls20" / "level_1" / "sequences" / "seq_0002.json").write_text("{}\n", encoding="utf-8")
+    (stale / "supervisor" / "arc").mkdir(parents=True, exist_ok=True)
+    (active / "agent" / "game_ls20" / "level_2").mkdir(parents=True, exist_ok=True)
+    (active / "supervisor" / "arc").mkdir(parents=True, exist_ok=True)
+    (workspace_root / "flux").mkdir(parents=True, exist_ok=True)
+    (workspace_root / "flux" / "state.json").write_text(
+        json.dumps(
+            {
+                "active": {
+                    "solver": {
+                        "instanceId": "seed_rev_live",
+                        "status": "running",
+                    }
+                }
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    calls: list[tuple[Path, Path | None]] = []
+
+    def fake_sync_solver_artifacts_to_model_workspace(meta: dict, solver_dir: Path, state_dir: Path | None = None) -> list[str]:
+        calls.append((solver_dir, state_dir))
+        return []
+
+    monkeypatch.setattr(common, "sync_solver_artifacts_to_model_workspace", fake_sync_solver_artifacts_to_model_workspace)
+
+    common.sync_latest_attempt_to_model_workspace(
+        str(workspace_root),
+        {
+            "solver_template_dir": str(solver_template_dir),
+            "model_workspace_dir": str(workspace_root / "agent" / "game_ls20"),
+        },
+    )
+
+    assert calls
+    assert calls[0] == (active / "agent" / "game_ls20", active / "supervisor" / "arc")
+    assert calls[1] == (stale / "agent" / "game_ls20", None)
+
+
 def test_rehearse_seed_on_model_resolves_agent_prefixed_paths(tmp_path: Path) -> None:
     _load_module("common", "scripts/flux/common.py")
     rehearse = _load_module("flux_rehearse_seed_test", "scripts/flux/rehearse_seed_on_model.py")

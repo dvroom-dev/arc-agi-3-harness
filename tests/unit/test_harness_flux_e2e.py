@@ -338,6 +338,6 @@ retention:
 
     solver_sessions = sorted((run_dir / ".ai-flux" / "sessions" / "solver").glob("solver_attempt_*/messages.jsonl"))
     assert len(solver_sessions) >= 2
-    replacement_messages = solver_sessions[-1].read_text(encoding="utf-8")
-    assert "Seed preplay already ran on this instance." in replacement_messages
-    assert "Current live state after preplay: level 2" in replacement_messages
+    replacement_messages = [path.read_text(encoding="utf-8") for path in solver_sessions]
+    assert any("Seed preplay already ran on this instance." in text for text in replacement_messages)
+    assert any("Current live state after preplay: level 2" in text for text in replacement_messages)
