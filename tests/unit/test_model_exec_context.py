@@ -162,6 +162,41 @@ def plan_level_actions(state: dict, *, level: int | None = None) -> list[int]:
     payload = json.loads("\n".join(proc.stdout.splitlines()[3:]))
     assert payload["ok"] is True
     assert payload["current_level"] == 1
-    assert payload["levels_completed"] == 0
+    assert payload["levels_completed"] == 1
+    assert payload["level_complete"] is True
+    assert payload["last_completed_level"] == 1
+
+    proc = _run_model(game_dir, ["status", "--game-id", "ls20"])
+    assert proc.returncode == 0, proc.stderr
+    status_payload = json.loads(proc.stdout)
+    assert status_payload["current_level"] == 1
+    assert status_payload["levels_completed"] == 1
+    assert status_payload["last_completed_level"] == 1
+
+
+def test_model_exec_file_completes_without_next_level_pin(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["0000", "0000", "0000", "0000"])
+
+    (game_dir / "play_lib.py").write_text(
+        """
+def plan_level_actions(state: dict, *, level: int | None = None) -> list[int]:
+    _ = state, level
+    return [1]
+""".strip()
+        + "\n"
+    )
+    (game_dir / "model_lib.py").write_text(
+        (game_dir / "model_lib.py").read_text()
+        + "\n\ndef is_level_complete(env):\n    return int(env.turn) >= 1\n"
+    )
+
+    proc = _run_model(game_dir, ["exec_file", "--game-id", "ls20", "./play.py"])
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads("\n".join(proc.stdout.splitlines()[3:]))
+    assert payload["ok"] is True
+    assert payload["current_level"] == 2
+    assert payload["levels_completed"] == 1
     assert payload["level_complete"] is True
     assert payload["last_completed_level"] == 1

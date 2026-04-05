@@ -24,7 +24,6 @@ from .utils import (
     grid_hex_rows,
     load_frontier_level_from_arc_state,
     model_status_path,
-    load_analysis_level_pin,
     read_hex_grid,
     resolve_level_dir,
     session_state_path,
@@ -60,7 +59,8 @@ class ModelEnv:
         self.game_over = False
         self.last_step_game_over = False
         self.last_game_over_level: int | None = None
-        self.allow_missing_next_level_on_completion = False
+        self.allow_missing_next_level_on_completion = True
+        self.pending_level_init: int | None = None
         self.last_step_frames: list[np.ndarray] = []
         self.grid = np.zeros((0, 0), dtype=np.int8)
         self.refresh_level_initial_states()
@@ -91,6 +91,7 @@ class ModelEnv:
         self.full_reset = False
         self.level_complete = False
         self.game_over = False
+        self.pending_level_init = None
         if clear_last_step_level_complete:
             self.last_step_level_complete = False
             self.last_step_game_over = False
@@ -140,6 +141,9 @@ class ModelEnv:
                 except RuntimeError:
                     if not bool(getattr(self, "allow_missing_next_level_on_completion", False)):
                         raise
+                    self.pending_level_init = self.levels_completed + 1
+                    self.current_level = int(self.last_completed_level or self.current_level)
+                    self.grid = completed_grid
         return self
 
     def reset(self):
@@ -155,10 +159,6 @@ class ModelSession:
         self.env = ModelEnv(self.game_id, self.game_dir, self.hooks)
         self.state_path = session_state_path(self.game_dir, self.env.game_id)
         self.model_status_path = model_status_path(self.game_dir)
-        self.env.allow_missing_next_level_on_completion = isinstance(
-            load_analysis_level_pin(self.game_dir),
-            dict,
-        )
         self.globals = {
             "np": np,
             "json": json,
@@ -285,6 +285,17 @@ class ModelSession:
 
     def _sync_to_frontier_level(self, *, action_name: str) -> dict | None:
         self.env.refresh_level_initial_states()
+        pending_level = int(self.env.pending_level_init) if self.env.pending_level_init is not None else None
+        if pending_level is not None:
+            valid_levels = set(int(v) for v in self.env.available_model_levels)
+            if action_name == "status":
+                return None
+            return self._error(
+                action_name,
+                "missing_initial_state",
+                f"visible level {pending_level} is active for model work but no initial_state.hex "
+                f"was discovered; discovered initial states {sorted(valid_levels)}",
+            )
         frontier_level = load_frontier_level_from_arc_state()
         if frontier_level is None:
             return None
