@@ -88,6 +88,10 @@ function StateView({
   setManualFrameIndex: (value: number) => void;
   controlRun: (action: "stop" | "continue") => Promise<void>;
 }) {
+  const queueSummary = SESSION_TYPES.map((sessionType) => ({
+    sessionType,
+    queue: detail.queues[sessionType],
+  }));
   return (
     <div className="space-y-4">
       <section className="rounded-[24px] border border-white/10 bg-[var(--panel-alt)] p-4">
@@ -154,21 +158,55 @@ function StateView({
         </div>
       </section>
       <section className="rounded-[24px] border border-white/10 bg-[var(--panel)] p-4">
+        <div className="mb-3 text-xs uppercase tracking-[0.18em] text-[var(--accent-2)]">Runtime Heads</div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-white/45">Model Revision</div>
+            <div className="mt-2 font-mono text-xs text-white">{detail.currentModelRevisionId ?? "none"}</div>
+            <div className="mt-3 text-[10px] uppercase tracking-[0.14em] text-white/45">Bootstrap Baseline</div>
+            <div className="mt-2 font-mono text-xs text-white/80">{detail.lastBootstrapperModelRevisionId ?? "none"}</div>
+            <div className="mt-3 text-[10px] uppercase tracking-[0.14em] text-white/45">Queued Bootstrap Model</div>
+            <div className="mt-2 font-mono text-xs text-white/80">{detail.lastQueuedBootstrapModelRevisionId ?? "none"}</div>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-white/45">Attested Seed</div>
+            <div className="mt-2 font-mono text-xs text-white">{detail.lastAttestedSeedRevisionId ?? "none"}</div>
+            <div className="mt-3 text-[10px] uppercase tracking-[0.14em] text-white/45">Seed Hash</div>
+            <div className="mt-2 break-all font-mono text-[11px] text-white/75">{detail.lastAttestedSeedHash ?? "none"}</div>
+          </div>
+          <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-white/45">Last Solver Policy</div>
+            <div className="mt-2 text-sm font-semibold text-white">{detail.lastInterruptPolicy ?? "none"}</div>
+            <div className="mt-3 text-[10px] uppercase tracking-[0.14em] text-white/45">Seed Delta</div>
+            <div className="mt-2 text-sm text-white/80">{detail.lastSeedDeltaKind ?? "none"}</div>
+          </div>
+        </div>
+      </section>
+      <section className="rounded-[24px] border border-white/10 bg-[var(--panel)] p-4">
         <div className="mb-3 text-xs uppercase tracking-[0.18em] text-[var(--accent-2)]">Session Status</div>
         <div className="grid gap-3 md:grid-cols-3">
-          {SESSION_TYPES.map((sessionType) => (
+          {queueSummary.map(({ sessionType, queue }) => (
             <div key={sessionType} className="rounded-2xl border border-white/10 bg-white/4 p-4">
               <div className="text-sm font-semibold capitalize">{sessionType}</div>
               <div className="mt-2 text-2xl font-semibold text-white">{detail.active[sessionType].status}</div>
               <div className="mt-2 flex items-center justify-between gap-2 text-xs text-[var(--muted)]">
-                <span>queue {detail.queues[sessionType].length}</span>
+                <span>queue {queue.length}</span>
                 <span className={`rounded-full border px-2 py-1 text-[10px] uppercase tracking-[0.14em] ${
-                  detail.queues[sessionType].length > 0
+                  queue.length > 0
                     ? "border-[var(--accent)]/40 bg-[var(--accent)]/15 text-[var(--accent)]"
                     : "border-white/10 bg-white/5 text-white/45"
                 }`}>
-                  {detail.queues[sessionType].length > 0 ? "queued" : "clear"}
+                  {queue.length > 0 ? "queued" : "clear"}
                 </span>
+              </div>
+              <div className="mt-3 space-y-2 text-[11px] text-white/70">
+                <div><span className="text-white/40">reason</span> {queue.reason ?? "none"}</div>
+                {queue.interruptPolicy ? <div><span className="text-white/40">solver</span> {queue.interruptPolicy}</div> : null}
+                {queue.seedDeltaKind ? <div><span className="text-white/40">delta</span> {queue.seedDeltaKind}</div> : null}
+                {queue.modelRevisionId ? <div className="truncate font-mono text-[10px]"><span className="text-white/40 font-sans">model</span> {queue.modelRevisionId}</div> : null}
+                {queue.baselineModelRevisionId ? <div className="truncate font-mono text-[10px]"><span className="text-white/40 font-sans">baseline</span> {queue.baselineModelRevisionId}</div> : null}
+                {queue.seedRevisionId ? <div className="truncate font-mono text-[10px]"><span className="text-white/40 font-sans">seed</span> {queue.seedRevisionId}</div> : null}
+                {queue.evidenceBundleId ? <div className="truncate font-mono text-[10px]"><span className="text-white/40 font-sans">bundle</span> {queue.evidenceBundleId}</div> : null}
               </div>
             </div>
           ))}

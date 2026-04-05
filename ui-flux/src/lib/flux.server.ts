@@ -7,6 +7,7 @@ import type {
   FluxActionSummary,
   FluxFrameSnapshot,
   FluxPromptPayload,
+  FluxQueuePreview,
   FluxRunDetail,
   FluxRunStartRequest,
   FluxRunSummary,
@@ -304,6 +305,25 @@ async function readFrameSnapshots(gameDir: string): Promise<{ frames: FluxFrameS
   return { frames, actions, currentLevel };
 }
 
+function summarizeQueueItem(queue: { items?: unknown[] } | null): FluxQueuePreview {
+  const items = Array.isArray(queue?.items) ? queue.items : [];
+  const head = items[0] && typeof items[0] === "object" && !Array.isArray(items[0]) ? items[0] as JsonRecord : null;
+  const payload = head?.payload && typeof head.payload === "object" && !Array.isArray(head.payload)
+    ? head.payload as JsonRecord
+    : null;
+  return {
+    length: items.length,
+    reason: typeof head?.reason === "string" ? String(head.reason) : null,
+    dedupeKey: typeof head?.dedupeKey === "string" ? String(head.dedupeKey) : null,
+    interruptPolicy: typeof payload?.interruptPolicy === "string" ? String(payload.interruptPolicy) : null,
+    baselineModelRevisionId: typeof payload?.baselineModelRevisionId === "string" ? String(payload.baselineModelRevisionId) : null,
+    modelRevisionId: typeof payload?.modelRevisionId === "string" ? String(payload.modelRevisionId) : null,
+    seedRevisionId: typeof payload?.seedRevisionId === "string" ? String(payload.seedRevisionId) : null,
+    seedDeltaKind: typeof payload?.seedDeltaKind === "string" ? String(payload.seedDeltaKind) : null,
+    evidenceBundleId: typeof payload?.evidenceBundleId === "string" ? String(payload.evidenceBundleId) : null,
+  };
+}
+
 function toRunSummary(
   runId: string,
   state: JsonRecord | null,
@@ -372,6 +392,8 @@ export async function readFluxRunDetail(runId: string): Promise<FluxRunDetail | 
   const state = await readJson<JsonRecord>(path.join(root, "flux", "state.json"));
   if (!state) return null;
   const runtimeMeta = await readJson<JsonRecord>(path.join(root, "flux_runtime.json"));
+  const seedMeta = await readJson<JsonRecord>(path.join(root, "flux", "seed", "current_meta.json"));
+  const currentModelMeta = await readJson<JsonRecord>(path.join(root, "flux", "model", "current", "meta.json"));
   const activeSessionRecords = await readActiveSessionRecords(root, state);
   const sessionHistory = Object.fromEntries(await Promise.all(SESSION_TYPES.map(async (sessionType) => {
     return [sessionType, await listSessionSummaries(root, sessionType)];
@@ -382,7 +404,7 @@ export async function readFluxRunDetail(runId: string): Promise<FluxRunDetail | 
   const summary = toRunSummary(runId, state, runtimeMeta, currentState, activeSessionRecords, sessionHistory);
   const queues = Object.fromEntries(await Promise.all(SESSION_TYPES.map(async (sessionType) => {
     const queue = await readJson<{ items?: unknown[] }>(path.join(root, "flux", "queues", `${sessionType}.json`));
-    return [sessionType, { length: Array.isArray(queue?.items) ? queue.items.length : 0 }];
+    return [sessionType, summarizeQueueItem(queue)];
   }))) as FluxRunDetail["queues"];
   const timeline = gameDir ? await readFrameSnapshots(gameDir) : { frames: [], actions: [], currentLevel: null };
   return {
@@ -392,6 +414,13 @@ export async function readFluxRunDetail(runId: string): Promise<FluxRunDetail | 
     currentState,
     currentLevel: timeline.currentLevel,
     currentAttemptId: attemptId,
+    currentModelRevisionId: typeof currentModelMeta?.revisionId === "string" ? String(currentModelMeta.revisionId) : null,
+    lastBootstrapperModelRevisionId: typeof seedMeta?.lastBootstrapperModelRevisionId === "string" ? String(seedMeta.lastBootstrapperModelRevisionId) : null,
+    lastQueuedBootstrapModelRevisionId: typeof seedMeta?.lastQueuedBootstrapModelRevisionId === "string" ? String(seedMeta.lastQueuedBootstrapModelRevisionId) : null,
+    lastAttestedSeedRevisionId: typeof seedMeta?.lastAttestedSeedRevisionId === "string" ? String(seedMeta.lastAttestedSeedRevisionId) : null,
+    lastAttestedSeedHash: typeof seedMeta?.lastAttestedSeedHash === "string" ? String(seedMeta.lastAttestedSeedHash) : null,
+    lastInterruptPolicy: typeof seedMeta?.lastInterruptPolicy === "string" ? String(seedMeta.lastInterruptPolicy) : null,
+    lastSeedDeltaKind: typeof seedMeta?.lastSeedDeltaKind === "string" ? String(seedMeta.lastSeedDeltaKind) : null,
     frames: timeline.frames,
     actions: timeline.actions,
     sessionHistory,

@@ -26,8 +26,20 @@ export function SessionsView({
               {detail.queues[sessionType].length > 0 ? "queued" : "clear"}
             </span>
           </div>
-          <div className="space-y-2">
-            {(detail.sessionHistory[sessionType] ?? []).map((session) => {
+            <div className="space-y-2">
+              {detail.queues[sessionType].length > 0 ? (
+                <div className="rounded-xl border border-[var(--accent)]/20 bg-[var(--accent)]/8 p-3 text-[11px] text-white/75">
+                  <div className="font-semibold uppercase tracking-[0.12em] text-[var(--accent)]">Queued</div>
+                  <div className="mt-2">{detail.queues[sessionType].reason ?? "pending work"}</div>
+                  {detail.queues[sessionType].interruptPolicy ? (
+                    <div className="mt-1"><span className="text-white/45">solver</span> {detail.queues[sessionType].interruptPolicy}</div>
+                  ) : null}
+                  {detail.queues[sessionType].seedDeltaKind ? (
+                    <div className="mt-1"><span className="text-white/45">delta</span> {detail.queues[sessionType].seedDeltaKind}</div>
+                  ) : null}
+                </div>
+              ) : null}
+              {(detail.sessionHistory[sessionType] ?? []).map((session) => {
               const key = `${session.sessionType}:${session.sessionId}`;
               return (
                 <button

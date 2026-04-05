@@ -23,6 +23,8 @@ describe("flux UI server helpers", () => {
     const seedRoot = path.join(runRoot, "flux_instances", "seed_rev_live");
 
     await fs.mkdir(path.join(runRoot, "flux"), { recursive: true });
+    await fs.mkdir(path.join(runRoot, "flux", "seed"), { recursive: true });
+    await fs.mkdir(path.join(runRoot, "flux", "model", "current"), { recursive: true });
     await fs.mkdir(path.join(runRoot, ".ai-flux", "sessions", "solver", "solver_attempt_live"), { recursive: true });
     await fs.mkdir(path.join(attemptRoot, "agent", "game_ls20", "level_current"), { recursive: true });
     await fs.mkdir(path.join(seedRoot, "agent", "game_ls20", "level_current", "turn_0001"), { recursive: true });
@@ -30,6 +32,23 @@ describe("flux UI server helpers", () => {
     await fs.mkdir(path.join(seedRoot, "supervisor", "arc"), { recursive: true });
 
     await fs.writeFile(path.join(runRoot, "flux_runtime.json"), JSON.stringify({ game_id: "ls20" }, null, 2), "utf8");
+    await fs.writeFile(
+      path.join(runRoot, "flux", "seed", "current_meta.json"),
+      JSON.stringify({
+        lastBootstrapperModelRevisionId: "model_rev_old",
+        lastQueuedBootstrapModelRevisionId: "model_rev_live",
+        lastAttestedSeedRevisionId: "seed_rev_live",
+        lastAttestedSeedHash: "hash_live",
+        lastInterruptPolicy: "queue_and_interrupt",
+        lastSeedDeltaKind: "level_completion_advanced",
+      }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(runRoot, "flux", "model", "current", "meta.json"),
+      JSON.stringify({ revisionId: "model_rev_live" }, null, 2),
+      "utf8",
+    );
     await fs.writeFile(
       path.join(runRoot, "flux", "state.json"),
       JSON.stringify({
@@ -122,5 +141,8 @@ describe("flux UI server helpers", () => {
     expect(detail?.currentLevel).toBe(2);
     expect(detail?.currentState?.current_level).toBe(2);
     expect(detail?.selectedGameDir?.includes("seed_rev_live")).toBe(true);
+    expect(detail?.currentModelRevisionId).toBe("model_rev_live");
+    expect(detail?.lastAttestedSeedRevisionId).toBe("seed_rev_live");
+    expect(detail?.lastInterruptPolicy).toBe("queue_and_interrupt");
   });
 });

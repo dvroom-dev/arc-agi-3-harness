@@ -45,12 +45,31 @@ export interface FluxSessionSummary {
   assistantMessageCount: number;
 }
 
+export interface FluxQueuePreview {
+  length: number;
+  reason: string | null;
+  dedupeKey: string | null;
+  interruptPolicy: string | null;
+  baselineModelRevisionId: string | null;
+  modelRevisionId: string | null;
+  seedRevisionId: string | null;
+  seedDeltaKind: string | null;
+  evidenceBundleId: string | null;
+}
+
 export interface FluxRunDetail extends FluxRunSummary {
-  queues: Record<FluxSessionType, { length: number }>;
+  queues: Record<FluxSessionType, FluxQueuePreview>;
   selectedGameDir: string | null;
   currentState: Record<string, unknown> | null;
   currentLevel: number | null;
   currentAttemptId: string | null;
+  currentModelRevisionId: string | null;
+  lastBootstrapperModelRevisionId: string | null;
+  lastQueuedBootstrapModelRevisionId: string | null;
+  lastAttestedSeedRevisionId: string | null;
+  lastAttestedSeedHash: string | null;
+  lastInterruptPolicy: string | null;
+  lastSeedDeltaKind: string | null;
   frames: FluxFrameSnapshot[];
   actions: FluxActionSummary[];
   sessionHistory: Record<FluxSessionType, FluxSessionSummary[]>;
