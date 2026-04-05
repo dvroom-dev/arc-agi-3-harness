@@ -60,9 +60,23 @@ Critical workflow rules:
 - Use `continue_refining` only when you are actually changing the seed now or when rehearsal/replay exposed a concrete problem that must be fixed before the next solver should use this seed.
 - If rehearsal or real replay feedback shows an error, mismatch, or weaker-than-expected branch, revise the seed and return `continue_refining`.
 - The seed should solve solved levels perfectly, then attempt to solve the frontier or probe the most important unresolved frontier feature.
+- After deciding whether the seed should be finalized or refined, also decide what the solver runtime should do with this seed:
+  - `queue_and_interrupt`: use only when this seed materially advances the run right now
+    - examples: explains a new mechanic not explained before, significantly improves a mechanic explanation, or completes a level the previous seed did not complete
+  - `queue_without_interrupt`: use when the seed is better but the improvement is marginal and not worth killing the active solver immediately
+  - `no_action`: use when there is no meaningful improvement over the currently active seed
+- Prefer `no_action` over churn. Do not queue a replacement solver just because wording changed.
+- Populate `seed_delta_kind` with a short stable label such as:
+  - `no_useful_change`
+  - `mechanic_explanation_added`
+  - `mechanic_explanation_improved`
+  - `level_completion_advanced`
+  - `frontier_branch_improved`
 
 Output contract reminder:
 - `decision`
 - `summary`
 - `seed_bundle_updated`
 - `notes`
+- `solver_action`
+- `seed_delta_kind`

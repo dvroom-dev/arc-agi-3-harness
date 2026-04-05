@@ -42,5 +42,11 @@ Rules:
   - whether a HUD symbol must match an exit symbol
   - which trigger changes the HUD symbol color/state
 - Even if the frontier replay is still unstable, preserve any confirmed reusable mechanic from that level in the cumulative mechanic summary so the next solver can reason from it immediately.
+- Also return:
+  - `solver_action`: `no_action`, `queue_without_interrupt`, or `queue_and_interrupt`
+  - `seed_delta_kind`: short stable label describing whether the seed meaningfully changed
+- Use `queue_and_interrupt` only when this seed materially changes what the active solver should do right now.
+- Use `queue_without_interrupt` when the seed improved but not enough to justify interrupting the active solver.
+- Use `no_action` when the current seed is effectively unchanged or not meaningfully better.
 
 Return fresh `bootstrap_seed_decision_v1` JSON.

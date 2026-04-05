@@ -82,6 +82,7 @@ def instance_root(workspace_root: str, instance_id: str) -> Path:
     return Path(workspace_root) / "flux_instances" / safe_instance_name(instance_id)
 
 
+
 def build_instance_env(meta: dict, state_dir: Path, conversation_id: str) -> dict[str, str]:
     env = dict(os.environ)
     env["PATH"] = f"{meta['run_bin_dir']}:{env.get('PATH', '')}"

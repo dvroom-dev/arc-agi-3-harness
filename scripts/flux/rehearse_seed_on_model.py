@@ -137,6 +137,7 @@ def main() -> None:
     workspace_root = str(payload["workspaceRoot"])
     meta = load_runtime_meta(workspace_root)
     seed_bundle = payload.get("seedBundle") if isinstance(payload.get("seedBundle"), dict) else {}
+    model_revision_id = str(payload.get("modelRevisionId") or "").strip()
     seed_key = safe_instance_name(str(payload.get("seedRevisionId") or payload.get("seedHash") or "seed"))
     rehearsal_root = Path(workspace_root) / "flux_model_rehearsals" / seed_key
     model_workspace = rehearsal_root / Path(str(meta["model_workspace_dir"])).name
@@ -144,7 +145,16 @@ def main() -> None:
     if rehearsal_root.exists():
         shutil.rmtree(rehearsal_root, ignore_errors=True)
     arc_state_dir.mkdir(parents=True, exist_ok=True)
-    copy_model_workspace(meta, model_workspace)
+    if model_revision_id:
+        snapshot_source = Path(workspace_root) / "flux" / "model" / "revisions" / model_revision_id / "workspace" / model_workspace.name
+        if not snapshot_source.exists():
+            raise FileNotFoundError(f"missing model revision workspace: {snapshot_source}")
+        if model_workspace.exists():
+            shutil.rmtree(model_workspace, ignore_errors=True)
+        model_workspace.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(snapshot_source, model_workspace)
+    else:
+        copy_model_workspace(meta, model_workspace)
     env = _model_env(meta, model_workspace, arc_state_dir)
     env["ARC_ACTIVE_GAME_ID"] = str(meta["game_id"])
 

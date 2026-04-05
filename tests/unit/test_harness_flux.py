@@ -376,6 +376,8 @@ retention:
                                 "summary": "seed is ready",
                                 "seed_bundle_updated": False,
                                 "notes": "finalize best known seed",
+                                "solver_action": "queue_and_interrupt",
+                                "seed_delta_kind": "level_completion_advanced",
                             }
                         ),
                     }

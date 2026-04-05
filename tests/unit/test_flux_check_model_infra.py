@@ -29,7 +29,6 @@ def test_check_model_classifies_missing_sequence_frame_as_infrastructure_failure
         "run_bin_dir": str(tmp_path / "bin"),
         "game_id": "ls20",
     })
-    monkeypatch.setattr(check_model, "sync_latest_attempt_to_model_workspace", lambda _workspace, _meta: [])
     monkeypatch.setattr(
         check_model,
         "_run_compare",

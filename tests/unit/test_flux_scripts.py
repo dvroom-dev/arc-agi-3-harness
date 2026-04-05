@@ -79,7 +79,6 @@ def test_check_model_skips_frontier_compare_until_frontier_level_is_ready(
         "run_bin_dir": str(tmp_path / "bin"),
         "game_id": "ls20",
     })
-    monkeypatch.setattr(check_model, "sync_latest_attempt_to_model_workspace", lambda _workspace, _meta: [])
 
     calls: list[int | None] = []
 
@@ -118,7 +117,6 @@ def test_check_model_classifies_missing_sequences_as_infrastructure_failure(tmp_
         "run_bin_dir": str(tmp_path / "bin"),
         "game_id": "ls20",
     })
-    monkeypatch.setattr(check_model, "sync_latest_attempt_to_model_workspace", lambda _workspace, _meta: [])
     monkeypatch.setattr(
         check_model,
         "_run_compare",
@@ -138,16 +136,20 @@ def test_check_model_classifies_missing_sequences_as_infrastructure_failure(tmp_
 
 
 
-def test_check_model_uses_latest_flux_instance_state_dir_for_compare_env(tmp_path: Path, monkeypatch) -> None:
+def test_check_model_uses_evidence_bundle_state_dir_for_compare_env(tmp_path: Path, monkeypatch) -> None:
     _load_module("common", "scripts/flux/common.py")
     check_model = _load_module("flux_check_model_state_dir_test", "scripts/flux/check_model.py")
     model_workspace = tmp_path / "agent" / "game_ls20"
     model_workspace.mkdir(parents=True, exist_ok=True)
     (model_workspace / "model.py").write_text("# stub\n", encoding="utf-8")
-    active_state_dir = tmp_path / "flux_instances" / "seed_rev_x" / "supervisor" / "arc"
-    active_state_dir.mkdir(parents=True, exist_ok=True)
+    bundle_state_dir = tmp_path / "flux" / "evidence_bundles" / "bundle_x" / "arc_state"
+    bundle_state_dir.mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setattr(check_model, "read_json_stdin", lambda: {"workspaceRoot": str(tmp_path), "modelOutput": {}})
+    monkeypatch.setattr(check_model, "read_json_stdin", lambda: {
+        "workspaceRoot": str(tmp_path),
+        "modelOutput": {},
+        "evidenceBundlePath": str(bundle_state_dir.parent),
+    })
     monkeypatch.setattr(check_model, "load_runtime_meta", lambda _workspace: {
         "model_workspace_dir": str(model_workspace),
         "run_config_dir": str(tmp_path / "config"),
@@ -155,8 +157,6 @@ def test_check_model_uses_latest_flux_instance_state_dir_for_compare_env(tmp_pat
         "game_id": "ls20",
         "solver_template_dir": str(tmp_path / "flux_seed" / "agent" / "game_ls20"),
     })
-    monkeypatch.setattr(check_model, "sync_latest_attempt_to_model_workspace", lambda _workspace, _meta: [])
-    monkeypatch.setattr(check_model, "latest_flux_instance_state_dir", lambda _workspace, _meta: active_state_dir)
 
     seen_envs: list[dict] = []
 
@@ -176,7 +176,7 @@ def test_check_model_uses_latest_flux_instance_state_dir_for_compare_env(tmp_pat
     check_model.main()
 
     assert seen_envs
-    assert seen_envs[0]["ARC_STATE_DIR"] == str(active_state_dir)
+    assert seen_envs[0]["ARC_STATE_DIR"] == str(bundle_state_dir)
 
 
 def test_latest_flux_instance_state_dir_prefers_active_solver_instance(tmp_path: Path) -> None:

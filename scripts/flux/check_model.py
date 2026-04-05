@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 from common import (
-    latest_flux_instance_state_dir,
     load_runtime_meta,
     read_json_stdin,
-    sync_latest_attempt_to_model_workspace,
     write_json_stdout,
 )
 
@@ -90,8 +90,13 @@ def main() -> None:
     model_output = payload.get("modelOutput") if isinstance(payload.get("modelOutput"), dict) else {}
     workspace_root = str(payload.get("workspaceRoot", ""))
     meta = load_runtime_meta(workspace_root)
+    model_revision_id = str(payload.get("modelRevisionId") or "").strip()
+    evidence_bundle_path = str(payload.get("evidenceBundlePath") or "").strip()
     model_workspace = Path(str(meta["model_workspace_dir"]))
-    sync_latest_attempt_to_model_workspace(workspace_root, meta)
+    if model_revision_id:
+        revision_workspace = Path(workspace_root) / "flux" / "model" / "revisions" / model_revision_id / "workspace" / model_workspace.name
+        if revision_workspace.exists():
+            model_workspace = revision_workspace
     model_script = model_workspace / "model.py"
     if not model_script.exists():
         write_json_stdout(
@@ -102,15 +107,36 @@ def main() -> None:
             }
         )
         return
+    (Path(workspace_root) / "flux").mkdir(parents=True, exist_ok=True)
+    compare_workspace_root = Path(tempfile.mkdtemp(prefix="flux-compare-", dir=Path(workspace_root) / "flux"))
+    compare_workspace = compare_workspace_root / model_workspace.name
+    if compare_workspace.exists():
+        shutil.rmtree(compare_workspace, ignore_errors=True)
+    shutil.copytree(model_workspace, compare_workspace)
+    bundle_path = Path(evidence_bundle_path) if evidence_bundle_path else None
+    bundle_workspace = bundle_path / "workspace" / model_workspace.name if bundle_path else None
+    if bundle_workspace and bundle_workspace.exists():
+        for child in bundle_workspace.iterdir():
+            destination = compare_workspace / child.name
+            if destination.exists() or destination.is_symlink():
+                if destination.is_dir() and not destination.is_symlink():
+                    shutil.rmtree(destination, ignore_errors=True)
+                else:
+                    destination.unlink(missing_ok=True)
+            if child.is_dir():
+                shutil.copytree(child, destination)
+            else:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(child, destination)
     child_env = dict(os.environ)
     child_env["ARC_CONFIG_DIR"] = str(meta["run_config_dir"])
-    active_state_dir = latest_flux_instance_state_dir(workspace_root, meta)
-    child_env["ARC_STATE_DIR"] = str(active_state_dir or (Path(workspace_root) / "supervisor" / "arc"))
+    bundle_state_dir = bundle_path / "arc_state" if bundle_path else None
+    child_env["ARC_STATE_DIR"] = str(bundle_state_dir or (Path(workspace_root) / "supervisor" / "arc"))
     child_env["ARC_MODEL_DISABLE_CANONICAL_ARTIFACTS"] = "1"
     child_env["PATH"] = f"{meta['run_bin_dir']}:{child_env.get('PATH', '')}"
-    frontier_level = _read_frontier_level(model_workspace)
+    frontier_level = _read_frontier_level(compare_workspace)
     try:
-        _default_code, compare_payload = _run_compare(model_workspace, meta, child_env, frontier_level=None)
+        _default_code, compare_payload = _run_compare(compare_workspace, meta, child_env, frontier_level=None)
     except Exception as exc:
         infra = _classify_infrastructure_failure(str(exc))
         write_json_stdout(
@@ -125,10 +151,10 @@ def main() -> None:
 
     compare_level = int(compare_payload.get("level", 1) or 1)
     frontier_compare_payload = None
-    frontier_ready = _frontier_level_ready(model_workspace, frontier_level)
+    frontier_ready = _frontier_level_ready(compare_workspace, frontier_level)
     if frontier_level > compare_level and frontier_ready:
         try:
-            _frontier_code, frontier_compare_payload = _run_compare(model_workspace, meta, child_env, frontier_level=frontier_level)
+            _frontier_code, frontier_compare_payload = _run_compare(compare_workspace, meta, child_env, frontier_level=frontier_level)
         except Exception as exc:
             infra = _classify_infrastructure_failure(str(exc))
             write_json_stdout(
@@ -145,12 +171,12 @@ def main() -> None:
         compare_payload = {
             **compare_payload,
             "frontier_sync_pending": True,
-            "frontier_snapshot": {
-                "level": frontier_level,
-                "level_dir": str(model_workspace / f"level_{frontier_level}"),
-                "ready": False,
-            },
-        }
+                "frontier_snapshot": {
+                    "level": frontier_level,
+                    "level_dir": str(compare_workspace / f"level_{frontier_level}"),
+                    "ready": False,
+                },
+            }
 
     compare_for_acceptance = frontier_compare_payload or compare_payload
     error_payload = compare_for_acceptance.get("error") if isinstance(compare_for_acceptance.get("error"), dict) else {}
@@ -158,8 +184,8 @@ def main() -> None:
     eligible_sequences = int(compare_for_acceptance.get("eligible_sequences", 0) or 0)
     frontier_snapshot = {
         "level": frontier_level,
-        "meta_file": str(model_workspace / "level_current" / "meta.json"),
-        "current_compare_file": str(model_workspace / "level_current" / "sequence_compare" / "current_compare.json"),
+        "meta_file": str(compare_workspace / "level_current" / "meta.json"),
+        "current_compare_file": str(compare_workspace / "level_current" / "sequence_compare" / "current_compare.json"),
     }
 
     accepted = bool(compare_for_acceptance.get("all_match"))
