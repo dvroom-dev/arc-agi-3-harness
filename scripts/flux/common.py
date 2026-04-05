@@ -471,3 +471,24 @@ def sync_latest_attempt_to_model_workspace(workspace_root: str, meta: dict) -> l
         if richest_solver_dir.exists():
             synced.extend(sync_solver_artifacts_to_model_workspace(meta, richest_solver_dir, state_dir=None))
     return synced
+
+
+def latest_flux_instance_state_dir(workspace_root: str, meta: dict) -> Path | None:
+    attempts_root = Path(workspace_root) / "flux_instances"
+    if not attempts_root.exists():
+        return None
+    instances = [path for path in attempts_root.iterdir() if path.is_dir()]
+    if not instances:
+        return None
+    solver_dir_name = Path(str(meta["solver_template_dir"])).name
+    latest = max(instances, key=lambda path: path.stat().st_mtime)
+    richest = max(
+        instances,
+        key=lambda path: (
+            *_instance_sequence_richness(path, solver_dir_name),
+            path.stat().st_mtime,
+        ),
+    )
+    chosen = richest if _instance_sequence_richness(richest, solver_dir_name) > _instance_sequence_richness(latest, solver_dir_name) else latest
+    state_dir = chosen / "supervisor" / "arc"
+    return state_dir if state_dir.exists() else None

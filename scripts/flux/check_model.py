@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 from common import (
+    latest_flux_instance_state_dir,
     load_runtime_meta,
     read_json_stdin,
     sync_latest_attempt_to_model_workspace,
@@ -97,7 +98,8 @@ def main() -> None:
         return
     child_env = dict(os.environ)
     child_env["ARC_CONFIG_DIR"] = str(meta["run_config_dir"])
-    child_env["ARC_STATE_DIR"] = str(Path(workspace_root) / "supervisor" / "arc")
+    active_state_dir = latest_flux_instance_state_dir(workspace_root, meta)
+    child_env["ARC_STATE_DIR"] = str(active_state_dir or (Path(workspace_root) / "supervisor" / "arc"))
     child_env["ARC_MODEL_DISABLE_CANONICAL_ARTIFACTS"] = "1"
     child_env["PATH"] = f"{meta['run_bin_dir']}:{child_env.get('PATH', '')}"
     frontier_level = _read_frontier_level(model_workspace)

@@ -137,6 +137,47 @@ def test_check_model_classifies_missing_sequences_as_infrastructure_failure(tmp_
     assert payloads[0]["infrastructure_failure"]["type"] == "missing_sequence_surface"
 
 
+def test_check_model_uses_latest_flux_instance_state_dir_for_compare_env(tmp_path: Path, monkeypatch) -> None:
+    _load_module("common", "scripts/flux/common.py")
+    check_model = _load_module("flux_check_model_state_dir_test", "scripts/flux/check_model.py")
+    model_workspace = tmp_path / "agent" / "game_ls20"
+    model_workspace.mkdir(parents=True, exist_ok=True)
+    (model_workspace / "model.py").write_text("# stub\n", encoding="utf-8")
+    active_state_dir = tmp_path / "flux_instances" / "seed_rev_x" / "supervisor" / "arc"
+    active_state_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(check_model, "read_json_stdin", lambda: {"workspaceRoot": str(tmp_path), "modelOutput": {}})
+    monkeypatch.setattr(check_model, "load_runtime_meta", lambda _workspace: {
+        "model_workspace_dir": str(model_workspace),
+        "run_config_dir": str(tmp_path / "config"),
+        "run_bin_dir": str(tmp_path / "bin"),
+        "game_id": "ls20",
+        "solver_template_dir": str(tmp_path / "flux_seed" / "agent" / "game_ls20"),
+    })
+    monkeypatch.setattr(check_model, "sync_latest_attempt_to_model_workspace", lambda _workspace, _meta: [])
+    monkeypatch.setattr(check_model, "latest_flux_instance_state_dir", lambda _workspace, _meta: active_state_dir)
+
+    seen_envs: list[dict] = []
+
+    def fake_run_compare(_workspace, _meta, child_env, frontier_level=None):
+        seen_envs.append(dict(child_env))
+        return 0, {
+            "level": 1,
+            "all_match": True,
+            "eligible_sequences": 1,
+            "reports": [{"sequence_id": "seq_0001", "matched": True}],
+        }
+
+    payloads: list[dict] = []
+    monkeypatch.setattr(check_model, "_run_compare", fake_run_compare)
+    monkeypatch.setattr(check_model, "write_json_stdout", lambda payload: payloads.append(payload))
+
+    check_model.main()
+
+    assert seen_envs
+    assert seen_envs[0]["ARC_STATE_DIR"] == str(active_state_dir)
+
+
 def test_rehearse_seed_on_model_resolves_agent_prefixed_paths(tmp_path: Path) -> None:
     _load_module("common", "scripts/flux/common.py")
     rehearse = _load_module("flux_rehearse_seed_test", "scripts/flux/rehearse_seed_on_model.py")
