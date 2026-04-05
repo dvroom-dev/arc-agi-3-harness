@@ -124,6 +124,16 @@ def load_initial_grid(game_dir: str | Path, level: int) -> np.ndarray | None:
     return np.array([[int(ch, 16) for ch in row] for row in rows], dtype=np.int8)
 
 
+def resolve_sequence_action_path(action_dir: str | Path, relative_path: str | Path) -> Path:
+    """Resolve a sequence-relative artifact path from the matched action dir itself.
+
+    Use this for `files.*` and `frame_sequence_hex` entries from synced sequence
+    artifacts. Do not hardcode `level_N` prefixes when the matched action may
+    come from `level_current` or another visible level surface.
+    """
+    return artifact_helpers.resolve_sequence_action_path(action_dir, relative_path)
+
+
 # ---------------------------------------------------------------------------
 # Example helpers/mechanics (commented out by default):
 #

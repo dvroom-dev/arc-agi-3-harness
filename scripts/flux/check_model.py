@@ -37,6 +37,12 @@ def _classify_infrastructure_failure(message: str) -> dict | None:
             "type": "missing_sequence_surface",
             "message": text,
         }
+    normalized = text.replace('\\', '/')
+    if 'filenotfounderror' in lowered and '/sequences/' in normalized:
+        return {
+            "type": "missing_sequence_surface",
+            "message": text,
+        }
     return None
 
 

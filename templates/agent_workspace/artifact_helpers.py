@@ -291,6 +291,37 @@ def sequence_json_path(game_dir: str | Path, level: int, sequence_id: str) -> Pa
     return level_dir(game_dir, level) / "sequences" / f"{sequence_id}.json"
 
 
+def sequence_action_level_dir(action_dir: str | Path) -> Path:
+    action_dir = coerce_path(action_dir)
+    for candidate in (action_dir, *action_dir.parents):
+        name = candidate.name
+        if name == "level_current" or name == "analysis_level":
+            return candidate
+        if name.startswith("level_"):
+            suffix = name.removeprefix("level_")
+            if suffix.isdigit():
+                return candidate
+    raise ValueError(f"could not determine level dir for action dir: {action_dir}")
+
+
+def resolve_sequence_action_path(action_dir: str | Path, relative_path: str | Path) -> Path:
+    action_dir = coerce_path(action_dir)
+    rel_path = coerce_path(relative_path)
+    if rel_path.is_absolute():
+        return rel_path
+    level_root = sequence_action_level_dir(action_dir)
+    game_dir = level_root.parent
+    candidates = [
+        action_dir / rel_path,
+        level_root / rel_path,
+        game_dir / rel_path,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return level_root / rel_path
+
+
 def load_sequence(game_dir: str | Path, level: int, sequence_id: str) -> dict[str, Any]:
     return load_json(sequence_json_path(game_dir, level, sequence_id))
 

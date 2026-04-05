@@ -28,6 +28,8 @@ Goals:
 - Treat `action_input_name` / `last_action_name` / sequence `action_name` as the canonical action labels. Ignore wrapped tool labels like `exec(<...>)`.
 - For game-vs-model diffs, read them literally as `game_value -> model_value`. Do not mentally flip the direction.
 - If a step has `frame_sequence_hex` files and `frame_0001.hex` equals `after_state.hex`, emit the same post-action frame from your model before investigating anything else.
+- If you replay synced sequence artifacts from code, resolve `files.*` and `frame_sequence_hex` relative to the matched action directory's actual level root, for example with `artifact_helpers.resolve_sequence_action_path(action_dir, rel_path)`. Do not prepend a hardcoded `level_N` prefix.
+- Remember that `apply_level_1..apply_level_N` run cumulatively on later levels. If you replay recorded transitions in a per-level hook, gate them to the intended level or match them by `before_state`; do not assume a global action index from a later level belongs under an earlier level's artifact tree.
 - For `intermediate_frame_mismatch`, default assumption is that your model's direct action effect or `last_step_frames` emission is wrong. Patch `model_lib.py` first, then rerun compare.
 - Make one focused patch, then immediately rerun `python3 model.py compare_sequences --game-id ...`.
 - Repeat patch/compare until `all_match` is true or you hit a concrete blocked diagnosis.
