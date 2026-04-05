@@ -85,6 +85,88 @@ def _run_compare(model_workspace: Path, meta: dict, child_env: dict[str, str], f
     return proc.returncode, payload
 
 
+def _sequence_payload_for_report(model_workspace: Path, report: dict) -> dict | None:
+    sequence_id = str(report.get("sequence_id", "")).strip()
+    if not sequence_id:
+        return None
+    try:
+        level = int(report.get("level", 1) or 1)
+    except Exception:
+        level = 1
+    sequence_path = model_workspace / f"level_{level}" / "sequences" / f"{sequence_id}.json"
+    if not sequence_path.exists():
+        return None
+    try:
+        payload = json.loads(sequence_path.read_text())
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _sequence_frontier_level(sequence_payload: dict) -> int:
+    try:
+        frontier_level = int(sequence_payload.get("level", 1) or 1)
+    except Exception:
+        frontier_level = 1
+    actions = sequence_payload.get("actions") if isinstance(sequence_payload.get("actions"), list) else []
+    for action in actions:
+        if not isinstance(action, dict):
+            continue
+        try:
+            level_before = int(action.get("level_before", frontier_level) or frontier_level)
+        except Exception:
+            level_before = frontier_level
+        try:
+            level_after = int(action.get("level_after", level_before) or level_before)
+        except Exception:
+            level_after = level_before
+        frontier_level = max(frontier_level, level_after)
+        try:
+            completed_before = int(action.get("levels_completed_before", 0) or 0)
+            completed_after = int(action.get("levels_completed_after", completed_before) or completed_before)
+        except Exception:
+            completed_before = 0
+            completed_after = 0
+        if completed_after > completed_before or bool(action.get("level_complete_after", False)):
+            frontier_level = max(frontier_level, max(level_before, level_after) + 1)
+    return frontier_level
+
+
+def _annotate_compare_payload_frontier(model_workspace: Path, compare_payload: dict) -> dict:
+    payload = dict(compare_payload)
+    reports = payload.get("reports") if isinstance(payload.get("reports"), list) else []
+    matched_frontier = 0
+    matched_levels: set[int] = set()
+    annotated_reports: list[dict] = []
+    for report in reports:
+        if not isinstance(report, dict):
+            annotated_reports.append(report)
+            continue
+        annotated = dict(report)
+        sequence_payload = _sequence_payload_for_report(model_workspace, annotated)
+        if sequence_payload:
+            sequence_frontier = _sequence_frontier_level(sequence_payload)
+            annotated["frontier_level_after_sequence"] = sequence_frontier
+            annotated["sequence_completed_level"] = sequence_frontier > int(sequence_payload.get("level", 1) or 1)
+            if bool(annotated.get("matched")):
+                matched_frontier = max(matched_frontier, sequence_frontier)
+                try:
+                    matched_levels.add(int(sequence_payload.get("level", 1) or 1))
+                except Exception:
+                    pass
+        annotated_reports.append(annotated)
+    if annotated_reports:
+        payload["reports"] = annotated_reports
+    try:
+        compare_level = int(payload.get("level", 1) or 1)
+    except Exception:
+        compare_level = 1
+    payload["frontier_level"] = max(compare_level, matched_frontier)
+    if matched_levels:
+        payload["matched_levels"] = sorted(matched_levels)
+    return payload
+
+
 def main() -> None:
     payload = read_json_stdin()
     model_output = payload.get("modelOutput") if isinstance(payload.get("modelOutput"), dict) else {}
@@ -137,6 +219,7 @@ def main() -> None:
     frontier_level = _read_frontier_level(compare_workspace)
     try:
         _default_code, compare_payload = _run_compare(compare_workspace, meta, child_env, frontier_level=None)
+        compare_payload = _annotate_compare_payload_frontier(compare_workspace, compare_payload)
     except Exception as exc:
         infra = _classify_infrastructure_failure(str(exc))
         write_json_stdout(
@@ -155,6 +238,7 @@ def main() -> None:
     if frontier_level > compare_level and frontier_ready:
         try:
             _frontier_code, frontier_compare_payload = _run_compare(compare_workspace, meta, child_env, frontier_level=frontier_level)
+            frontier_compare_payload = _annotate_compare_payload_frontier(compare_workspace, frontier_compare_payload)
         except Exception as exc:
             infra = _classify_infrastructure_failure(str(exc))
             write_json_stdout(

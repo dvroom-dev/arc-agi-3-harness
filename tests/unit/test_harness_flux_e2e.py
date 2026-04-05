@@ -324,6 +324,7 @@ retention:
     assert sum(1 for row in event_rows if row["kind"] == "bootstrapper.model_rehearsal_started") == 3
     assert sum(1 for row in event_rows if row["kind"] == "bootstrapper.model_rehearsal_failed") == 2
     assert sum(1 for row in event_rows if row["kind"] == "bootstrapper.model_rehearsal_passed") == 1
+    assert sum(1 for row in event_rows if row["kind"] == "bootstrapper.auto_accepted_after_rehearsal") == 1
     assert sum(1 for row in event_rows if row["kind"] == "bootstrapper.real_replay_passed") == 1
     assert sum(1 for row in event_rows if row["kind"] == "bootstrapper.attested_satisfactory") == 1
     assert any(
@@ -336,7 +337,7 @@ retention:
     assert state["status"] == "stopped"
 
     revisions = sorted((run_dir / "flux" / "seed" / "revisions").glob("seed_rev_*.json"))
-    assert len(revisions) >= 4
+    assert len(revisions) >= 3
 
     solver_sessions = sorted((run_dir / ".ai-flux" / "sessions" / "solver").glob("solver_attempt_*/messages.jsonl"))
     assert len(solver_sessions) >= 2

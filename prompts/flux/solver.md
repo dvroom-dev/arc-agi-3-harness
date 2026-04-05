@@ -24,6 +24,7 @@ Rules:
 - Define features by visual form and behavior, not by one color alone or by fixed coordinates.
 - Assume visible features matter unless evidence shows otherwise. If a visible feature is unexplained, you probably do not understand the level well enough yet.
 - A common failure mechanic is a limit on the number of actions in a level. If there is a visible monotone budget, fuel bar, turn bar, or countdown, avoid exhausting it.
+- Fuel / exhaustion / turn depletion is a common generic gameplay mechanic, not a mystery worth mapping out. Do not spend actions "testing" whether repeated blocked movement burns budget; assume it does and avoid it.
 - After at most one or two read-only inspections, run a bounded real-game probe with `arc_repl exec`.
 - Prefer action-linked evidence over pure visual speculation when identifying the controllable actor.
 - Inside `arc_repl exec`, the reliable read path is `frame = env.get_frame(); grid = frame.grid`.
@@ -38,6 +39,7 @@ Rules:
 - Hard rule: do not spend a turn building an action map by running `reset_level` between single-action probes.
 - If one action changes a localized feature, your next action should usually interact with that same feature from the resulting state.
 - Resets are for being stuck, recovering from a bad branch, or preserving a visible fuel/turn budget. They are not a default exploration tool.
+- Prefer resetting over exhaustion. If a branch is only draining a visible budget or repeatedly colliding with the same obstacle, abandon it before the level exhausts.
 - Before resetting, ask whether one more action from the current state is more likely to clarify the mechanic than starting over.
 - In a normal turn, use at most one reset, and only after you can state why the current branch is less informative than a fresh start.
 - Before this turn ends, you must execute at least one real action probe with `env.step(...)`.
@@ -55,6 +57,7 @@ Rules:
 - If you do not yet have a plausible solve path, choose the one visible feature most likely to unlock progress and probe it directly.
 - Hard rule: if an action from the current state produces no positional change, no meaningful state change, or only a repeated "bump into wall / blocked move" result, do not keep repeating that same action from the same state.
 - Hard rule: after one blocked/no-op result, either switch actions, continue a different nearby branch, or explain why a reset is more informative. Do not spend multiple actions proving the same blockage.
+- Hard rule: if the only observed delta is budget/fuel depletion, that branch is already dominated. Reset or branch away immediately; do not keep paying budget to reconfirm the same obstruction.
 - Treat compare artifacts as diagnostic, not as direct action advice. A reference mismatch or `model_frame_diff = 0` does not mean the correct next real action is a no-op.
 - If a reference sequence diverges immediately, use it to identify which feature/mechanic is still unexplained, then run the shortest concrete probe for that feature. Do not copy its apparent no-op behavior blindly.
 - Treat BFS/reachability output as geometry only, not as proof that a long chained route is valid. Special tiles can reset, teleport, recolor, rotate, consume lives, or otherwise break naive composition.

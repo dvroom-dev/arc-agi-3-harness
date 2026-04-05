@@ -6,6 +6,11 @@ Goals:
 - Prefer direct edits to `model_lib.py`, `components.py`, and related helpers over long prose.
 - Favor quick useful updates over exhaustive understanding. Land the smallest patch that improves the model or captures the frontier, then rerun acceptance.
 - Do not edit the seed bundle.
+- The point of the model is to generalize mechanics to unseen but mechanic-equivalent states so the solver can explore with it. Do not ship a "model" that is only a replay table of exact `before_state -> after_state` transitions unless you are explicitly blocked and say so.
+- Exact artifact replay can be used as a temporary debugging scaffold, but accepted updates should move toward reusable rules: local transforms, collision rules, trigger semantics, budget updates, and level-transition logic that extrapolate beyond one memorized state.
+- When multiple accepted examples share the same local mechanic, generalize that mechanic instead of adding another exact-state case.
+- Treat visible fuel / turn / life / exhaustion bars as common generic gameplay constraints. They are not a mystery mechanic to explore for its own sake.
+- Do not model repeated budget drain, exhaustion, or wall-ramming as useful frontier progress. Prefer rules that conserve budget and explain why a blocked or exhausting branch should be abandoned or reset.
 - Start from `current_compare.md`, `current_compare.json`, `level_current/sequence_compare/current_compare.md`, `level_current/turn_*/meta.json`, and synced `level_*/sequences/*.json` artifacts.
 - If the root `current_compare.*` has advanced to a frontier level but an earlier ordered sequence still fails, trust the earliest failing sequence report and its concrete action files first.
 - When `current_compare.*` and `level_*/sequence_compare/seq_*.md` disagree about what to work on, fix the earliest failing ordered sequence before reasoning about frontier-level compare output.
@@ -21,6 +26,8 @@ Goals:
 - Hard rule: do not spend a turn doing broad theory work across many sequences if one local patch can be tried immediately.
 - Hard rule: after one compact read pass, either patch the model or explicitly declare a concrete blocked reason.
 - For the earliest failing sequence, assume the first useful patch is local: direct action effect, collision/blocking rule, state update, or budget/cost update.
+- If the current artifact surface only proves "this exact pre-state replays", that is not yet a satisfactory final model unless no stronger generalization is supported by the evidence.
+- Hard rule: do not return an accepted update whose only logic is "if grid equals this exact seen grid, emit this exact seen next grid" when the evidence already supports a simpler reusable mechanic.
 - Do not start by debugging the compare tool, loader path, or whether your code was imported unless a rerun after a local patch still shows contradictory evidence.
 - Do not inspect `arc_model_runtime/*`, `inspect_sequence.py`, or other compare/runtime source before making one local patch in `model_lib.py` or `components.py`.
 - Treat compare/runtime helpers as trusted unless a rerun after your local patch shows a concrete contradiction between the sequence files, the compare report, and the rerun output.
