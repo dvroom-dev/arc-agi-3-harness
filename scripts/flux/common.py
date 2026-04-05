@@ -323,14 +323,18 @@ def _instance_sequence_richness(instance_dir: Path, solver_dir_name: str) -> tup
     sequence_files = 0
     if solver_dir.exists():
         for level_dir in solver_dir.glob("level_*"):
-            if not level_dir.is_dir():
-                continue
             seq_dir = level_dir / "sequences"
-            if seq_dir.exists() and seq_dir.is_dir():
+            if level_dir.is_dir() and seq_dir.exists() and seq_dir.is_dir():
                 sequence_dirs += 1
                 sequence_files += len(list(seq_dir.glob("seq_*.json")))
     return sequence_dirs, sequence_files
 
+def _levels_with_sequences(solver_dir: Path) -> set[str]:
+    return {
+        level_dir.name
+        for level_dir in solver_dir.glob("level_*")
+        if level_dir.is_dir() and (level_dir / "sequences").exists() and any((level_dir / "sequences").glob("seq_*.json"))
+    } if solver_dir.exists() else set()
 
 def _ensure_sequence_surface(meta: dict, model_workspace: Path) -> None:
     level_current = model_workspace / "level_current"
@@ -444,34 +448,26 @@ def _ensure_sequence_surface(meta: dict, model_workspace: Path) -> None:
     }
     sequence_path.write_text(json.dumps(sequence_payload, indent=2) + "\n", encoding="utf-8")
 
-
 def _active_flux_instance_dir(workspace_root: Path) -> Path | None:
     try:
-        solver = ((json.loads((workspace_root / "flux" / "state.json").read_text()).get("active") or {}).get("solver") or {})
-        instance_id = str(solver.get("instanceId", "") or "").strip()
+        instance_id = str((((json.loads((workspace_root / "flux" / "state.json").read_text()).get("active") or {}).get("solver") or {}).get("instanceId")) or "").strip()
+        instance_dir = workspace_root / "flux_instances" / safe_instance_name(instance_id)
+        return instance_dir if instance_id and instance_dir.exists() else None
     except Exception:
         return None
-    instance_dir = workspace_root / "flux_instances" / safe_instance_name(instance_id)
-    return instance_dir if instance_id and instance_dir.exists() else None
 
-
-def _selected_flux_instances(workspace_root: str, solver_dir_name: str) -> tuple[list[Path], Path | None, Path, Path] | None:
+def _selected_flux_instances(workspace_root: str, solver_dir_name: str) -> tuple[Path | None, Path, Path] | None:
     attempts_root = Path(workspace_root) / "flux_instances"
     attempts = [path for path in attempts_root.iterdir() if path.is_dir()] if attempts_root.exists() else []
-    if not attempts:
-        return None
+    if not attempts: return None
     active = _active_flux_instance_dir(Path(workspace_root))
-    latest = max(attempts, key=lambda path: path.stat().st_mtime)
-    richest = max(attempts, key=lambda path: (*_instance_sequence_richness(path, solver_dir_name), path.stat().st_mtime))
-    return attempts, active if active and active in attempts else None, latest, richest
-
+    return (active if active in attempts else None), max(attempts, key=lambda path: path.stat().st_mtime), max(attempts, key=lambda path: (*_instance_sequence_richness(path, solver_dir_name), path.stat().st_mtime))
 
 def sync_latest_attempt_to_model_workspace(workspace_root: str, meta: dict) -> list[str]:
     solver_dir_name = Path(str(meta.get("solver_template_dir") or meta.get("model_workspace_dir") or "game_ls20")).name
     selected = _selected_flux_instances(workspace_root, solver_dir_name)
-    if not selected:
-        return []
-    _attempts, active, latest, richest = selected
+    if not selected: return []
+    active, latest, richest = selected
     primary = active or latest
     solver_dir = primary / "agent" / solver_dir_name
     state_dir = primary / "supervisor" / "arc"
@@ -481,19 +477,22 @@ def sync_latest_attempt_to_model_workspace(workspace_root: str, meta: dict) -> l
     if richest != primary:
         richest_solver_dir = richest / "agent" / solver_dir_name
         if richest_solver_dir.exists():
-            synced.extend(sync_solver_artifacts_to_model_workspace(meta, richest_solver_dir, state_dir=None))
+            primary_levels = _levels_with_sequences(solver_dir)
+            if any(
+                child.is_dir()
+                and re.fullmatch(r"level_\d+", child.name)
+                and child.name not in primary_levels
+                for child in richest_solver_dir.iterdir()
+            ):
+                synced.extend(sync_solver_artifacts_to_model_workspace(meta, richest_solver_dir, state_dir=None))
     return synced
-
 
 def latest_flux_instance_state_dir(workspace_root: str, meta: dict) -> Path | None:
     solver_dir_name = Path(str(meta.get("solver_template_dir") or meta.get("model_workspace_dir") or "game_ls20")).name
     selected = _selected_flux_instances(workspace_root, solver_dir_name)
-    if not selected:
-        return None
-    _instances, active, latest, richest = selected
-    if active:
-        state_dir = active / "supervisor" / "arc"
-        return state_dir if state_dir.exists() else None
+    if not selected: return None
+    active, latest, richest = selected
+    if active: return active / "supervisor" / "arc" if (active / "supervisor" / "arc").exists() else None
     chosen = richest if _instance_sequence_richness(richest, solver_dir_name) > _instance_sequence_richness(latest, solver_dir_name) else latest
     state_dir = chosen / "supervisor" / "arc"
     return state_dir if state_dir.exists() else None

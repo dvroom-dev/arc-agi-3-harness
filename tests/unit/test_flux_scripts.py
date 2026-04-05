@@ -266,6 +266,56 @@ def test_sync_latest_attempt_to_model_workspace_prefers_active_instance_before_r
     assert calls[1] == (stale / "agent" / "game_ls20", None)
 
 
+def test_sync_latest_attempt_to_model_workspace_does_not_merge_stale_extra_sequences_into_active_level(tmp_path: Path, monkeypatch) -> None:
+    common = _load_module("flux_common_active_level_merge_test", "scripts/flux/common.py")
+    workspace_root = tmp_path / "run"
+    attempts_root = workspace_root / "flux_instances"
+    solver_name = "game_ls20"
+
+    active = attempts_root / "seed_rev_live"
+    stale = attempts_root / "attempt_stale"
+    active_solver = active / "agent" / solver_name
+    stale_solver = stale / "agent" / solver_name
+
+    active_sequences = active_solver / "level_1" / "sequences"
+    active_sequences.mkdir(parents=True, exist_ok=True)
+    (active_sequences / "seq_0001.json").write_text("{}\n", encoding="utf-8")
+    (active_sequences / "seq_0002.json").write_text("{}\n", encoding="utf-8")
+    (active / "supervisor" / "arc").mkdir(parents=True, exist_ok=True)
+
+    stale_sequences = stale_solver / "level_1" / "sequences"
+    stale_sequences.mkdir(parents=True, exist_ok=True)
+    (stale_sequences / "seq_0001.json").write_text("{}\n", encoding="utf-8")
+    (stale_sequences / "seq_0002.json").write_text("{}\n", encoding="utf-8")
+    (stale_sequences / "seq_0003.json").write_text("{}\n", encoding="utf-8")
+    (stale_sequences / "seq_0004.json").write_text("{}\n", encoding="utf-8")
+    (stale / "supervisor" / "arc").mkdir(parents=True, exist_ok=True)
+
+    (workspace_root / "flux").mkdir(parents=True, exist_ok=True)
+    (workspace_root / "flux" / "state.json").write_text(
+        json.dumps({"active": {"solver": {"instanceId": "seed_rev_live", "status": "running"}}}) + "\n",
+        encoding="utf-8",
+    )
+
+    calls: list[tuple[Path, Path | None]] = []
+
+    def fake_sync_solver_artifacts_to_model_workspace(meta: dict, solver_dir: Path, state_dir: Path | None = None) -> list[str]:
+        calls.append((solver_dir, state_dir))
+        return []
+
+    monkeypatch.setattr(common, "sync_solver_artifacts_to_model_workspace", fake_sync_solver_artifacts_to_model_workspace)
+
+    common.sync_latest_attempt_to_model_workspace(
+        str(workspace_root),
+        {
+            "solver_template_dir": str(workspace_root / "templates" / solver_name),
+            "model_workspace_dir": str(workspace_root / "agent" / solver_name),
+        },
+    )
+
+    assert calls == [(active_solver, active / "supervisor" / "arc")]
+
+
 def test_rehearse_seed_on_model_resolves_agent_prefixed_paths(tmp_path: Path) -> None:
     _load_module("common", "scripts/flux/common.py")
     rehearse = _load_module("flux_rehearse_seed_test", "scripts/flux/rehearse_seed_on_model.py")

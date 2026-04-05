@@ -225,3 +225,57 @@ def test_compare_markdown_explains_level_boundary_exclusion(tmp_path: Path) -> N
     assert "- comparison_stop_reason: post_level_complete_state_diff_excluded" in report_text
     assert "Compare checked the boundary action's completion transition" in report_text
     assert "boundary_note: level-completing action transition was compared" in current_compare_text
+
+
+def test_persist_current_compare_prunes_stale_sequence_reports(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    from arc_model_runtime.sequence_compare_artifacts import persist_current_compare
+
+    game_dir = tmp_path / "game_ls20"
+    (game_dir / "level_current" / "sequence_compare").mkdir(parents=True, exist_ok=True)
+    (game_dir / "level_1" / "sequence_compare").mkdir(parents=True, exist_ok=True)
+
+    stale_paths = [
+        game_dir / "level_current" / "sequence_compare" / "seq_0002.md",
+        game_dir / "level_1" / "sequence_compare" / "seq_0002.md",
+    ]
+    for stale in stale_paths:
+        stale.write_text("# stale\n", encoding="utf-8")
+
+    session = SimpleNamespace(game_dir=game_dir, env=SimpleNamespace(current_level=1))
+    payload = {
+        "ok": True,
+        "action": "compare_sequences",
+        "level": 1,
+        "all_match": False,
+        "compared_sequences": 1,
+        "diverged_sequences": 1,
+        "reports": [
+            {
+                "level": 1,
+                "sequence_id": "seq_0001",
+                "actions_total": 1,
+                "actions_compared": 1,
+                "matched": False,
+                "divergence_step": 1,
+                "divergence_reason": "intermediate_frame_mismatch",
+                "frame_count_game": 1,
+                "frame_count_model": 1,
+                "frame_diffs": [],
+                "start_action_index": 1,
+                "end_action_index": 1,
+                "end_reason": "open",
+                "report_file": "level_1/sequence_compare/seq_0001.md",
+            }
+        ],
+        "state": "NOT_FINISHED",
+        "current_level": 1,
+        "levels_completed": 0,
+    }
+
+    persist_current_compare(session, payload)
+
+    assert (game_dir / "level_current" / "sequence_compare" / "seq_0001.md").exists()
+    assert (game_dir / "level_1" / "sequence_compare" / "seq_0001.md").exists()
+    assert not (game_dir / "level_current" / "sequence_compare" / "seq_0002.md").exists()
+    assert not (game_dir / "level_1" / "sequence_compare" / "seq_0002.md").exists()
