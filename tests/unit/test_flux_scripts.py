@@ -4,6 +4,7 @@ import importlib.util
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -17,6 +18,72 @@ def _load_module(name: str, relative_path: str):
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def test_observe_evidence_script_runs_as_real_subprocess_and_materializes_bundle(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "run"
+    solver_dir = workspace_root / "flux_instances" / "attempt_x" / "agent" / "game_ls20"
+    state_dir = workspace_root / "flux_instances" / "attempt_x" / "supervisor" / "arc"
+    solver_dir.mkdir(parents=True, exist_ok=True)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "flux").mkdir(parents=True, exist_ok=True)
+    (solver_dir / "level_current").mkdir(parents=True, exist_ok=True)
+    (solver_dir / "level_current" / "meta.json").write_text(
+        json.dumps({"schema_version": "arc_repl.level_current.v1", "level": 1}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (solver_dir / "level_current" / "initial_state.hex").write_text("0\n", encoding="utf-8")
+    (state_dir / "state.json").write_text(
+        json.dumps({"current_level": 1, "levels_completed": 0, "state": "NOT_FINISHED"}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    (state_dir / "tool-engine-history.json").write_text(json.dumps({"events": []}) + "\n", encoding="utf-8")
+    (state_dir / "action-history.json").write_text(json.dumps([]) + "\n", encoding="utf-8")
+    (workspace_root / "flux_runtime.json").write_text(
+        json.dumps(
+            {
+                "solver_template_dir": str(workspace_root / "flux_seed" / "agent" / "game_ls20"),
+                "model_workspace_dir": str(workspace_root / "agent" / "game_ls20"),
+                "game_id": "ls20",
+                "run_config_dir": str(workspace_root / "config"),
+                "run_bin_dir": str(workspace_root / "config" / "bin"),
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    script_path = Path(__file__).resolve().parents[2] / "scripts" / "flux" / "observe_evidence.py"
+    proc = subprocess.run(
+        [str(Path(__file__).resolve().parents[2] / ".venv" / "bin" / "python"), str(script_path)],
+        input=json.dumps(
+            {
+                "workspaceRoot": str(workspace_root),
+                "attemptId": "attempt_x",
+                "instance": {
+                    "instance_id": "attempt_x",
+                    "metadata": {
+                        "state_dir": str(state_dir),
+                        "solver_dir": str(solver_dir),
+                    },
+                },
+            }
+        ),
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "ARC_FLUX_META_PATH": str(workspace_root / "flux_runtime.json"),
+        },
+        cwd=str(workspace_root),
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    payload = json.loads(proc.stdout)
+    bundle_path = Path(str(payload["evidence_bundle_path"]))
+    assert payload["evidence_bundle_id"]
+    assert bundle_path.exists()
+    assert (bundle_path / "manifest.json").exists()
 
 
 def test_sync_solver_artifacts_to_model_workspace_retries_transient_copy_errors(
