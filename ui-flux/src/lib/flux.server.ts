@@ -56,14 +56,6 @@ async function readJsonLines(filePath: string): Promise<JsonRecord[]> {
   return items;
 }
 
-async function listJsonFiles(dirPath: string): Promise<string[]> {
-  const entries = await fs.readdir(dirPath, { withFileTypes: true }).catch(() => []);
-  return entries
-    .filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-    .map((entry) => path.join(dirPath, entry.name))
-    .sort((left, right) => left.localeCompare(right));
-}
-
 function isPidAlive(pid: number | null): boolean {
   if (!pid || pid <= 0) return false;
   try {
@@ -133,15 +125,24 @@ async function readAttemptArcState(attemptRoot: string | null): Promise<JsonReco
 }
 
 async function listSessionSummaries(baseDir: string, sessionType: FluxSessionType): Promise<FluxSessionSummary[]> {
+  return listSessionSummariesWithOptions(baseDir, sessionType, { includeActivityCounts: true });
+}
+
+async function listSessionSummariesWithOptions(
+  baseDir: string,
+  sessionType: FluxSessionType,
+  options: { includeActivityCounts: boolean },
+): Promise<FluxSessionSummary[]> {
   const sessionRoot = path.join(baseDir, ".ai-flux", "sessions", sessionType);
   const entries = await fs.readdir(sessionRoot, { withFileTypes: true }).catch(() => []);
   const sessions = await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
     const perSessionRoot = path.join(sessionRoot, entry.name);
     const sessionPath = path.join(perSessionRoot, "session.json");
-    return {
-      ...normalizeSessionSummary(await readJson(sessionPath), sessionType, entry.name),
-      ...(await readSessionActivityCounts(perSessionRoot)),
-    };
+    const summary = normalizeSessionSummary(await readJson(sessionPath), sessionType, entry.name);
+    if (!options.includeActivityCounts) {
+      return summary;
+    }
+    return { ...summary, ...(await readSessionActivityCounts(perSessionRoot)) };
   }));
   return sessions.sort((left, right) => (right.updatedAt || "").localeCompare(left.updatedAt || ""));
 }
@@ -222,9 +223,6 @@ async function readFrameSnapshots(gameDir: string): Promise<{ frames: FluxFrameS
       stepCount: 0,
     });
   }
-  const levelDir = currentLevel ? path.join(gameDir, `level_${currentLevel}`) : levelCurrentDir;
-  const sequenceRoot = path.join(levelDir, "sequences");
-  const sequenceFiles = await listJsonFiles(sequenceRoot);
   type ActionRecord = {
     actionIndex: number;
     actionLabel: string;
@@ -235,55 +233,32 @@ async function readFrameSnapshots(gameDir: string): Promise<{ frames: FluxFrameS
     afterGrid: number[][];
   };
   const actionRecords: ActionRecord[] = [];
-  for (const sequenceFile of sequenceFiles) {
-    const sequence = await readJson<JsonRecord>(sequenceFile);
-    const sequenceActions = Array.isArray(sequence?.actions) ? sequence.actions : [];
-    for (const action of sequenceActions) {
-      if (!action || typeof action !== "object" || Array.isArray(action)) continue;
-      const record = action as JsonRecord;
-      const actionIndex = typeof record.action_index === "number"
-        ? Number(record.action_index)
-        : (typeof record.local_step === "number" ? Number(record.local_step) : actionRecords.length + 1);
-      const actionLabel = typeof record.action_name === "string" ? String(record.action_name) : "UNKNOWN";
-      const files = (record.files && typeof record.files === "object" && !Array.isArray(record.files))
-        ? record.files as JsonRecord
-        : {};
-      const afterStatePath = typeof files.after_state_hex === "string"
-        ? path.join(levelDir, String(files.after_state_hex))
-        : null;
-      const afterHex = afterStatePath ? await readText(afterStatePath) : null;
-      if (!afterHex) continue;
-      const beforeHex = typeof files.before_state_hex === "string"
-        ? await readText(path.join(levelDir, String(files.before_state_hex)))
-        : null;
-      const beforeGrid = beforeHex ? parseHexGrid(beforeHex) : null;
-      const afterGrid = parseHexGrid(afterHex);
-      const rows = Math.max(beforeGrid?.length ?? 0, afterGrid.length);
-      const cols = Math.max(
-        ...Array.from({ length: rows }, (_, index) => Math.max(beforeGrid?.[index]?.length ?? 0, afterGrid[index]?.length ?? 0)),
-        0,
-      );
-      let changedPixels = 0;
-      for (let row = 0; row < rows; row += 1) {
-        for (let col = 0; col < cols; col += 1) {
-          const beforeValue = beforeGrid?.[row]?.[col] ?? null;
-          const afterValue = afterGrid[row]?.[col] ?? null;
-          if (beforeValue !== afterValue) changedPixels += 1;
-        }
-      }
-      const turnDir = typeof record.tool_turn === "number"
-        ? `level_${currentLevel ?? 1}/turn_${String(Number(record.tool_turn)).padStart(4, "0")}`
-        : path.relative(gameDir, path.dirname(afterStatePath ?? levelDir));
-      actionRecords.push({
-        actionIndex,
-        actionLabel,
-        changedPixels,
-        turnDir,
-        stateBefore: typeof record.state_before === "string" ? String(record.state_before) : "",
-        stateAfter: typeof record.state_after === "string" ? String(record.state_after) : "",
-        afterGrid,
-      });
-    }
+  const turnEntries = await fs.readdir(levelCurrentDir, { withFileTypes: true }).catch(() => []);
+  const turnDirs = turnEntries
+    .filter((entry) => entry.isDirectory() && entry.name.startsWith("turn_"))
+    .map((entry) => entry.name)
+    .sort((left, right) => left.localeCompare(right))
+    .slice(-120);
+  for (const turnDirName of turnDirs) {
+    const turnDir = path.join(levelCurrentDir, turnDirName);
+    const turnMeta = await readJson<JsonRecord>(path.join(turnDir, "meta.json"));
+    const afterHex = await readText(path.join(turnDir, "after_state.hex"));
+    if (!turnMeta || !afterHex) continue;
+    const actionIndex = typeof turnMeta.tool_turn === "number"
+      ? Number(turnMeta.tool_turn)
+      : Number(String(turnDirName).split("_").pop() || actionRecords.length + 1);
+    const actionLabel = typeof turnMeta.action_input_name === "string" && String(turnMeta.action_input_name).trim().length > 0
+      ? String(turnMeta.action_input_name)
+      : (typeof turnMeta.action_label === "string" ? String(turnMeta.action_label) : "UNKNOWN");
+    actionRecords.push({
+      actionIndex,
+      actionLabel,
+      changedPixels: typeof turnMeta.changed_pixels === "number" ? Number(turnMeta.changed_pixels) : 0,
+      turnDir: path.relative(gameDir, turnDir),
+      stateBefore: typeof turnMeta.state_before_action === "string" ? String(turnMeta.state_before_action) : "",
+      stateAfter: typeof turnMeta.state_after_action === "string" ? String(turnMeta.state_after_action) : "",
+      afterGrid: parseHexGrid(afterHex),
+    });
   }
   actionRecords.sort((left, right) => left.actionIndex - right.actionIndex);
   for (const action of actionRecords) {
@@ -387,10 +362,7 @@ export async function listFluxRuns(): Promise<FluxRunSummary[]> {
     const { attemptRoot } = await pickGameDirForRun(entry.name, fluxState);
     const gameState = await readAttemptArcState(attemptRoot);
     const activeSessionRecords = await readActiveSessionRecords(root, fluxState);
-    const latestSessionSummaries = Object.fromEntries(await Promise.all(
-      SESSION_TYPES.map(async (sessionType) => [sessionType, await listSessionSummaries(root, sessionType)]),
-    )) as Partial<Record<FluxSessionType, FluxSessionSummary[]>>;
-    return toRunSummary(entry.name, fluxState, runtimeMeta, gameState, activeSessionRecords, latestSessionSummaries);
+    return toRunSummary(entry.name, fluxState, runtimeMeta, gameState, activeSessionRecords, {});
   }));
   return runs.filter(Boolean).sort((left, right) => (right?.updatedAt || "").localeCompare(left?.updatedAt || "")) as FluxRunSummary[];
 }
