@@ -164,15 +164,18 @@ async function pickGameDirForRun(runId: string, state: JsonRecord | null): Promi
   const root = runDir(runId);
   const active = (state?.active as JsonRecord | undefined)?.solver as JsonRecord | undefined;
   const activeAttemptId = typeof active?.attemptId === "string" ? String(active.attemptId) : null;
-  if (activeAttemptId) {
-    const candidate = path.join(root, "flux_instances", activeAttemptId, "agent");
+  const activeInstanceId = typeof active?.instanceId === "string" ? String(active.instanceId) : null;
+  const preferredInstanceId = activeInstanceId || activeAttemptId;
+  if (preferredInstanceId) {
+    const candidateRoot = path.join(root, "flux_instances", preferredInstanceId);
+    const candidate = path.join(candidateRoot, "agent");
     const entries = await fs.readdir(candidate, { withFileTypes: true }).catch(() => []);
     const game = entries.find((entry) => entry.isDirectory() && entry.name.startsWith("game_"));
     if (game) {
       return {
         gameDir: path.join(candidate, game.name),
-        attemptId: activeAttemptId,
-        attemptRoot: path.join(root, "flux_instances", activeAttemptId),
+        attemptId: preferredInstanceId,
+        attemptRoot: candidateRoot,
       };
     }
   }
