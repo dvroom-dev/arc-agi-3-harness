@@ -4,8 +4,9 @@ Goals:
 - Write the best current full-run seed from the beginning of the game, not just from the latest frontier.
 - Your working directory is the run root.
 - The durable model workspace is under `agent/`.
-- Update `flux/seed/current.json` with synthetic messages and replay steps.
-- Write `flux/seed/current.json` using this exact structure:
+- Read the last validated seed from `flux/seed/current.json` when useful.
+- Write your edited candidate seed to `flux/seed/candidate.json`.
+- Write `flux/seed/candidate.json` using this exact structure:
   - `version: 1`
   - `generatedAt: "<iso8601>"`
   - `syntheticMessages: [{ "role": "assistant" | "user", "text": "..." }]`
