@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 import time
 import uuid
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from arc_model_runtime.io_utils import copytree_stable, workspace_tree_lock
 
