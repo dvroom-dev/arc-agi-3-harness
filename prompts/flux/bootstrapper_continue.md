@@ -9,6 +9,8 @@ Real replay results:
 Generic replay fallback:
 {{replay_results}}
 
+If any payload above contains a seed validation error, fix `flux/seed/current.json` first before deciding whether to finalize or refine.
+
 Re-read `flux/seed/current.json`.
 
 Rules:
