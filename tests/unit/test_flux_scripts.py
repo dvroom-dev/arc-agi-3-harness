@@ -149,7 +149,7 @@ def test_check_model_skips_frontier_compare_until_frontier_level_is_ready(
 
     calls: list[int | None] = []
 
-    def fake_run_compare(_workspace, _meta, _env, frontier_level=None):
+    def fake_run_compare(_workspace, _meta, _env, frontier_level=None, *, include_reset_ended=False):
         calls.append(frontier_level)
         return 0, {
             "level": 1,
@@ -167,7 +167,6 @@ def test_check_model_skips_frontier_compare_until_frontier_level_is_ready(
     assert calls == [None]
     assert payloads
     assert payloads[0]["accepted"] is False
-    assert payloads[0]["compare_payload"]["frontier_sync_pending"] is True
 
 
 def test_check_model_classifies_missing_sequences_as_infrastructure_failure(tmp_path: Path, monkeypatch) -> None:
@@ -227,7 +226,7 @@ def test_check_model_uses_evidence_bundle_state_dir_for_compare_env(tmp_path: Pa
 
     seen_envs: list[dict] = []
 
-    def fake_run_compare(_workspace, _meta, child_env, frontier_level=None):
+    def fake_run_compare(_workspace, _meta, child_env, frontier_level=None, *, include_reset_ended=False):
         seen_envs.append(dict(child_env))
         return 0, {
             "level": 1,
@@ -331,7 +330,7 @@ def test_sync_latest_attempt_to_model_workspace_prefers_active_instance_before_r
 
     assert calls
     assert calls[0] == (active / "agent" / "game_ls20", active / "supervisor" / "arc")
-    assert calls[1] == (stale / "agent" / "game_ls20", None)
+    assert len(calls) == 1
 
 
 def test_sync_latest_attempt_to_model_workspace_does_not_merge_stale_extra_sequences_into_active_level(tmp_path: Path, monkeypatch) -> None:
