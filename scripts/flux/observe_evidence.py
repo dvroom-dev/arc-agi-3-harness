@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bundles import materialize_evidence_bundle
+from bundles import materialize_evidence_bundle, visible_action_surface_summary
 from common import (
     instance_root,
     load_runtime_meta,
@@ -31,6 +31,17 @@ def main() -> None:
             if not solver_dir.exists():
                 solver_dir = fallback_solver_dir
     summary = summarize_instance_state(state_dir) if state_dir.exists() else {"summary": "missing state dir"}
+    surface_summary = visible_action_surface_summary(solver_dir) if solver_dir.exists() else {}
+    summary.update(surface_summary)
+    reported_actions = int(summary.get("action_count", 0) or 0)
+    visible_actions = int(surface_summary.get("visible_action_count", 0) or 0)
+    handoff_incomplete = reported_actions > max(0, visible_actions)
+    if handoff_incomplete:
+        summary["artifact_handoff_incomplete"] = {
+            "reported_action_count": reported_actions,
+            "visible_action_count": visible_actions,
+            "latest_visible_action_dir": surface_summary.get("latest_visible_action_dir"),
+        }
     bundle = (
         materialize_evidence_bundle(
             workspace_root,
@@ -43,8 +54,9 @@ def main() -> None:
         else None
     )
     if bundle:
-        summary["evidence_bundle_id"] = bundle["bundle_id"]
-        summary["evidence_bundle_path"] = bundle["bundle_path"]
+        # Keep bundle references out of the evidence payload fingerprint. The runtime
+        # receives them as top-level fields and uses them separately for modeler input.
+        pass
     write_json_stdout(
         {
             "evidence": [summary],

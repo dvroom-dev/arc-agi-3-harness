@@ -182,3 +182,46 @@ def test_sync_latest_attempt_to_model_workspace_merges_sequences_from_all_attemp
     assert len(merged_sequences) == 2
     merged_payloads = [json.loads(path.read_text()) for path in merged_sequences]
     assert {payload["actions"][0]["action_name"] for payload in merged_payloads} == {"ACTION1", "ACTION2"}
+
+
+def test_observe_evidence_marks_artifact_handoff_incomplete_when_state_outpaces_visible_actions(tmp_path: Path, monkeypatch) -> None:
+    _load_module("common", "scripts/flux/common.py")
+    _load_module("bundles", "scripts/flux/bundles.py")
+    observe = _load_module("flux_observe_evidence_incomplete_test", "scripts/flux/observe_evidence.py")
+    workspace_root = tmp_path / "run"
+    solver_dir = workspace_root / "flux_instances" / "attempt_x" / "agent" / "game_ls20" / "level_2" / "sequences" / "seq_0002"
+    state_dir = workspace_root / "flux_instances" / "attempt_x" / "supervisor" / "arc"
+    (solver_dir / "actions" / "step_0018_action_000056_action2").mkdir(parents=True, exist_ok=True)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (solver_dir.parent / "seq_0002.json").write_text(
+        json.dumps({
+            "level": 2,
+            "sequence_id": "seq_0002",
+            "actions": [{"action_index": 56, "files": {"meta_json": "sequences/seq_0002/actions/step_0018_action_000056_action2/meta.json"}}],
+        }, indent=2),
+        encoding="utf-8",
+    )
+    (solver_dir / "actions" / "step_0018_action_000056_action2" / "meta.json").write_text("{}", encoding="utf-8")
+    (state_dir / "state.json").write_text(
+        json.dumps({"current_level": 2, "levels_completed": 1, "state": "NOT_FINISHED", "total_steps": 125, "current_attempt_steps": 17}, indent=2),
+        encoding="utf-8",
+    )
+    (state_dir / "tool-engine-history.json").write_text(json.dumps({"events": [1] * 130}) + "\n", encoding="utf-8")
+    (state_dir / "action-history.json").write_text(json.dumps([{}] * 130) + "\n", encoding="utf-8")
+    monkeypatch.setattr(observe, "read_json_stdin", lambda: {
+        "workspaceRoot": str(workspace_root),
+        "attemptId": "attempt_x",
+        "instance": {"instance_id": "attempt_x", "metadata": {"state_dir": str(state_dir), "solver_dir": str(solver_dir.parent.parent.parent)}},
+    })
+    monkeypatch.setattr(observe, "load_runtime_meta", lambda _workspace: {"solver_template_dir": str(workspace_root / "templates" / "game_ls20")})
+    monkeypatch.setattr(observe, "materialize_evidence_bundle", lambda *args, **kwargs: {"bundle_id": "bundle_x", "bundle_path": str(workspace_root / "flux" / "bundle_x")})
+    payloads: list[dict] = []
+    monkeypatch.setattr(observe, "write_json_stdout", lambda payload: payloads.append(payload))
+
+    observe.main()
+
+    assert payloads
+    evidence = payloads[0]["evidence"][0]
+    assert evidence["artifact_handoff_incomplete"]["reported_action_count"] == 130
+    assert evidence["artifact_handoff_incomplete"]["visible_action_count"] == 56
+    assert "evidence_bundle_id" not in evidence

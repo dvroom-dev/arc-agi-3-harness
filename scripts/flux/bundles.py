@@ -23,6 +23,43 @@ def evidence_bundle_root(workspace_root: str, bundle_id: str) -> Path:
     return Path(workspace_root) / "flux" / "evidence_bundles" / safe_instance_name(bundle_id)
 
 
+def visible_action_surface_summary(solver_dir: Path) -> dict:
+    max_action_index = 0
+    latest_action_dir = None
+    sequence_files = 0
+    for level_dir in sorted(solver_dir.glob("level_*")):
+        if not level_dir.is_dir():
+            continue
+        sequence_root = level_dir / "sequences"
+        if not sequence_root.exists():
+            continue
+        for sequence_path in sorted(sequence_root.glob("seq_*.json")):
+            sequence_files += 1
+            try:
+                payload = json.loads(sequence_path.read_text())
+            except Exception:
+                continue
+            actions = payload.get("actions") if isinstance(payload.get("actions"), list) else []
+            for action in actions:
+                if not isinstance(action, dict):
+                    continue
+                try:
+                    action_index = int(action.get("action_index", 0) or 0)
+                except Exception:
+                    action_index = 0
+                if action_index <= max_action_index:
+                    continue
+                max_action_index = action_index
+                files = action.get("files") if isinstance(action.get("files"), dict) else {}
+                meta_rel = files.get("meta_json")
+                latest_action_dir = str((level_dir / str(meta_rel)).parent) if isinstance(meta_rel, str) else str(level_dir)
+    return {
+        "visible_action_count": max_action_index,
+        "visible_sequence_files": sequence_files,
+        "latest_visible_action_dir": latest_action_dir,
+    }
+
+
 def materialize_evidence_bundle(
     workspace_root: str,
     *,
