@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 
@@ -24,15 +25,14 @@ EXCLUDED_DIRS = {
 
 def iter_candidate_files() -> list[Path]:
     files: list[Path] = []
-    for path in ROOT.rglob("*"):
-        if not path.is_file():
-            continue
-        rel = path.relative_to(ROOT)
-        if any(part in EXCLUDED_DIRS for part in rel.parts):
-            continue
-        if path.suffix not in CHECK_SUFFIXES:
-            continue
-        files.append(path)
+    for dirpath, dirnames, filenames in os.walk(ROOT, topdown=True):
+        dirnames[:] = [name for name in dirnames if name not in EXCLUDED_DIRS]
+        current_dir = Path(dirpath)
+        for filename in filenames:
+            path = current_dir / filename
+            if path.suffix not in CHECK_SUFFIXES:
+                continue
+            files.append(path)
     return sorted(files)
 
 

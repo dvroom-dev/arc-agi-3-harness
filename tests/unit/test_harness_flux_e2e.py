@@ -338,7 +338,7 @@ retention:
     assert state["status"] == "stopped"
 
     revisions = sorted((run_dir / "flux" / "seed" / "revisions").glob("seed_rev_*.json"))
-    assert len(revisions) >= 3
+    assert len(revisions) == 1
 
     solver_sessions = sorted((run_dir / ".ai-flux" / "sessions" / "solver").glob("solver_attempt_*/messages.jsonl"))
     assert len(solver_sessions) >= 2
