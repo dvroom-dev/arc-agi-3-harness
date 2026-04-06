@@ -138,10 +138,11 @@ else:
         "ok": True,
         "action": "compare_sequences",
         "level": 2,
-        "all_match": False,
+        "all_match": True,
         "compared_sequences": 1,
-        "diverged_sequences": 1,
-        "reports": [{"sequence_id": "seq_0001", "matched": False, "divergence_reason": "intermediate_frame_mismatch", "report_file": "level_2/report.md"}]
+        "eligible_sequences": 1,
+        "diverged_sequences": 0,
+        "reports": [{"sequence_id": "seq_0001", "matched": True, "report_file": "level_2/report.md"}]
       },
       "tool_results": []
     }))

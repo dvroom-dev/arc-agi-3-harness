@@ -208,7 +208,7 @@ def main() -> None:
     compare_result = _run_model_command(
         model_workspace,
         env,
-        ["compare_sequences", "--game-id", str(meta["game_id"]), "--level", str(compare_level)],
+        ["compare_sequences", "--game-id", str(meta["game_id"]), "--level", str(compare_level), "--include-reset-ended"],
     )
     write_json_stdout(
         {
