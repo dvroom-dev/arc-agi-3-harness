@@ -111,10 +111,10 @@ def _render_flux_config(runtime: HarnessRuntime) -> str:
         "codex": "gpt-5.4",
     }
     solver_model = provider_default_model.get(provider_name, "claude-opus-4-6")
-    modeler_provider = provider_name if provider_name == "mock" else "codex"
+    modeler_provider = provider_name
     modeler_model = provider_default_model.get(modeler_provider, "claude-opus-4-6")
-    bootstrapper_provider = provider_name if provider_name == "mock" else "codex"
-    bootstrapper_model = provider_default_model.get(bootstrapper_provider, "gpt-5.4")
+    bootstrapper_provider = provider_name
+    bootstrapper_model = provider_default_model.get(bootstrapper_provider, "claude-opus-4-6")
     replacements = {
         "{{RUNTIME_PROVIDER}}": provider_name,
         "{{RUNTIME_MODEL}}": solver_model,
