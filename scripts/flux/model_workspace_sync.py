@@ -8,11 +8,35 @@ from pathlib import Path
 from typing import Callable
 
 
-def _instance_sequence_richness(instance_dir: Path, solver_dir_name: str) -> tuple[int, int]:
+def _canonical_sequence_surface_root(instance_dir: Path) -> Path | None:
+    state_dir = instance_dir / "supervisor" / "arc"
+    game_artifacts_root = state_dir / "game_artifacts"
+    if not game_artifacts_root.exists() or not game_artifacts_root.is_dir():
+        return None
+    game_roots = [path for path in game_artifacts_root.iterdir() if path.is_dir()]
+    if not game_roots:
+        return None
+    if len(game_roots) == 1:
+        return game_roots[0]
+    return max(
+        game_roots,
+        key=lambda path: len(list(path.glob("level_*/sequences/seq_*.json"))),
+    )
+
+
+def _preferred_sequence_surface_root(instance_dir: Path, solver_dir_name: str) -> Path | None:
+    canonical_root = _canonical_sequence_surface_root(instance_dir)
+    if canonical_root is not None:
+        return canonical_root
     solver_dir = instance_dir / "agent" / solver_dir_name
+    return solver_dir if solver_dir.exists() else None
+
+
+def _instance_sequence_richness(instance_dir: Path, solver_dir_name: str) -> tuple[int, int]:
+    solver_dir = _preferred_sequence_surface_root(instance_dir, solver_dir_name)
     sequence_dirs = 0
     sequence_files = 0
-    if solver_dir.exists():
+    if solver_dir and solver_dir.exists():
         for level_dir in solver_dir.glob("level_*"):
             seq_dir = level_dir / "sequences"
             if level_dir.is_dir() and seq_dir.exists() and seq_dir.is_dir():
@@ -198,10 +222,10 @@ def sync_latest_attempt_to_model_workspace_impl(
     synced = sync_solver_artifacts_to_model_workspace(meta, solver_dir, state_dir=state_dir)
     model_workspace = Path(str(meta["model_workspace_dir"]))
     for attempt in ordered:
-        attempt_solver_dir = attempt / "agent" / solver_dir_name
-        if not attempt_solver_dir.exists():
+        sequence_surface_root = _preferred_sequence_surface_root(attempt, solver_dir_name)
+        if sequence_surface_root is None or not sequence_surface_root.exists():
             continue
-        for level_num, source_level_dir in _iter_sequence_surfaces(attempt_solver_dir):
+        for level_num, source_level_dir in _iter_sequence_surfaces(sequence_surface_root):
             target_level_dir = model_workspace / f"level_{level_num}"
             if not target_level_dir.exists():
                 shutil.copytree(source_level_dir, target_level_dir, dirs_exist_ok=True)

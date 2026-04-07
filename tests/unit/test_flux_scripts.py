@@ -385,6 +385,8 @@ def test_sync_latest_attempt_to_model_workspace_does_not_merge_stale_extra_seque
     assert calls == [(active_solver, active / "supervisor" / "arc")]
 
 
+
+
 def test_inspect_current_mismatch_falls_back_to_first_report(tmp_path: Path) -> None:
     artifact_helpers = _load_module("artifact_helpers_fallback_test", "templates/agent_workspace/artifact_helpers.py")
     game_dir = tmp_path / "game_ls20"
