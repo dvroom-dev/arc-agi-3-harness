@@ -168,12 +168,21 @@ def summarize_instance_state(state_dir: Path) -> dict:
     action_history = read_json_file_with_retry(action_history_path) if action_history_path.exists() else []
     history_events = history.get("events", []) if isinstance(history, dict) else history
     if isinstance(action_history, list):
-        action_count = len(action_history)
+        records = [rec for rec in action_history if isinstance(rec, dict)]
     elif isinstance(action_history, dict):
-        records = action_history.get("records")
-        action_count = len(records) if isinstance(records, list) else 0
+        raw_records = action_history.get("records")
+        records = [rec for rec in raw_records if isinstance(rec, dict)] if isinstance(raw_records, list) else []
     else:
-        action_count = 0
+        records = []
+    total_action_records = len(records)
+    reset_action_count = sum(
+        1
+        for rec in records
+        if str(rec.get("action_name", "")).strip().upper() == "RESET_LEVEL"
+        or str(rec.get("call_action", "")).strip().lower() == "reset_level"
+        or str(rec.get("source", "")).strip().lower() == "reset_level"
+    )
+    action_count = total_action_records - reset_action_count
     if action_count == 0 and isinstance(state, dict):
         action_count = int(state.get("current_attempt_steps", 0) or state.get("total_steps", 0) or 0)
     state_payload = state if isinstance(state, dict) else {}
@@ -200,6 +209,8 @@ def summarize_instance_state(state_dir: Path) -> dict:
         "state": state_payload,
         "history_count": len(history_events) if isinstance(history_events, list) else 0,
         "action_count": action_count,
+        "total_action_records": total_action_records,
+        "reset_action_count": reset_action_count,
         "last_action_name": normalized_last_action or None,
     }
 

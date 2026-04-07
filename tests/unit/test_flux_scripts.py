@@ -86,6 +86,8 @@ def test_observe_evidence_script_runs_as_real_subprocess_and_materializes_bundle
     assert (bundle_path / "manifest.json").exists()
 
 
+
+
 def test_sync_solver_artifacts_to_model_workspace_retries_transient_copy_errors(
     tmp_path: Path,
     monkeypatch,

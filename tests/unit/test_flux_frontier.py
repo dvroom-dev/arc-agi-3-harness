@@ -225,3 +225,48 @@ def test_observe_evidence_marks_artifact_handoff_incomplete_when_state_outpaces_
     assert evidence["artifact_handoff_incomplete"]["reported_action_count"] == 130
     assert evidence["artifact_handoff_incomplete"]["visible_action_count"] == 56
     assert "evidence_bundle_id" not in evidence
+
+
+def test_observe_evidence_does_not_treat_reset_records_as_missing_visible_actions(tmp_path: Path, monkeypatch) -> None:
+    _load_module("common", "scripts/flux/common.py")
+    _load_module("bundles", "scripts/flux/bundles.py")
+    observe = _load_module("flux_observe_evidence_reset_filter_test", "scripts/flux/observe_evidence.py")
+    workspace_root = tmp_path / "run"
+    solver_dir = workspace_root / "flux_instances" / "attempt_x" / "agent" / "game_ls20" / "level_1" / "sequences" / "seq_0001"
+    state_dir = workspace_root / "flux_instances" / "attempt_x" / "supervisor" / "arc"
+    (solver_dir / "actions" / "step_0008_action_000008_action3").mkdir(parents=True, exist_ok=True)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    (solver_dir.parent / "seq_0001.json").write_text(
+        json.dumps({
+            "level": 1,
+            "sequence_id": "seq_0001",
+            "actions": [{"action_index": 8, "files": {"meta_json": "sequences/seq_0001/actions/step_0008_action_000008_action3/meta.json"}}],
+        }, indent=2),
+        encoding="utf-8",
+    )
+    (solver_dir / "actions" / "step_0008_action_000008_action3" / "meta.json").write_text("{}", encoding="utf-8")
+    (state_dir / "state.json").write_text(
+        json.dumps({"current_level": 1, "levels_completed": 0, "state": "NOT_FINISHED", "total_steps": 8, "current_attempt_steps": 0}, indent=2),
+        encoding="utf-8",
+    )
+    (state_dir / "tool-engine-history.json").write_text(json.dumps({"events": [{"kind": "step"}] * 8 + [{"kind": "reset"}]}) + "\n", encoding="utf-8")
+    records = [{"action_index": index + 1, "action_name": "ACTION1"} for index in range(8)]
+    records.append({"action_index": 9, "action_name": "RESET_LEVEL", "call_action": "reset_level", "source": "reset_level"})
+    (state_dir / "action-history.json").write_text(json.dumps({"records": records}) + "\n", encoding="utf-8")
+    monkeypatch.setattr(observe, "read_json_stdin", lambda: {
+        "workspaceRoot": str(workspace_root),
+        "attemptId": "attempt_x",
+        "instance": {"instance_id": "attempt_x", "metadata": {"state_dir": str(state_dir), "solver_dir": str(solver_dir.parent.parent.parent)}},
+    })
+    monkeypatch.setattr(observe, "load_runtime_meta", lambda _workspace: {"solver_template_dir": str(workspace_root / "templates" / "game_ls20")})
+    monkeypatch.setattr(observe, "materialize_evidence_bundle", lambda *args, **kwargs: {"bundle_id": "bundle_x", "bundle_path": str(workspace_root / "flux" / "bundle_x")})
+    payloads: list[dict] = []
+    monkeypatch.setattr(observe, "write_json_stdout", lambda payload: payloads.append(payload))
+
+    observe.main()
+
+    assert payloads
+    evidence = payloads[0]["evidence"][0]
+    assert evidence["action_count"] == 8
+    assert evidence["reset_action_count"] == 1
+    assert "artifact_handoff_incomplete" not in evidence
