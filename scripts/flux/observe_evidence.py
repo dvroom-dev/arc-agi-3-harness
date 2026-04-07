@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from bundles import materialize_evidence_bundle, visible_action_surface_summary
+from bundles import materialize_evidence_bundle, preferred_solver_surface_dir, visible_action_surface_summary
 from common import (
     instance_root,
     load_runtime_meta,
@@ -31,7 +31,8 @@ def main() -> None:
             if not solver_dir.exists():
                 solver_dir = fallback_solver_dir
     summary = summarize_instance_state(state_dir) if state_dir.exists() else {"summary": "missing state dir"}
-    surface_summary = visible_action_surface_summary(solver_dir) if solver_dir.exists() else {}
+    surface_dir = preferred_solver_surface_dir(solver_dir=solver_dir, state_dir=state_dir) if solver_dir.exists() and state_dir.exists() else solver_dir
+    surface_summary = visible_action_surface_summary(surface_dir) if surface_dir.exists() else {}
     summary.update(surface_summary)
     reported_actions = int(summary.get("action_count", 0) or 0)
     visible_actions = int(surface_summary.get("visible_action_count", 0) or 0)
@@ -47,10 +48,11 @@ def main() -> None:
             workspace_root,
             attempt_id=str(payload.get("attemptId") or raw_instance_id or ""),
             instance_id=str(raw_instance_id or payload.get("instanceId") or ""),
-            solver_dir=solver_dir,
+            solver_dir=surface_dir,
             state_dir=state_dir,
+            workspace_dir_name=solver_dir.name,
         )
-        if solver_dir.exists() and state_dir.exists()
+        if surface_dir.exists() and state_dir.exists()
         else None
     )
     if bundle:

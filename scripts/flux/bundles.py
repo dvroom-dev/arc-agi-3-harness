@@ -23,6 +23,15 @@ def evidence_bundle_root(workspace_root: str, bundle_id: str) -> Path:
     return Path(workspace_root) / "flux" / "evidence_bundles" / safe_instance_name(bundle_id)
 
 
+def preferred_solver_surface_dir(*, solver_dir: Path, state_dir: Path) -> Path:
+    game_artifacts_root = state_dir / "game_artifacts"
+    if game_artifacts_root.exists() and game_artifacts_root.is_dir():
+        game_roots = sorted(path for path in game_artifacts_root.iterdir() if path.is_dir())
+        if len(game_roots) == 1:
+            return game_roots[0]
+    return solver_dir
+
+
 def visible_action_surface_summary(solver_dir: Path) -> dict:
     max_action_index = 0
     latest_action_dir = None
@@ -67,14 +76,16 @@ def materialize_evidence_bundle(
     instance_id: str,
     solver_dir: Path,
     state_dir: Path,
+    workspace_dir_name: str | None = None,
 ) -> dict:
     bundle_id = f"evidence_{uuid.uuid4()}"
     final_root = evidence_bundle_root(workspace_root, bundle_id)
     temp_root = final_root.parent / f".{bundle_id}.tmp-{uuid.uuid4().hex}"
     shutil.rmtree(temp_root, ignore_errors=True)
     (temp_root / "workspace").mkdir(parents=True, exist_ok=True)
+    workspace_leaf = workspace_dir_name or solver_dir.name
     with workspace_tree_lock(solver_dir):
-        copytree_stable(solver_dir, temp_root / "workspace" / solver_dir.name)
+        copytree_stable(solver_dir, temp_root / "workspace" / workspace_leaf)
     if state_dir.exists():
         copytree_stable(state_dir, temp_root / "arc_state")
     manifest = {
@@ -82,14 +93,14 @@ def materialize_evidence_bundle(
         "attempt_id": attempt_id,
         "instance_id": instance_id,
         "created_at": time.time(),
-        "solver_dir_name": solver_dir.name,
-        "workspace_dir": str(temp_root / "workspace" / solver_dir.name),
+        "solver_dir_name": workspace_leaf,
+        "workspace_dir": str(temp_root / "workspace" / workspace_leaf),
         "arc_state_dir": str(temp_root / "arc_state"),
     }
     (temp_root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     final_root.parent.mkdir(parents=True, exist_ok=True)
     temp_root.rename(final_root)
-    manifest["workspace_dir"] = str(final_root / "workspace" / solver_dir.name)
+    manifest["workspace_dir"] = str(final_root / "workspace" / workspace_leaf)
     manifest["arc_state_dir"] = str(final_root / "arc_state")
     manifest["manifest_path"] = str(final_root / "manifest.json")
     manifest["bundle_path"] = str(final_root)
