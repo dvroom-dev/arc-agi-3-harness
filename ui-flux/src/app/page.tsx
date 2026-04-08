@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import ArcGrid from "@/components/ArcGrid";
 import { SessionDetailView, SessionsView } from "@/components/FluxSessionPanels";
 import type { FluxRunDetail, FluxRunStartRequest, FluxRunSummary, FluxSessionDetail, FluxSessionSummary, FluxSessionType } from "@/lib/types";
@@ -10,16 +10,27 @@ type MobileSection = "runs" | "state" | "sessions" | "detail";
 
 function usePolling<T>(url: string | null, intervalMs: number, fallback: T): T {
   const [value, setValue] = useState<T>(fallback);
+  const fallbackRef = useRef<T>(fallback);
+  fallbackRef.current = fallback;
   useEffect(() => {
-    if (!url) return;
+    if (!url) {
+      setValue(fallbackRef.current);
+      return;
+    }
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    setValue(fallbackRef.current);
     const load = async () => {
       try {
         const response = await fetch(url, { cache: "no-store" });
-        if (!response.ok) return;
+        if (!response.ok) {
+          if (!stopped) setValue(fallbackRef.current);
+          return;
+        }
         const next = await response.json() as T;
         if (!stopped) setValue(next);
+      } catch {
+        if (!stopped) setValue(fallbackRef.current);
       } finally {
         if (!stopped) timer = setTimeout(load, intervalMs);
       }
