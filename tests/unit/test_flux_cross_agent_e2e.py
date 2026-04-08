@@ -141,3 +141,106 @@ def test_sync_model_workspace_script_prefers_canonical_solver_sequences(tmp_path
     assert synced["start_action_index"] == 1
     assert synced["action_count"] == 3
     assert [action["action_index"] for action in synced["actions"]] == [1, 2, 3]
+
+
+def test_sync_model_workspace_script_uses_explicit_evidence_bundle_snapshot(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "run"
+    solver_name = "game_ls20"
+    runtime_meta_path = workspace_root / "flux_runtime.json"
+    model_workspace = workspace_root / "agent" / solver_name
+    live_attempt = workspace_root / "flux_instances" / "attempt_live"
+    live_surface = live_attempt / "supervisor" / "arc" / "game_artifacts" / "game_ls20-live" / "level_1" / "sequences"
+    bundle_root = workspace_root / "flux" / "evidence_bundles" / "evidence_test"
+    bundle_surface = bundle_root / "workspace" / solver_name / "level_1" / "sequences"
+    bundle_state = bundle_root / "arc_state"
+
+    model_workspace.mkdir(parents=True, exist_ok=True)
+    live_surface.mkdir(parents=True, exist_ok=True)
+    bundle_surface.mkdir(parents=True, exist_ok=True)
+    bundle_state.mkdir(parents=True, exist_ok=True)
+    (workspace_root / "flux").mkdir(parents=True, exist_ok=True)
+    (workspace_root / "flux" / "state.json").write_text(
+        json.dumps({"active": {"solver": {"instanceId": "attempt_live", "status": "running"}}}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    runtime_meta_path.write_text(
+        json.dumps(
+            {
+                "solver_template_dir": str(workspace_root / "flux_seed" / "agent" / solver_name),
+                "model_workspace_dir": str(model_workspace),
+                "game_id": "ls20",
+                "run_config_dir": str(workspace_root / "config"),
+                "run_bin_dir": str(workspace_root / "config" / "bin"),
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (bundle_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "workspace_dir": str(bundle_root / "workspace" / solver_name),
+                "arc_state_dir": str(bundle_state),
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    live_seq = {
+        "level": 1,
+        "sequence_id": "seq_0001",
+        "sequence_number": 1,
+        "start_action_index": 45,
+        "end_action_index": 45,
+        "end_reason": "reset_level",
+        "action_count": 1,
+        "actions": [{"local_step": 1, "action_index": 45, "action_name": "ACTION1", "files": {"meta_json": "sequences/seq_0001/actions/step_0001_action_000045_action1/meta.json"}}],
+    }
+    bundle_seq = {
+        "level": 1,
+        "sequence_id": "seq_0001",
+        "sequence_number": 1,
+        "start_action_index": 1,
+        "end_action_index": 3,
+        "end_reason": "reset_level",
+        "action_count": 3,
+        "actions": [
+            {"local_step": 1, "action_index": 1, "action_name": "ACTION1", "files": {"meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json"}},
+            {"local_step": 2, "action_index": 2, "action_name": "ACTION2", "files": {"meta_json": "sequences/seq_0001/actions/step_0002_action_000002_action2/meta.json"}},
+            {"local_step": 3, "action_index": 3, "action_name": "ACTION3", "files": {"meta_json": "sequences/seq_0001/actions/step_0003_action_000003_action3/meta.json"}},
+        ],
+    }
+    (live_surface / "seq_0001.json").write_text(json.dumps(live_seq, indent=2) + "\n", encoding="utf-8")
+    (bundle_surface / "seq_0001.json").write_text(json.dumps(bundle_seq, indent=2) + "\n", encoding="utf-8")
+    for rel in [
+        "seq_0001/actions/step_0001_action_000001_action1/meta.json",
+        "seq_0001/actions/step_0002_action_000002_action2/meta.json",
+        "seq_0001/actions/step_0003_action_000003_action3/meta.json",
+    ]:
+        path = bundle_surface / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{}\n", encoding="utf-8")
+
+    script_path = Path(__file__).resolve().parents[2] / "scripts" / "flux" / "sync_model_workspace.py"
+    proc = subprocess.run(
+        [str(Path(__file__).resolve().parents[2] / ".venv" / "bin" / "python"), str(script_path)],
+        input=json.dumps(
+            {
+                "workspaceRoot": str(workspace_root),
+                "reason": "solver_new_evidence",
+                "evidenceBundlePath": str(bundle_root),
+            }
+        ),
+        text=True,
+        capture_output=True,
+        env={**os.environ, "ARC_FLUX_META_PATH": str(runtime_meta_path)},
+        cwd=str(workspace_root),
+        check=False,
+    )
+    assert proc.returncode == 0, proc.stderr or proc.stdout
+    synced = json.loads((model_workspace / "level_1" / "sequences" / "seq_0001.json").read_text())
+    assert synced["start_action_index"] == 1
+    assert synced["action_count"] == 3

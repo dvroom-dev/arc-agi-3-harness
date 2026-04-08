@@ -451,6 +451,24 @@ def sync_latest_attempt_to_model_workspace(workspace_root: str, meta: dict) -> l
         safe_instance_name=safe_instance_name,
     )
 
+
+def sync_evidence_bundle_to_model_workspace(meta: dict, bundle_path: Path) -> list[str]:
+    manifest_path = bundle_path / "manifest.json"
+    if not manifest_path.exists():
+        raise RuntimeError(f"missing evidence bundle manifest: {manifest_path}")
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except Exception as exc:
+        raise RuntimeError(f"failed to read evidence bundle manifest {manifest_path}: {exc}") from exc
+    workspace_dir = Path(str(manifest.get("workspace_dir") or "")).resolve()
+    if not workspace_dir.exists():
+        raise RuntimeError(f"evidence bundle workspace_dir is missing: {workspace_dir}")
+    state_dir_value = str(manifest.get("arc_state_dir") or "").strip()
+    state_dir = Path(state_dir_value).resolve() if state_dir_value else None
+    if state_dir is not None and not state_dir.exists():
+        state_dir = None
+    return sync_solver_artifacts_to_model_workspace(meta, workspace_dir, state_dir=state_dir)
+
 def latest_flux_instance_state_dir(workspace_root: str, meta: dict) -> Path | None:
     from scripts.flux.model_workspace_sync import latest_flux_instance_state_dir_impl
 
