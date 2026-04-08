@@ -104,19 +104,29 @@ def _render_flux_config(runtime: HarnessRuntime) -> str:
     prompts_root = PROJECT_ROOT / "prompts" / "flux"
     scripts_root = PROJECT_ROOT / "scripts" / "flux"
     model_workspace_rel = _safe_relpath(runtime.run_dir, runtime.active_agent_dir())
-    provider_name = str(getattr(runtime.args, "provider", None) or "codex").strip() or "codex"
+    provider_name = str(getattr(runtime.args, "provider", None) or "").strip()
     provider_default_model = {
         "mock": "mock-model",
         "claude": "claude-opus-4-6",
         "codex": "gpt-5.4",
     }
-    solver_model = provider_default_model.get(provider_name, "claude-opus-4-6")
-    modeler_provider = provider_name
-    modeler_model = provider_default_model.get(modeler_provider, "claude-opus-4-6")
-    bootstrapper_provider = provider_name
-    bootstrapper_model = provider_default_model.get(bootstrapper_provider, "claude-opus-4-6")
+    if provider_name == "mock":
+        runtime_provider = "mock"
+        modeler_provider = "mock"
+        bootstrapper_provider = "mock"
+    elif provider_name == "codex":
+        runtime_provider = "codex"
+        modeler_provider = "codex"
+        bootstrapper_provider = "codex"
+    else:
+        runtime_provider = "claude"
+        modeler_provider = "codex"
+        bootstrapper_provider = "codex"
+    solver_model = provider_default_model.get(runtime_provider, "claude-opus-4-6")
+    modeler_model = provider_default_model.get(modeler_provider, "gpt-5.4")
+    bootstrapper_model = provider_default_model.get(bootstrapper_provider, "gpt-5.4")
     replacements = {
-        "{{RUNTIME_PROVIDER}}": provider_name,
+        "{{RUNTIME_PROVIDER}}": runtime_provider,
         "{{RUNTIME_MODEL}}": solver_model,
         "{{PROMPTS_ROOT}}": str(prompts_root),
         "{{SCRIPTS_ROOT}}": str(scripts_root),

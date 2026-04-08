@@ -357,6 +357,7 @@ export default function Home() {
                 <div className="space-y-3">
                   <input className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" value={form.sessionName} onChange={(event) => setForm((value) => ({ ...value, sessionName: event.target.value }))} placeholder="run name prefix" />
                   <input className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" value={form.gameId} onChange={(event) => setForm((value) => ({ ...value, gameId: event.target.value }))} placeholder="game id" />
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-white/45">Solver provider</div>
                   <div className="grid grid-cols-2 gap-2">
                     <select className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" value={form.provider} onChange={(event) => setForm((value) => ({ ...value, provider: event.target.value as FluxRunStartRequest["provider"] }))}>
                       <option value="claude">claude</option>
@@ -422,6 +423,7 @@ export default function Home() {
             <div className="space-y-3">
               <input className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" value={form.sessionName} onChange={(event) => setForm((value) => ({ ...value, sessionName: event.target.value }))} placeholder="run name prefix" />
               <input className="w-full rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" value={form.gameId} onChange={(event) => setForm((value) => ({ ...value, gameId: event.target.value }))} placeholder="game id" />
+              <div className="text-[11px] uppercase tracking-[0.14em] text-white/45">Solver provider</div>
               <div className="grid grid-cols-2 gap-2">
                 <select className="rounded-xl border border-white/10 bg-black/20 px-3 py-2 text-sm" value={form.provider} onChange={(event) => setForm((value) => ({ ...value, provider: event.target.value as FluxRunStartRequest["provider"] }))}>
                   <option value="claude">claude</option>

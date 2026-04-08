@@ -34,12 +34,14 @@ def test_render_flux_config_includes_durable_workspace() -> None:
     assert "rehearse_seed_on_model.py" in text
     assert "replay_seed_on_real_game.py" in text
     assert "output_schema: bootstrap_seed_decision_v1" in text
-    assert "runtime_defaults:\n  provider: codex" in text
+    assert "runtime_defaults:\n  provider: claude" in text
     assert "modeler:\n  prompt_file:" in text
+    assert "  provider: codex" in text
+    assert "bootstrapper:\n  prompt_file:" in text
     assert "  provider: codex" in text
 
 
-def test_render_flux_config_keeps_selected_provider_for_all_workers() -> None:
+def test_render_flux_config_uses_split_defaults_for_claude_solver_runs() -> None:
     runtime = SimpleNamespace(
         args=SimpleNamespace(provider="claude"),
         run_dir=Path("/tmp/flux-run"),
@@ -48,9 +50,23 @@ def test_render_flux_config_keeps_selected_provider_for_all_workers() -> None:
     text = _render_flux_config(runtime)
     assert "runtime_defaults:\n  provider: claude" in text
     assert "modeler:\n  prompt_file:" in text
-    assert "  provider: claude" in text
+    assert "  provider: codex" in text
     assert "bootstrapper:\n  prompt_file:" in text
-    assert "  provider: claude" in text
+    assert "  provider: codex" in text
+
+
+def test_render_flux_config_keeps_codex_provider_coherent() -> None:
+    runtime = SimpleNamespace(
+        args=SimpleNamespace(provider="codex"),
+        run_dir=Path("/tmp/flux-run"),
+        active_agent_dir=lambda: Path("/tmp/flux-run/agent/game_ls20"),
+    )
+    text = _render_flux_config(runtime)
+    assert "runtime_defaults:\n  provider: codex" in text
+    assert "modeler:\n  prompt_file:" in text
+    assert "  provider: codex" in text
+    assert "bootstrapper:\n  prompt_file:" in text
+    assert "  provider: codex" in text
 
 
 def test_render_flux_config_keeps_mock_provider_coherent() -> None:
