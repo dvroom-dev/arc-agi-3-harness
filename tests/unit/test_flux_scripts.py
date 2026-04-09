@@ -84,6 +84,11 @@ def test_observe_evidence_script_runs_as_real_subprocess_and_materializes_bundle
     assert payload["evidence_bundle_id"]
     assert bundle_path.exists()
     assert (bundle_path / "manifest.json").exists()
+    manifest = json.loads((bundle_path / "manifest.json").read_text())
+    assert manifest["bundle_path"] == str(bundle_path)
+    assert manifest["manifest_path"] == str(bundle_path / "manifest.json")
+    assert manifest["workspace_dir"] == str(bundle_path / "workspace" / "game_ls20")
+    assert "/.evidence_" not in manifest["workspace_dir"]
 
 
 

@@ -104,4 +104,5 @@ def materialize_evidence_bundle(
     manifest["arc_state_dir"] = str(final_root / "arc_state")
     manifest["manifest_path"] = str(final_root / "manifest.json")
     manifest["bundle_path"] = str(final_root)
+    (final_root / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return manifest
