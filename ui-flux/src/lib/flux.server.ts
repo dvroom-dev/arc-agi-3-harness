@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { readFrameSnapshots } from "@/lib/flux.frames";
@@ -18,6 +19,92 @@ import type {
 type JsonRecord = Record<string, unknown>;
 
 const SESSION_TYPES: FluxSessionType[] = ["solver", "modeler", "bootstrapper"];
+const TMP_INODE_CLEANUP_THRESHOLD = 85;
+const TMP_CLEANUP_STALE_MS = 15 * 60 * 1000;
+const TMP_CLEANUP_PREFIXES = [
+  "flux-flow-e2e-",
+  "flux-modeler-",
+  "flux-orchestrator-",
+  "harnessdebug-",
+  "super-v2-manual-",
+];
+
+async function readCommandStdout(command: string, args: string[]): Promise<string> {
+  return await new Promise<string>((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += String(chunk);
+    });
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve(stdout);
+        return;
+      }
+      reject(new Error(stderr.trim() || `${command} exited with code ${code ?? -1}`));
+    });
+  });
+}
+
+async function readTmpInodeUsePercent(tmpRoot: string): Promise<number | null> {
+  try {
+    const stdout = await readCommandStdout("df", ["-iP", tmpRoot]);
+    const lines = stdout.trim().split("\n");
+    const line = lines[lines.length - 1] ?? "";
+    const columns = line.trim().split(/\s+/);
+    const useToken = columns.find((token) => token.endsWith("%")) ?? "";
+    const parsed = Number.parseInt(useToken.replace("%", ""), 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+async function removeStaleTempEntry(entryPath: string, staleBeforeMs: number): Promise<number> {
+  try {
+    const stat = await fs.stat(entryPath);
+    if (stat.mtimeMs >= staleBeforeMs) return 0;
+    await fs.rm(entryPath, { recursive: true, force: true });
+    return 1;
+  } catch {
+    return 0;
+  }
+}
+
+export async function cleanupLaunchTempArtifacts(
+  tmpRoot = os.tmpdir(),
+  nowMs = Date.now(),
+  minInodeUsePercent = TMP_INODE_CLEANUP_THRESHOLD,
+): Promise<{ removed: number; inodeUsePercent: number | null }> {
+  const inodeUsePercent = await readTmpInodeUsePercent(tmpRoot);
+  if (inodeUsePercent === null || inodeUsePercent < minInodeUsePercent) {
+    return { removed: 0, inodeUsePercent };
+  }
+  const staleBeforeMs = nowMs - TMP_CLEANUP_STALE_MS;
+  let removed = 0;
+  const entries = await fs.readdir(tmpRoot, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const entryPath = path.join(tmpRoot, entry.name);
+    if (TMP_CLEANUP_PREFIXES.some((prefix) => entry.name.startsWith(prefix))) {
+      removed += await removeStaleTempEntry(entryPath, staleBeforeMs);
+      continue;
+    }
+    if (entry.name.startsWith("pytest-of-")) {
+      const childEntries = await fs.readdir(entryPath, { withFileTypes: true }).catch(() => []);
+      for (const child of childEntries) {
+        if (!child.isDirectory()) continue;
+        removed += await removeStaleTempEntry(path.join(entryPath, child.name), staleBeforeMs);
+      }
+    }
+  }
+  return { removed, inodeUsePercent };
+}
 
 async function readText(filePath: string): Promise<string | null> {
   try {
@@ -381,6 +468,7 @@ function uniqueRunId(prefix: string): string {
 }
 
 export async function startFluxRun(input: FluxRunStartRequest): Promise<{ runId: string }> {
+  await cleanupLaunchTempArtifacts();
   const runId = uniqueRunId(input.sessionName);
   spawnDetached("python", [
     HARNESS_FLUX_ENTRYPOINT,

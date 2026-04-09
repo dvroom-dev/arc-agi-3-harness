@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import { readFluxRunDetail } from "@/lib/flux.server";
+import { cleanupLaunchTempArtifacts, readFluxRunDetail } from "@/lib/flux.server";
 import { RUNS_DIR } from "@/lib/paths";
 
 const createdRuns: string[] = [];
@@ -303,12 +304,52 @@ describe("flux UI server helpers", () => {
       "29. ACTION1 (sequence 23)",
       "30. RESET (sequence 23)",
       "31. ACTION4 (sequence 24)",
-      "Current",
     ]);
     expect(detail?.actions.map((action) => `${action.step}. ${action.actionLabel}`)).toEqual([
       "29. ACTION1 (sequence 23)",
       "30. RESET (sequence 23)",
       "31. ACTION4 (sequence 24)",
     ]);
+  });
+
+  test("cleanupLaunchTempArtifacts removes only stale known temp roots under inode pressure", async () => {
+    const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "ui-flux-cleanup-"));
+    try {
+      const staleFlow = path.join(tmpRoot, "flux-flow-e2e-stale");
+      const staleHarness = path.join(tmpRoot, "harnessdebug-frontier");
+      const recentFlow = path.join(tmpRoot, "flux-flow-e2e-recent");
+      const unrelated = path.join(tmpRoot, "keep-me");
+      const pytestRoot = path.join(tmpRoot, "pytest-of-dvroom");
+      const stalePytestChild = path.join(pytestRoot, "pytest-101");
+      const recentPytestChild = path.join(pytestRoot, "pytest-202");
+
+      await fs.mkdir(staleFlow, { recursive: true });
+      await fs.mkdir(staleHarness, { recursive: true });
+      await fs.mkdir(recentFlow, { recursive: true });
+      await fs.mkdir(unrelated, { recursive: true });
+      await fs.mkdir(stalePytestChild, { recursive: true });
+      await fs.mkdir(recentPytestChild, { recursive: true });
+
+      const nowMs = Date.now();
+      const staleMs = nowMs - (16 * 60 * 1000);
+      const recentMs = nowMs - (5 * 60 * 1000);
+      await fs.utimes(staleFlow, staleMs / 1000, staleMs / 1000);
+      await fs.utimes(staleHarness, staleMs / 1000, staleMs / 1000);
+      await fs.utimes(stalePytestChild, staleMs / 1000, staleMs / 1000);
+      await fs.utimes(recentFlow, recentMs / 1000, recentMs / 1000);
+      await fs.utimes(recentPytestChild, recentMs / 1000, recentMs / 1000);
+      await fs.utimes(unrelated, staleMs / 1000, staleMs / 1000);
+
+      const result = await cleanupLaunchTempArtifacts(tmpRoot, nowMs, 0);
+      expect(result.removed).toBe(3);
+      expect(await fs.stat(recentFlow).then(() => true).catch(() => false)).toBe(true);
+      expect(await fs.stat(recentPytestChild).then(() => true).catch(() => false)).toBe(true);
+      expect(await fs.stat(unrelated).then(() => true).catch(() => false)).toBe(true);
+      expect(await fs.stat(staleFlow).then(() => true).catch(() => false)).toBe(false);
+      expect(await fs.stat(staleHarness).then(() => true).catch(() => false)).toBe(false);
+      expect(await fs.stat(stalePytestChild).then(() => true).catch(() => false)).toBe(false);
+    } finally {
+      await fs.rm(tmpRoot, { recursive: true, force: true });
+    }
   });
 });
