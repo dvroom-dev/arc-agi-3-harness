@@ -44,11 +44,20 @@ def _classify_infrastructure_failure(message: str) -> dict | None:
 
 def _read_frontier_level(model_workspace: Path) -> int:
     level_meta = model_workspace / "level_current" / "meta.json"
+    frontier_level = 1
     try:
         payload = json.loads(level_meta.read_text()) if level_meta.exists() else {}
-        return int(payload.get("level", 1) or 1)
+        frontier_level = int(payload.get("level", 1) or 1)
     except Exception:
-        return 1
+        frontier_level = 1
+    visible_levels = [
+        level_num
+        for level_num in _levels_with_sequences(model_workspace)
+        if _frontier_level_ready(model_workspace, level_num)
+    ]
+    if visible_levels:
+        frontier_level = max(frontier_level, max(visible_levels))
+    return frontier_level
 
 
 def _frontier_level_ready(model_workspace: Path, frontier_level: int) -> bool:
