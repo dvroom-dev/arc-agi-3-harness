@@ -208,7 +208,6 @@ def test_check_model_classifies_missing_sequences_as_infrastructure_failure(tmp_
     assert payloads[0]["infrastructure_failure"]["type"] == "missing_sequence_surface"
 
 
-
 def test_check_model_uses_evidence_bundle_state_dir_for_compare_env(tmp_path: Path, monkeypatch) -> None:
     _load_module("common", "scripts/flux/common.py")
     check_model = _load_module("flux_check_model_state_dir_test", "scripts/flux/check_model.py")

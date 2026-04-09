@@ -82,12 +82,30 @@ def _run_compare(
         capture_output=True,
         env=child_env,
     )
-    if proc.returncode != 0:
-        raise RuntimeError(proc.stderr or proc.stdout)
     payload = json.loads(proc.stdout or "{}")
+    if proc.returncode != 0:
+        if isinstance(payload, dict):
+            return proc.returncode, payload
+        raise RuntimeError(proc.stderr or proc.stdout)
     if not isinstance(payload, dict):
         raise RuntimeError("compare_sequences returned non-object JSON")
     return proc.returncode, payload
+
+
+def _is_frontier_discovery_payload(compare_payload: dict, *, frontier_level: int) -> bool:
+    error = compare_payload.get("error") if isinstance(compare_payload.get("error"), dict) else {}
+    if str(error.get("type", "") or "") != "no_eligible_sequences":
+        return False
+    try:
+        payload_level = int(compare_payload.get("level", 0) or 0)
+    except Exception:
+        payload_level = 0
+    if payload_level != frontier_level:
+        return False
+    skipped = compare_payload.get("skipped_sequences") if isinstance(compare_payload.get("skipped_sequences"), list) else []
+    if not skipped:
+        return False
+    return all(isinstance(item, dict) and str(item.get("reason", "") or "") == "wrong_level" for item in skipped)
 
 
 def _levels_with_sequences(model_workspace: Path) -> list[int]:
@@ -382,6 +400,7 @@ def main() -> None:
         )
         return
     compare_payloads: list[dict] = []
+    frontier_discovery_payload: dict | None = None
     for level_num in levels_to_compare:
         try:
             _code, compare_payload = _run_compare(
@@ -402,10 +421,32 @@ def main() -> None:
                 }
             )
             return
+        if not bool(compare_payload.get("ok", True)):
+            if _is_frontier_discovery_payload(compare_payload, frontier_level=visible_frontier_level):
+                frontier_discovery_payload = compare_payload
+                continue
+            write_json_stdout(
+                {
+                    "accepted": False,
+                    "message": f"compare_sequences failed at level {level_num}: {json.dumps(compare_payload, indent=2)}",
+                    "model_output": model_output,
+                    "compare_payload": compare_payload,
+                }
+            )
+            return
         compare_payloads.append(_annotate_compare_payload_frontier(compare_workspace, compare_payload))
 
     compare_for_acceptance = _aggregate_compare_payloads(compare_workspace, compare_payloads, visible_frontier_level=visible_frontier_level)
     accepted = bool(compare_for_acceptance.get("all_match"))
+    if frontier_discovery_payload and accepted:
+        compare_for_acceptance["frontier_discovery"] = True
+        compare_for_acceptance["frontier_level"] = max(
+            int(compare_for_acceptance.get("frontier_level", 0) or 0),
+            int(frontier_discovery_payload.get("level", visible_frontier_level) or visible_frontier_level or 1),
+        )
+        compare_for_acceptance["requested_sequences"] = int(compare_for_acceptance.get("requested_sequences", 0) or 0) + int(frontier_discovery_payload.get("requested_sequences", 0) or 0)
+        compare_for_acceptance["eligible_sequences"] = int(compare_for_acceptance.get("eligible_sequences", 0) or 0) + int(frontier_discovery_payload.get("eligible_sequences", 0) or 0)
+        compare_for_acceptance["skipped_sequences"] = list(compare_for_acceptance.get("skipped_sequences") or []) + list(frontier_discovery_payload.get("skipped_sequences") or [])
     frontier_level = int(compare_for_acceptance.get("frontier_level", visible_frontier_level) or visible_frontier_level or 1)
     summary = str(model_output.get("summary", "")).strip()
     if not summary and accepted:
