@@ -365,6 +365,7 @@ retention:
 
 
 @pytest.mark.skip(reason="stale mocked flux launcher flow superseded by real-filesystem orchestrator e2e coverage in super")
+@pytest.mark.skip(reason="stale mocked flux launcher flow superseded by real-filesystem orchestrator e2e coverage in super")
 def test_launch_flux_mocked_end_to_end_flow_retries_modeler_then_bootstraps_and_preempts_solver(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     prompts_dir = run_dir / "prompts"
