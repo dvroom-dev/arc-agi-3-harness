@@ -76,12 +76,15 @@ def _run_compare(
     meta: dict,
     child_env: dict[str, str],
     frontier_level: int | None = None,
+    sequence_id: str | None = None,
     *,
     include_reset_ended: bool = False,
 ) -> tuple[int, dict]:
     command = ["python3", "model.py", "compare_sequences", "--game-id", str(meta["game_id"])]
     if frontier_level is not None:
         command.extend(["--level", str(frontier_level)])
+    if sequence_id:
+        command.extend(["--sequence", str(sequence_id)])
     if include_reset_ended:
         command.append("--include-reset-ended")
     proc = subprocess.run(
@@ -177,7 +180,8 @@ def _sequence_frontier_level(sequence_payload: dict) -> int:
             completed_before = 0
             completed_after = 0
         if completed_after > completed_before or bool(action.get("level_complete_after", False)):
-            frontier_level = max(frontier_level, max(level_before, level_after) + 1)
+            completed_frontier = level_after if level_after > level_before else (level_before + 1)
+            frontier_level = max(frontier_level, completed_frontier)
     return frontier_level
 
 
@@ -323,14 +327,88 @@ def _aggregate_compare_payloads(model_workspace: Path, compare_payloads: list[di
     }
 
 
+def _failure_message_from_compare_payload(compare_payload: dict) -> str:
+    error = compare_payload.get("error") if isinstance(compare_payload.get("error"), dict) else None
+    if error:
+        error_type = str(error.get("type", "") or "compare_error")
+        error_message = str(error.get("message", "") or error_type)
+        return f"{error_type}: {error_message}"
+    reports = compare_payload.get("reports") if isinstance(compare_payload.get("reports"), list) else []
+    for report in reports:
+        if not isinstance(report, dict):
+            continue
+        if bool(report.get("matched")):
+            continue
+        level = int(report.get("level", compare_payload.get("level", 0)) or 0)
+        sequence_id = str(report.get("sequence_id", "") or "")
+        divergence_step = int(report.get("divergence_step", 0) or 0)
+        divergence_reason = str(report.get("divergence_reason", "") or "mismatch")
+        return (
+            f"compare mismatch at level {level or '?'}"
+            f" sequence {sequence_id or '?'}"
+            f" step {divergence_step or '?'}"
+            f": {divergence_reason}"
+        )
+    level = int(compare_payload.get("level", 0) or 0)
+    diverged = int(compare_payload.get("diverged_sequences", 0) or 0)
+    compared = int(compare_payload.get("compared_sequences", 0) or 0)
+    return f"compare mismatch at level {level or '?'}: {diverged} diverged of {compared} compared"
+
+
 def main() -> None:
     payload = read_json_stdin()
     model_output = payload.get("modelOutput") if isinstance(payload.get("modelOutput"), dict) else {}
+    acceptance_target = payload.get("acceptanceTarget") if isinstance(payload.get("acceptanceTarget"), dict) else {}
     workspace_root = str(payload.get("workspaceRoot", ""))
     meta = load_runtime_meta(workspace_root)
     model_revision_id = str(payload.get("modelRevisionId") or "").strip()
     evidence_bundle_path = str(payload.get("evidenceBundlePath") or "").strip()
-    model_workspace = Path(str(meta["model_workspace_dir"]))
+    target_workspace_dir = str(payload.get("targetWorkspaceDir") or "").strip()
+    if not evidence_bundle_path:
+        write_json_stdout(
+            {
+                "accepted": False,
+                "message": "missing evidenceBundlePath for model acceptance",
+                "model_output": model_output,
+                "infrastructure_failure": {
+                    "type": "missing_evidence_bundle",
+                    "message": "check_model.py now requires evidenceBundlePath",
+                },
+            }
+        )
+        return
+    bundle_path = Path(evidence_bundle_path)
+    manifest_path = bundle_path / "manifest.json"
+    if not manifest_path.exists():
+        write_json_stdout(
+            {
+                "accepted": False,
+                "message": f"missing evidence bundle manifest: {manifest_path}",
+                "model_output": model_output,
+                "infrastructure_failure": {
+                    "type": "missing_evidence_bundle_manifest",
+                    "message": f"missing evidence bundle manifest: {manifest_path}",
+                },
+            }
+        )
+        return
+    bundle_manifest = json.loads(manifest_path.read_text())
+    bundle_completeness = bundle_manifest.get("bundle_completeness") if isinstance(bundle_manifest.get("bundle_completeness"), dict) else {}
+    if not bool(bundle_completeness.get("has_compare_surface")):
+        write_json_stdout(
+            {
+                "accepted": False,
+                "message": "evidence bundle has incomplete compare surface",
+                "model_output": model_output,
+                "infrastructure_failure": {
+                    "type": "incomplete_artifacts",
+                    "message": "evidence bundle has incomplete compare surface",
+                    "bundle_completeness": bundle_completeness,
+                },
+            }
+        )
+        return
+    model_workspace = Path(target_workspace_dir) if target_workspace_dir else Path(str(meta["model_workspace_dir"]))
     if model_revision_id:
         revision_workspace = Path(workspace_root) / "flux" / "model" / "revisions" / model_revision_id / "workspace" / model_workspace.name
         if revision_workspace.exists():
@@ -351,29 +429,132 @@ def main() -> None:
     if compare_workspace.exists():
         shutil.rmtree(compare_workspace, ignore_errors=True)
     shutil.copytree(model_workspace, compare_workspace)
-    bundle_path = Path(evidence_bundle_path) if evidence_bundle_path else None
-    bundle_workspace = bundle_path / "workspace" / model_workspace.name if bundle_path else None
-    if bundle_workspace and bundle_workspace.exists():
-        for child in bundle_workspace.iterdir():
-            destination = compare_workspace / child.name
-            if destination.exists() or destination.is_symlink():
-                if destination.is_dir() and not destination.is_symlink():
-                    shutil.rmtree(destination, ignore_errors=True)
-                else:
-                    destination.unlink(missing_ok=True)
-            if child.is_dir():
-                shutil.copytree(child, destination)
+    bundle_workspace = bundle_path / "workspace" / model_workspace.name
+    if not bundle_workspace.exists():
+        write_json_stdout(
+            {
+                "accepted": False,
+                "message": f"evidence bundle workspace missing: {bundle_workspace}",
+                "model_output": model_output,
+                "infrastructure_failure": {
+                    "type": "missing_evidence_bundle_workspace",
+                    "message": f"evidence bundle workspace missing: {bundle_workspace}",
+                },
+            }
+        )
+        return
+    for child in bundle_workspace.iterdir():
+        destination = compare_workspace / child.name
+        if destination.exists() or destination.is_symlink():
+            if destination.is_dir() and not destination.is_symlink():
+                shutil.rmtree(destination, ignore_errors=True)
             else:
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(child, destination)
+                destination.unlink(missing_ok=True)
+        if child.is_dir():
+            shutil.copytree(child, destination)
+        else:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(child, destination)
     child_env = dict(os.environ)
     child_env["ARC_CONFIG_DIR"] = str(meta["run_config_dir"])
-    bundle_state_dir = bundle_path / "arc_state" if bundle_path else None
-    child_env["ARC_STATE_DIR"] = str(bundle_state_dir or (Path(workspace_root) / "supervisor" / "arc"))
+    bundle_state_dir = bundle_path / "arc_state"
+    child_env["ARC_STATE_DIR"] = str(bundle_state_dir)
     child_env["ARC_MODEL_DISABLE_CANONICAL_ARTIFACTS"] = "1"
+    child_env["ARC_MODEL_COMPARE_NO_PERSIST"] = "1"
+    child_env["ARC_MODEL_PERSIST_STATUS"] = "0"
     child_env["PATH"] = f"{meta['run_bin_dir']}:{child_env.get('PATH', '')}"
     visible_frontier_level = _read_frontier_level(compare_workspace)
     levels_to_compare = _levels_with_sequences(compare_workspace)
+
+    target_level = None
+    target_max_level = None
+    target_sequence_id = None
+    try:
+        target_level = int(acceptance_target.get("level", 0) or 0) or None
+    except Exception:
+        target_level = None
+    try:
+        target_max_level = int(acceptance_target.get("maxLevel", 0) or 0) or None
+    except Exception:
+        target_max_level = None
+    target_sequence_id = str(acceptance_target.get("sequenceId", "") or "").strip() or None
+
+    if target_level is not None and target_sequence_id:
+        try:
+            _code, target_compare_payload = _run_compare(
+                compare_workspace,
+                meta,
+                child_env,
+                frontier_level=target_level,
+                sequence_id=target_sequence_id,
+                include_reset_ended=True,
+            )
+        except Exception as exc:
+            infra = _classify_infrastructure_failure(str(exc))
+            write_json_stdout(
+                {
+                    "accepted": False,
+                    "message": f"compare_sequences failed at level {target_level}: {exc}",
+                    "model_output": model_output,
+                    "infrastructure_failure": infra,
+                }
+            )
+            return
+        if not bool(target_compare_payload.get("ok", True)):
+            write_json_stdout(
+                {
+                    "accepted": False,
+                    "message": f"compare_sequences failed at level {target_level}: {json.dumps(target_compare_payload, indent=2)}",
+                    "model_output": model_output,
+                    "compare_payload": target_compare_payload,
+                }
+            )
+            return
+        target_reports = [report for report in target_compare_payload.get("reports", []) if isinstance(report, dict)]
+        matching_report = next(
+            (
+                report
+                for report in target_reports
+                if str(report.get("sequence_id", "") or "").strip() == target_sequence_id
+            ),
+            None,
+        )
+        if matching_report is None:
+            write_json_stdout(
+                {
+                    "accepted": False,
+                    "message": f"targeted compare did not include sequence {target_sequence_id} at level {target_level}",
+                    "model_output": model_output,
+                    "compare_payload": target_compare_payload,
+                }
+            )
+            return
+        if not bool(matching_report.get("matched")):
+            targeted_payload = _annotate_compare_payload_frontier(
+                compare_workspace,
+                {
+                    **target_compare_payload,
+                    "reports": [matching_report],
+                    "requested_sequences": 1,
+                    "eligible_sequences": 1,
+                    "compared_sequences": 1,
+                    "diverged_sequences": 0 if bool(matching_report.get("matched")) else 1,
+                    "all_match": bool(matching_report.get("matched")),
+                },
+            )
+            write_json_stdout(
+                {
+                    "accepted": False,
+                    "message": _failure_message_from_compare_payload(targeted_payload),
+                    "model_output": model_output,
+                    "compare_payload": targeted_payload,
+                }
+            )
+            return
+
+    if target_max_level is not None:
+        levels_to_compare = [level_num for level_num in levels_to_compare if level_num <= target_max_level]
+
     if not levels_to_compare:
         try:
             _code, compare_payload = _run_compare(
@@ -397,7 +578,9 @@ def main() -> None:
         compare_for_acceptance = _annotate_compare_payload_frontier(compare_workspace, compare_payload)
         accepted = bool(compare_for_acceptance.get("all_match"))
         summary = str(model_output.get("summary", "")).strip()
-        if not summary and accepted:
+        if not accepted:
+            summary = _failure_message_from_compare_payload(compare_for_acceptance)
+        elif not summary:
             summary = f"compare_sequences passed through frontier level {int(compare_for_acceptance.get('frontier_level', visible_frontier_level) or visible_frontier_level or 1)}"
         write_json_stdout(
             {
@@ -458,7 +641,9 @@ def main() -> None:
         compare_for_acceptance["skipped_sequences"] = list(compare_for_acceptance.get("skipped_sequences") or []) + list(frontier_discovery_payload.get("skipped_sequences") or [])
     frontier_level = int(compare_for_acceptance.get("frontier_level", visible_frontier_level) or visible_frontier_level or 1)
     summary = str(model_output.get("summary", "")).strip()
-    if not summary and accepted:
+    if not accepted:
+        summary = _failure_message_from_compare_payload(compare_for_acceptance)
+    elif not summary:
         summary = f"compare_sequences passed through frontier level {frontier_level}"
     write_json_stdout(
         {

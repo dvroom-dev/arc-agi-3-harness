@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from attempt_snapshot import materialize_attempt_snapshot
 from common import (
     load_runtime_meta,
     read_json_stdin,
     summarize_instance_state,
-    sync_solver_artifacts_to_model_workspace,
+    sync_evidence_bundle_to_model_workspace,
     validate_replay_shell_cmd,
     write_json_stdout,
 )
+from evidence_bundle import materialize_evidence_bundle_from_snapshot
 
 
 def _run_shell(cmd: list[str], cwd: Path, env: dict[str, str]) -> dict:
@@ -102,20 +109,36 @@ def main() -> None:
             error = {"stepIndex": index, "step": step, "result": result}
             break
     state_dir = Path(str(instance.get("metadata", {}).get("state_dir", "")))
-    synced = (
-        sync_solver_artifacts_to_model_workspace(meta, working_directory, state_dir=state_dir)
-        if working_directory.exists()
-        else []
-    )
+    bundle = None
+    synced: list[str] = []
+    if working_directory.exists() and state_dir.exists():
+        snapshot = materialize_attempt_snapshot(
+            workspace_root,
+            attempt_id=str(payload.get("attemptId") or instance.get("instance_id") or ""),
+            instance_id=str(instance.get("instance_id") or payload.get("instanceId") or ""),
+            solver_dir=working_directory,
+            state_dir=state_dir,
+            workspace_dir_name=working_directory.name,
+            state_summary=summarize_instance_state(state_dir),
+        )
+        bundle = materialize_evidence_bundle_from_snapshot(
+            workspace_root,
+            snapshot_manifest=snapshot,
+        )
+        synced = sync_evidence_bundle_to_model_workspace(meta, Path(str(bundle["bundle_path"])))
     evidence = [summarize_instance_state(state_dir)] if state_dir.exists() else []
     if evidence:
         evidence[0]["synced_artifacts"] = synced
+        if bundle:
+            evidence[0]["bundle_completeness"] = bundle["bundle_completeness"]
     write_json_stdout(
         {
             "replay_ok": replay_ok,
             "error": error,
             "tool_results": results,
             "evidence": evidence,
+            "evidence_bundle_id": bundle["bundle_id"] if bundle else None,
+            "evidence_bundle_path": bundle["bundle_path"] if bundle else None,
         }
     )
 

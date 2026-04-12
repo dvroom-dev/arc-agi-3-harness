@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -14,14 +15,17 @@ from .utils import (
     canonical_game_artifacts_dir,
     clear_analysis_level_pin,
     diff_payload,
-    load_frontier_level_from_arc_state,
     load_analysis_level_pin,
     read_hex_grid,
     resolve_level_dir,
     sanitize_visible_json_payload,
-    sync_workspace_level_view,
     update_analysis_level_pin,
 )
+
+
+def _compare_persist_enabled() -> bool:
+    raw = str(os.getenv("ARC_MODEL_COMPARE_NO_PERSIST", "") or "").strip().lower()
+    return raw not in {"1", "true", "yes", "on"}
 
 
 def _sequence_has_level_regression(payload: dict) -> bool:
@@ -144,6 +148,9 @@ def compare_one_sequence(session, *, level: int, level_dir: Path, payload: dict)
         action_data = action.get("action_data", {}) if isinstance(action.get("action_data"), dict) else {}
         compare_env.level_complete = False
         compare_env.last_step_level_complete = False
+        compare_env.game_over = False
+        compare_env.last_step_game_over = False
+        compare_env.last_step_frames = []
         compare_env.hooks.apply_action(
             compare_env,
             action_from_name(action_name),
@@ -380,7 +387,8 @@ def compare_sequences(
         if not bool(report.get("matched", False)):
             diverged += 1
 
-    session._persist_to_disk("compare_sequences")
+    if _compare_persist_enabled():
+        session._persist_to_disk("compare_sequences")
     payload = {
         "ok": True,
         "action": "compare_sequences",
@@ -405,17 +413,17 @@ def compare_sequences(
             "action": "compare_sequences",
             "error": {"type": "invalid_compare_payload", "message": "sanitized compare payload was not a dict"},
         }
-    persist_current_compare(session, payload)
-    if bool(payload["all_match"]) and isinstance(pin, dict) and int(pin.get("level", -1)) == int(target_level):
+    if sequence_id is None and _compare_persist_enabled():
+        persist_current_compare(session, payload)
+    if (
+        sequence_id is None
+        and _compare_persist_enabled()
+        and bool(payload["all_match"])
+        and isinstance(pin, dict)
+        and int(pin.get("level", -1)) == int(target_level)
+    ):
         update_analysis_level_pin(
             session.game_dir,
             {"last_compare_all_match": True, "last_compare_level": int(target_level)},
-        )
-    frontier_level = load_frontier_level_from_arc_state()
-    if frontier_level is not None:
-        sync_workspace_level_view(
-            session.game_dir,
-            game_id=str(session.game_id),
-            frontier_level=int(frontier_level),
         )
     return payload, 0

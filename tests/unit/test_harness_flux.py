@@ -155,8 +155,10 @@ def test_launch_flux_mocked_end_to_end_flow(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     prompts_dir = run_dir / "prompts"
     scripts_dir = run_dir / "scripts"
+    model_workspace = run_dir / "model_workspace"
     prompts_dir.mkdir(parents=True, exist_ok=True)
     scripts_dir.mkdir(parents=True, exist_ok=True)
+    model_workspace.mkdir(parents=True, exist_ok=True)
 
     (prompts_dir / "solver.md").write_text("SOLVER_PROMPT", encoding="utf-8")
     (prompts_dir / "modeler.md").write_text("MODELER_PROMPT", encoding="utf-8")
@@ -242,10 +244,11 @@ print(json.dumps({
     "ok": True,
     "action": "compare_sequences",
     "level": 2,
-    "all_match": False,
+    "all_match": True,
     "compared_sequences": 1,
-    "diverged_sequences": 1,
-    "reports": [{"sequence_id": "seq_0001", "matched": False, "divergence_reason": "intermediate_frame_mismatch", "report_file": "level_2/report.md"}]
+    "eligible_sequences": 1,
+    "diverged_sequences": 0,
+    "reports": [{"sequence_id": "seq_0001", "matched": True, "report_file": "level_2/report.md"}]
   },
   "tool_results": []
 }))
@@ -289,7 +292,7 @@ print(json.dumps({
     "all_match": True,
     "compared_sequences": 1,
     "diverged_sequences": 0,
-    "reports": [{"sequence_id": "seq_0001", "matched": True}]
+    "reports": [{"level": 1, "sequence_id": "seq_0001", "matched": True, "frontier_level_after_sequence": 2, "sequence_completed_level": True}]
   },
   "model_output": model_output
 }))
@@ -354,6 +357,7 @@ solver:
     builtin: [shell]
 modeler:
   prompt_file: prompts/modeler.md
+  working_directory: model_workspace
   session_scope: run
   resume_policy: always
   triggers:

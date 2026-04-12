@@ -194,3 +194,43 @@ def test_sync_level_sequences_fails_without_canonical_level_start(tmp_path: Path
 
     with pytest.raises(RuntimeError, match="missing canonical initial state for level 1"):
         sync_level_sequences(session=session, game_dir=tmp_path)
+
+
+def test_sync_level_sequences_starts_a_new_sequence_after_level_completion(tmp_path: Path) -> None:
+    _write_bootstrap_initial_state(tmp_path, level=1, rows=["000", "000"])
+    session = _session(
+        [
+            _record(
+                action_index=1,
+                action_name="ACTION1",
+                level_before=1,
+                level_after=2,
+                levels_completed_before=0,
+                levels_completed_after=1,
+                before_rows=["000", "000"],
+                after_rows=["111", "111"],
+            ),
+            _record(
+                action_index=2,
+                action_name="ACTION2",
+                level_before=2,
+                level_after=2,
+                levels_completed_before=1,
+                levels_completed_after=1,
+                before_rows=["111", "111"],
+                after_rows=["222", "222"],
+            ),
+        ]
+    )
+
+    sync_level_sequences(session=session, game_dir=tmp_path)
+
+    level1_seq = json.loads((tmp_path / "level_1" / "sequences" / "seq_0001.json").read_text(encoding="utf-8"))
+    level2_seq = json.loads((tmp_path / "level_2" / "sequences" / "seq_0001.json").read_text(encoding="utf-8"))
+
+    assert level1_seq["action_count"] == 1
+    assert level1_seq["end_reason"] == "level_change"
+    assert level1_seq["actions"][0]["action_index"] == 1
+
+    assert level2_seq["action_count"] == 1
+    assert level2_seq["actions"][0]["action_index"] == 2

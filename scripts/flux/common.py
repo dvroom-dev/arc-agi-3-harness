@@ -325,134 +325,10 @@ def sync_solver_artifacts_to_model_workspace(meta: dict, solver_dir: Path, state
                         if child.name.startswith("level_"):
                             _replace_copy(child, model_workspace / child.name)
 
-        _ensure_sequence_surface(meta, model_workspace)
     return synced
 
 
-def _ensure_sequence_surface(meta: dict, model_workspace: Path) -> None:
-    level_current = model_workspace / "level_current"
-    if not level_current.exists():
-        return
-    meta_path = level_current / "meta.json"
-    try:
-        level_payload = json.loads(meta_path.read_text()) if meta_path.exists() else {}
-        level_num = int(level_payload.get("level", 1) or 1)
-    except Exception:
-        level_num = 1
-    level_dir = model_workspace / f"level_{level_num}"
-    if not level_dir.exists():
-        copytree_stable(level_current, level_dir)
-    elif not any(level_dir.iterdir()):
-        for child in level_current.iterdir():
-            destination = level_dir / child.name
-            if destination.exists() or destination.is_symlink():
-                if destination.is_dir() and not destination.is_symlink():
-                    shutil.rmtree(destination, ignore_errors=True)
-                else:
-                    destination.unlink(missing_ok=True)
-            if child.is_dir():
-                copytree_stable(child, destination)
-            else:
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(child, destination)
-    turn_meta_candidates: list[tuple[int, Path, dict]] = []
-    for candidate in sorted(level_dir.glob("turn_*")):
-        turn_meta_path = candidate / "meta.json"
-        if not turn_meta_path.exists():
-            continue
-        try:
-            turn_meta = json.loads(turn_meta_path.read_text())
-        except Exception:
-            continue
-        try:
-            turn_num = int(str(candidate.name).split("_")[-1])
-        except Exception:
-            turn_num = 0
-        turn_meta_candidates.append((turn_num, candidate, turn_meta))
-    if not turn_meta_candidates:
-        return
-    actionable = [
-        item
-        for item in turn_meta_candidates
-        if int(item[2].get("steps_executed", 0) or 0) > 0
-        or str(item[2].get("action_label", "") or "").strip().lower() != "status"
-    ]
-    if not actionable:
-        return
-    _turn_num, turn_dir, turn_meta = actionable[-1]
-    turn_rel = turn_dir.name
-    sequence_dir = level_dir / "sequences"
-    sequence_dir.mkdir(parents=True, exist_ok=True)
-    sequence_path = sequence_dir / "seq_0001.json"
-    if sequence_path.exists():
-        return
-    game_id = str(turn_meta.get("game_id", meta.get("game_id", "")) or "")
-    action_name = str(turn_meta.get("action_label", "") or "").upper()
-    if action_name.startswith("EXEC("):
-        action_name = "ACTION1"
-    levels_completed_before = int(turn_meta.get("levels_completed_before", 0) or 0)
-    levels_completed_after = int(turn_meta.get("levels_completed_after", 0) or 0)
-    level_complete_after = bool(turn_meta.get("level_complete_after", False))
-    game_over_after = bool(turn_meta.get("game_over_after", False))
-    end_reason = "open"
-    if game_over_after:
-        end_reason = "game_over"
-    elif levels_completed_after > levels_completed_before or level_complete_after:
-        end_reason = "level_change"
-    sequence_payload = {
-        "schema_version": "arc_repl.level_sequence.v1",
-        "game_id": game_id,
-        "level": int(level_num),
-        "sequence_id": "seq_0001",
-        "sequence_number": 1,
-        "start_action_index": 1,
-        "end_action_index": 1,
-        "start_recorded_at_utc": "",
-        "end_recorded_at_utc": "",
-        "end_reason": end_reason,
-        "action_count": 1,
-        "actions": [
-            {
-                "local_step": 1,
-                "action_index": 1,
-                "tool_turn": int(turn_meta.get("tool_turn", 1) or 1),
-                "step_in_call": 1,
-                "call_action": "exec",
-                "action_name": action_name,
-                "action_data": {},
-                "recorded_at_utc": "",
-                "state_before": str(turn_meta.get("state_before_action", "") or ""),
-                "state_after": str(turn_meta.get("state_after_action", "") or ""),
-                "level_before": int(turn_meta.get("level_before", level_num) or level_num),
-                "level_after": int(turn_meta.get("level_after", level_num) or level_num),
-                "levels_completed_before": levels_completed_before,
-                "levels_completed_after": levels_completed_after,
-                "level_complete_before": bool(turn_meta.get("level_complete_before", False)),
-                "level_complete_after": level_complete_after,
-                "game_over_before": bool(turn_meta.get("game_over_before", False)),
-                "game_over_after": game_over_after,
-                "files": {
-                    "before_state_hex": f"{turn_rel}/before_state.hex",
-                    "after_state_hex": f"{turn_rel}/after_state.hex",
-                    "meta_json": f"{turn_rel}/meta.json",
-                },
-            }
-        ],
-    }
-    sequence_path.write_text(json.dumps(sequence_payload, indent=2) + "\n", encoding="utf-8")
-
-def sync_latest_attempt_to_model_workspace(workspace_root: str, meta: dict) -> list[str]:
-    from scripts.flux.model_workspace_sync import sync_latest_attempt_to_model_workspace_impl
-
-    return sync_latest_attempt_to_model_workspace_impl(
-        workspace_root,
-        meta,
-        sync_solver_artifacts_to_model_workspace=sync_solver_artifacts_to_model_workspace,
-        safe_instance_name=safe_instance_name,
-    )
-
-
-def sync_evidence_bundle_to_model_workspace(meta: dict, bundle_path: Path) -> list[str]:
+def sync_evidence_bundle_to_model_workspace(meta: dict, bundle_path: Path, *, target_workspace: Path | None = None) -> list[str]:
     manifest_path = bundle_path / "manifest.json"
     if not manifest_path.exists():
         raise RuntimeError(f"missing evidence bundle manifest: {manifest_path}")
@@ -463,17 +339,73 @@ def sync_evidence_bundle_to_model_workspace(meta: dict, bundle_path: Path) -> li
     workspace_dir = Path(str(manifest.get("workspace_dir") or "")).resolve()
     if not workspace_dir.exists():
         raise RuntimeError(f"evidence bundle workspace_dir is missing: {workspace_dir}")
-    state_dir_value = str(manifest.get("arc_state_dir") or "").strip()
-    state_dir = Path(state_dir_value).resolve() if state_dir_value else None
-    if state_dir is not None and not state_dir.exists():
-        state_dir = None
-    return sync_solver_artifacts_to_model_workspace(meta, workspace_dir, state_dir=state_dir)
+    model_workspace = Path(str(target_workspace or meta["model_workspace_dir"]))
+    synced: list[str] = []
+    bundle_completeness = manifest.get("bundle_completeness") if isinstance(manifest.get("bundle_completeness"), dict) else {}
 
-def latest_flux_instance_state_dir(workspace_root: str, meta: dict) -> Path | None:
-    from scripts.flux.model_workspace_sync import latest_flux_instance_state_dir_impl
+    def _cleanup_path(target: Path) -> None:
+        if target.exists() or target.is_symlink():
+            if target.is_dir() and not target.is_symlink():
+                shutil.rmtree(target, ignore_errors=True)
+            else:
+                target.unlink(missing_ok=True)
 
-    return latest_flux_instance_state_dir_impl(
-        workspace_root,
-        meta,
-        safe_instance_name=safe_instance_name,
-    )
+    def _replace_copy(child: Path, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temp_target = destination.parent / f".{destination.name}.flux-sync-{uuid.uuid4().hex}"
+        backup_target = destination.parent / f".{destination.name}.flux-prev-{uuid.uuid4().hex}"
+        _cleanup_path(temp_target)
+        _cleanup_path(backup_target)
+        try:
+            if child.is_dir():
+                copytree_stable(child, temp_target)
+            else:
+                shutil.copy2(child, temp_target)
+            if destination.exists() or destination.is_symlink():
+                destination.replace(backup_target)
+            temp_target.replace(destination)
+            synced.append(str(destination))
+        finally:
+            _cleanup_path(temp_target)
+            _cleanup_path(backup_target)
+
+    with workspace_sync_lock(model_workspace):
+        model_workspace.mkdir(parents=True, exist_ok=True)
+        for child in sorted(workspace_dir.iterdir()):
+            name = child.name
+            should_sync = (
+                name == "level_current"
+                or name == "analysis_level"
+                or name == "solver_handoff"
+                or name.startswith("level_")
+                or name in {
+                    "current_compare.json",
+                    "current_compare.md",
+                    "component_coverage.json",
+                    "component_coverage.md",
+                    "analysis_state.json",
+                    ".analysis_level_pin.json",
+                    "model_status.json",
+                }
+            )
+            if not should_sync:
+                continue
+            destination = model_workspace / name
+            _replace_copy(child, destination)
+        solver_handoff_path = model_workspace / "solver_handoff" / "untrusted_theories.md"
+        frontier_level = int(bundle_completeness.get("frontier_level", 0) or 0)
+        theory_level = max(0, frontier_level - 1)
+        if theory_level > 0 and solver_handoff_path.exists():
+            theory_json_path = model_workspace / f"untrusted_theories_level_{theory_level}.json"
+            theory_payload = {
+                "schema_version": "flux.solver_untrusted_theory_handoff.v1",
+                "level": theory_level,
+                "frontier_level": frontier_level,
+                "attempt_id": manifest.get("attempt_id"),
+                "instance_id": manifest.get("instance_id"),
+                "evidence_bundle_id": manifest.get("bundle_id"),
+                "solver_handoff_markdown_path": "solver_handoff/untrusted_theories.md",
+            }
+            theory_json_path.write_text(json.dumps(theory_payload, indent=2) + "\n", encoding="utf-8")
+            synced.append(str(theory_json_path))
+    return synced

@@ -210,13 +210,23 @@ def main() -> None:
         env,
         ["compare_sequences", "--game-id", str(meta["game_id"]), "--level", str(compare_level), "--include-reset-ended"],
     )
+    compare_payload = compare_result.get("parsed") if isinstance(compare_result.get("parsed"), dict) else {}
+    compare_ok = bool(compare_payload.get("ok", False)) if isinstance(compare_payload, dict) else False
+    if not compare_ok and rehearsal_ok:
+        rehearsal_ok = False
+        if error is None:
+            error = {
+                "type": "compare_failed",
+                "message": "compare_sequences did not return ok",
+                "compare_payload": compare_payload,
+            }
     write_json_stdout(
         {
             "rehearsal_ok": rehearsal_ok,
             "error": error,
             "status_before": status_before.get("parsed"),
             "status_after": status_payload,
-            "compare_payload": compare_result.get("parsed"),
+            "compare_payload": compare_payload,
             "tool_results": tool_results,
             "model_workspace": str(model_workspace),
         }

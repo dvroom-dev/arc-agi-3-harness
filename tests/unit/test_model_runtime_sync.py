@@ -250,7 +250,8 @@ def test_sync_workspace_level_view_uses_pinned_level(tmp_path: Path) -> None:
     assert meta["level"] == 1
     assert meta["analysis_level_pinned"] is True
     assert (game_dir / "level_1").exists()
-    assert not (game_dir / "level_2").exists()
+    assert (game_dir / "level_2").exists()
+    assert (game_dir / "level_2" / "initial_state.hex").read_text().splitlines() == ["1111", "1111"]
 
 
 def test_sync_workspace_level_view_redacts_cross_level_turn_artifacts_while_pinned(tmp_path: Path) -> None:

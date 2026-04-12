@@ -398,19 +398,15 @@ def sync_workspace_level_view(
         _remove_path(level_current)
         temp.rename(level_current)
 
-        for child in game_dir.iterdir():
-            if child.name == "level_current":
-                continue
-            if child.name.startswith("level_"):
-                _remove_path(child)
-
         compat_level = game_dir / f"level_{int(visible_level)}"
-        _remove_path(compat_level)
-        try:
-            compat_level.symlink_to(level_current.name, target_is_directory=True)
-        except Exception:
+        if compat_level.is_symlink():
             _remove_path(compat_level)
-            copytree_stable(level_current, compat_level)
+        if not compat_level.exists():
+            try:
+                compat_level.symlink_to(level_current.name, target_is_directory=True)
+            except Exception:
+                _remove_path(compat_level)
+                copytree_stable(level_current, compat_level)
     rewrite_model_status_payload_for_visible_level(
         path=model_status_path(game_dir),
         frontier_level=int(frontier_level),

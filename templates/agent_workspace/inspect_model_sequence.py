@@ -217,6 +217,12 @@ def main() -> int:
         "level": int(level),
         "sequence_id": sequence_id,
         "target_step": int(target_step),
+        "replay_mode": "cumulative_sequence_replay",
+        "transient_step_state_reset": True,
+        "compare_frame_count_semantics": {
+            "completion_boundary_excludes_terminal_post_level_change_frame": True,
+            "game_frame_files_present_does_not_imply_compare_counts_all_of_them": True,
+        },
         "tracked_values": [format(value, "X") for value in tracked_values],
         "mismatch_report": {
             "divergence_reason": mismatch.get("divergence_reason") if isinstance(mismatch, dict) else None,

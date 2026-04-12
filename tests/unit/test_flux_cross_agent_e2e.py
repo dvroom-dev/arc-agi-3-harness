@@ -18,6 +18,11 @@ def test_sync_model_workspace_script_prefers_canonical_solver_sequences(tmp_path
     agent_surface.mkdir(parents=True, exist_ok=True)
     canonical_surface.mkdir(parents=True, exist_ok=True)
     model_workspace.mkdir(parents=True, exist_ok=True)
+    bundle_root = workspace_root / "flux" / "evidence_bundles" / "bundle_canonical"
+    bundle_surface = bundle_root / "workspace" / solver_name / "level_1" / "sequences"
+    bundle_state = bundle_root / "arc_state"
+    bundle_surface.mkdir(parents=True, exist_ok=True)
+    bundle_state.mkdir(parents=True, exist_ok=True)
     (workspace_root / "flux").mkdir(parents=True, exist_ok=True)
     (workspace_root / "flux" / "state.json").write_text(
         json.dumps({"active": {"solver": {"instanceId": "attempt_live", "status": "running"}}}, indent=2) + "\n",
@@ -109,6 +114,7 @@ def test_sync_model_workspace_script_prefers_canonical_solver_sequences(tmp_path
         ],
     }
     (canonical_surface / "seq_0001.json").write_text(json.dumps(canonical_seq, indent=2) + "\n", encoding="utf-8")
+    (bundle_surface / "seq_0001.json").write_text(json.dumps(canonical_seq, indent=2) + "\n", encoding="utf-8")
     (agent_surface / "seq_0001.json").write_text(json.dumps(stale_agent_seq, indent=2) + "\n", encoding="utf-8")
 
     for rel in [
@@ -119,14 +125,36 @@ def test_sync_model_workspace_script_prefers_canonical_solver_sequences(tmp_path
         path = canonical_surface / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("{}\n", encoding="utf-8")
+        bundle_path = bundle_surface / rel
+        bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        bundle_path.write_text("{}\n", encoding="utf-8")
     stale_meta = agent_surface / "seq_0001" / "actions" / "step_0001_action_000045_action1" / "meta.json"
     stale_meta.parent.mkdir(parents=True, exist_ok=True)
     stale_meta.write_text("{}\n", encoding="utf-8")
+    (bundle_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "workspace_dir": str(bundle_root / "workspace" / solver_name),
+                "arc_state_dir": str(bundle_state),
+                "bundle_completeness": {
+                    "frontier_level": 1,
+                    "has_level_sequences": True,
+                    "has_frontier_initial_state": True,
+                    "has_frontier_sequences": True,
+                    "has_compare_surface": True,
+                    "status": "ready_for_compare",
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
     script_path = Path(__file__).resolve().parents[2] / "scripts" / "flux" / "sync_model_workspace.py"
     proc = subprocess.run(
         [str(Path(__file__).resolve().parents[2] / ".venv" / "bin" / "python"), str(script_path)],
-        input=json.dumps({"workspaceRoot": str(workspace_root), "reason": "solver_new_evidence"}),
+        input=json.dumps({"workspaceRoot": str(workspace_root), "reason": "solver_new_evidence", "evidenceBundlePath": str(bundle_root)}),
         text=True,
         capture_output=True,
         env={**os.environ, "ARC_FLUX_META_PATH": str(runtime_meta_path)},

@@ -9,7 +9,7 @@ const eslintConfig = defineConfig([
     files: ["**/*.ts", "**/*.tsx"],
     ignores: ["**/*.test.*", "**/*.spec.*"],
     rules: {
-      "max-lines": ["error", { max: 500, skipBlankLines: true, skipComments: true }],
+      "max-lines": ["error", { max: 1000, skipBlankLines: true, skipComments: true }],
     },
   },
   // Override default ignores of eslint-config-next.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import sys
 import traceback
 from contextlib import redirect_stderr, redirect_stdout
@@ -30,10 +31,16 @@ from .utils import (
     to_jsonable,
 )
 from .sequence_compare import compare_sequences as compare_sequences_impl
+from .transition_diff import compare_transitions as compare_transitions_impl, diff_transition as diff_transition_impl
 from .io_utils import write_json_atomic
 
 MODEL_SESSION_SCHEMA_VERSION = 1
 MODEL_STATUS_SCHEMA_VERSION = 1
+
+
+def _persist_enabled() -> bool:
+    raw = str(os.getenv("ARC_MODEL_PERSIST_STATUS", "") or "").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
 
 
 class ModelEnv:
@@ -220,6 +227,8 @@ class ModelSession:
         return summary
 
     def persist_model_status(self, payload: dict[str, Any], *, action_name: str, exit_code: int) -> None:
+        if not _persist_enabled():
+            return
         summary = self._model_status_summary(payload, action_name=action_name, exit_code=exit_code)
         write_json_atomic(self.model_status_path, summary)
 
@@ -258,6 +267,8 @@ class ModelSession:
         return out
 
     def _persist_to_disk(self, action_name: str) -> None:
+        if not _persist_enabled():
+            return
         payload = {
             "schema_version": MODEL_SESSION_SCHEMA_VERSION,
             "game_id": str(self.env.game_id),
@@ -460,6 +471,48 @@ class ModelSession:
             include_reset_ended=include_reset_ended,
             include_level_regressions=include_level_regressions,
         )
+
+    def do_diff_transition(
+        self,
+        *,
+        level: int,
+        sequence_id: str,
+        local_step: int,
+    ) -> tuple[dict, int]:
+        try:
+            payload = diff_transition_impl(
+                game_dir=self.game_dir,
+                level=int(level),
+                sequence_id=str(sequence_id),
+                local_step=int(local_step),
+            )
+            return payload, 0
+        except Exception as exc:
+            return self._error("diff_transition", "transition_diff_error", str(exc)), 1
+
+    def do_compare_transitions(
+        self,
+        *,
+        a_level: int,
+        a_sequence_id: str,
+        a_local_step: int,
+        b_level: int,
+        b_sequence_id: str,
+        b_local_step: int,
+    ) -> tuple[dict, int]:
+        try:
+            payload = compare_transitions_impl(
+                game_dir=self.game_dir,
+                a_level=int(a_level),
+                a_sequence_id=str(a_sequence_id),
+                a_local_step=int(a_local_step),
+                b_level=int(b_level),
+                b_sequence_id=str(b_sequence_id),
+                b_local_step=int(b_local_step),
+            )
+            return payload, 0
+        except Exception as exc:
+            return self._error("compare_transitions", "transition_diff_error", str(exc)), 1
 
     def do_shutdown(self) -> dict:
         if self.state_path.exists():

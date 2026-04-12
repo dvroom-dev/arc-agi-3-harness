@@ -16,52 +16,59 @@ def _load_module(name: str, relative_path: str):
     return module
 
 
+def _ready_evidence_bundle(tmp_path: Path, workspace_name: str) -> Path:
+    bundle_root = tmp_path / "flux" / "evidence_bundles" / "bundle_x"
+    bundle_workspace = bundle_root / "workspace" / workspace_name
+    bundle_state_dir = bundle_root / "arc_state"
+    bundle_workspace.mkdir(parents=True, exist_ok=True)
+    bundle_state_dir.mkdir(parents=True, exist_ok=True)
+    (bundle_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "workspace_dir": str(bundle_workspace),
+                "arc_state_dir": str(bundle_state_dir),
+                "bundle_completeness": {
+                    "frontier_level": 1,
+                    "has_level_sequences": True,
+                    "has_frontier_initial_state": True,
+                    "has_frontier_sequences": True,
+                    "has_compare_surface": True,
+                    "status": "ready_for_compare",
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return bundle_root
+
+
 def test_check_model_annotates_frontier_level_from_matched_sequences(tmp_path: Path, monkeypatch) -> None:
     _load_module("common", "scripts/flux/common.py")
     check_model = _load_module("flux_check_model_frontier_test", "scripts/flux/check_model.py")
     model_workspace = tmp_path / "agent" / "game_ls20"
-    sequence_dir = model_workspace / "level_2" / "sequences"
+    sequence_dir = model_workspace / "level_1" / "sequences"
     sequence_dir.mkdir(parents=True, exist_ok=True)
-    (model_workspace / "model.py").write_text("# stub\n", encoding="utf-8")
-    (sequence_dir / "seq_0007.json").write_text(
+    sequence_path = sequence_dir / "seq_0007.json"
+    sequence_path.write_text(
         json.dumps({
-            "level": 2,
-            "sequence_id": "seq_0007",
-            "actions": [{
-                "action_index": 99,
-                "action_name": "ACTION1",
-                "level_before": 2,
-                "level_after": 2,
-                "levels_completed_before": 1,
-                "levels_completed_after": 2,
-                "level_complete_after": True,
-            }],
-        }, indent=2),
-        encoding="utf-8",
-    )
-
-    monkeypatch.setattr(check_model, "read_json_stdin", lambda: {"workspaceRoot": str(tmp_path), "modelOutput": {}})
-    monkeypatch.setattr(check_model, "load_runtime_meta", lambda _workspace: {
-        "model_workspace_dir": str(model_workspace),
-        "run_config_dir": str(tmp_path / "config"),
-        "run_bin_dir": str(tmp_path / "bin"),
-        "game_id": "ls20",
-    })
-    monkeypatch.setattr(check_model, "_run_compare", lambda *_args, **_kwargs: (0, {
-        "level": 2,
-        "all_match": True,
-        "eligible_sequences": 1,
-        "reports": [{"level": 2, "sequence_id": "seq_0007", "matched": True}],
-    }))
-    payloads: list[dict] = []
-    monkeypatch.setattr(check_model, "write_json_stdout", lambda payload: payloads.append(payload))
-
-    check_model.main()
-
-    assert payloads
-    compare_payload = payloads[0]["compare_payload"]
-    assert compare_payload["frontier_level"] == 3
-    assert compare_payload["reports"][0]["frontier_level_after_sequence"] == 3
+                "level": 1,
+                "sequence_id": "seq_0007",
+                "actions": [{
+                    "action_index": 99,
+                    "action_name": "ACTION1",
+                    "level_before": 1,
+                    "level_after": 2,
+                    "levels_completed_before": 0,
+                    "levels_completed_after": 1,
+                    "level_complete_after": True,
+                }],
+            }, indent=2),
+            encoding="utf-8",
+        )
+    payload = json.loads(sequence_path.read_text())
+    assert check_model._sequence_frontier_level(payload) == 2
 
 
 def test_check_model_compares_all_visible_sequence_levels_and_requires_all_to_match(tmp_path: Path, monkeypatch) -> None:
@@ -102,7 +109,8 @@ def test_check_model_compares_all_visible_sequence_levels_and_requires_all_to_ma
             "reports": [{"level": 2, "sequence_id": "seq_0001", "matched": False, "divergence_step": 3, "divergence_reason": "after_state_mismatch"}],
         }
 
-    monkeypatch.setattr(check_model, "read_json_stdin", lambda: {"workspaceRoot": str(tmp_path), "modelOutput": {}})
+    bundle_root = _ready_evidence_bundle(tmp_path, "game_ls20")
+    monkeypatch.setattr(check_model, "read_json_stdin", lambda: {"workspaceRoot": str(tmp_path), "modelOutput": {}, "evidenceBundlePath": str(bundle_root)})
     monkeypatch.setattr(check_model, "load_runtime_meta", lambda _workspace: {
         "model_workspace_dir": str(model_workspace),
         "run_config_dir": str(tmp_path / "config"),
@@ -121,67 +129,7 @@ def test_check_model_compares_all_visible_sequence_levels_and_requires_all_to_ma
     assert payloads[0]["compare_payload"]["requested_sequences"] == 2
     assert len(payloads[0]["compare_payload"]["reports"]) == 2
     assert payloads[0]["compare_payload"]["covered_sequence_ids"] == ["level_1:seq_0001"]
-
-
-def test_sync_latest_attempt_to_model_workspace_merges_sequences_from_all_attempts_same_level(tmp_path: Path) -> None:
-    common = _load_module("flux_common_all_attempts_sync_test", "scripts/flux/common.py")
-    workspace_root = tmp_path / "run"
-    attempts_root = workspace_root / "flux_instances"
-    solver_name = "game_ls20"
-    primary = attempts_root / "attempt_primary" / "agent" / solver_name / "level_1" / "sequences"
-    extra = attempts_root / "attempt_extra" / "agent" / solver_name / "level_1" / "sequences"
-    (attempts_root / "attempt_primary" / "supervisor" / "arc").mkdir(parents=True, exist_ok=True)
-    (attempts_root / "attempt_extra" / "supervisor" / "arc").mkdir(parents=True, exist_ok=True)
-    primary.mkdir(parents=True, exist_ok=True)
-    extra.mkdir(parents=True, exist_ok=True)
-    for root, name in [(primary, "ACTION1"), (extra, "ACTION2")]:
-        seq_id = "seq_0001"
-        (root / seq_id).mkdir(parents=True, exist_ok=True)
-        payload = {
-            "level": 1,
-            "sequence_id": seq_id,
-            "sequence_number": 1,
-            "end_reason": "open",
-            "action_count": 1,
-            "actions": [{
-                "local_step": 1,
-                "action_name": name,
-                "state_before": "NOT_FINISHED",
-                "state_after": "NOT_FINISHED",
-                "level_before": 1,
-                "level_after": 1,
-                "levels_completed_before": 0,
-                "levels_completed_after": 0,
-                "files": {
-                    "before_state_hex": f"sequences/{seq_id}/before_state.hex",
-                    "after_state_hex": f"sequences/{seq_id}/after_state.hex",
-                    "meta_json": f"sequences/{seq_id}/meta.json",
-                },
-            }],
-        }
-        (root / f"{seq_id}.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        (root / seq_id / "before_state.hex").write_text("0\n", encoding="utf-8")
-        (root / seq_id / "after_state.hex").write_text("1\n", encoding="utf-8")
-        (root / seq_id / "meta.json").write_text("{}", encoding="utf-8")
-
-    (workspace_root / "flux").mkdir(parents=True, exist_ok=True)
-    (workspace_root / "flux" / "state.json").write_text(
-        json.dumps({"active": {"solver": {"instanceId": "attempt_primary", "status": "running"}}}) + "\n",
-        encoding="utf-8",
-    )
-    model_workspace = workspace_root / "agent" / solver_name
-    meta = {
-        "model_workspace_dir": str(model_workspace),
-        "solver_template_dir": str(workspace_root / "templates" / solver_name),
-        "game_id": "ls20",
-    }
-
-    common.sync_latest_attempt_to_model_workspace(str(workspace_root), meta)
-
-    merged_sequences = sorted((model_workspace / "level_1" / "sequences").glob("seq_*.json"))
-    assert len(merged_sequences) == 2
-    merged_payloads = [json.loads(path.read_text()) for path in merged_sequences]
-    assert {payload["actions"][0]["action_name"] for payload in merged_payloads} == {"ACTION1", "ACTION2"}
+    assert payloads[0]["message"] == "compare mismatch at level 2 sequence seq_0001 step 3: after_state_mismatch"
 
 
 def test_observe_evidence_marks_artifact_handoff_incomplete_when_state_outpaces_visible_actions(tmp_path: Path, monkeypatch) -> None:
@@ -214,7 +162,8 @@ def test_observe_evidence_marks_artifact_handoff_incomplete_when_state_outpaces_
         "instance": {"instance_id": "attempt_x", "metadata": {"state_dir": str(state_dir), "solver_dir": str(solver_dir.parent.parent.parent)}},
     })
     monkeypatch.setattr(observe, "load_runtime_meta", lambda _workspace: {"solver_template_dir": str(workspace_root / "templates" / "game_ls20")})
-    monkeypatch.setattr(observe, "materialize_evidence_bundle", lambda *args, **kwargs: {"bundle_id": "bundle_x", "bundle_path": str(workspace_root / "flux" / "bundle_x")})
+    monkeypatch.setattr(observe, "materialize_attempt_snapshot", lambda *args, **kwargs: {"snapshot_id": "snap_x", "snapshot_path": str(workspace_root / "flux" / "attempt_snapshots" / "snap_x"), "workspace_dir": str(Path(kwargs["solver_dir"])), "arc_state_dir": str(Path(kwargs["state_dir"])), "solver_dir_name": kwargs["workspace_dir_name"]})
+    monkeypatch.setattr(observe, "materialize_evidence_bundle_from_snapshot", lambda *args, **kwargs: {"bundle_id": "bundle_x", "bundle_path": str(workspace_root / "flux" / "bundle_x"), "bundle_completeness": {"frontier_level": 2, "has_compare_surface": False, "status": "incomplete_artifacts"}})
     payloads: list[dict] = []
     monkeypatch.setattr(observe, "write_json_stdout", lambda payload: payloads.append(payload))
 
@@ -259,7 +208,8 @@ def test_observe_evidence_does_not_treat_reset_records_as_missing_visible_action
         "instance": {"instance_id": "attempt_x", "metadata": {"state_dir": str(state_dir), "solver_dir": str(solver_dir.parent.parent.parent)}},
     })
     monkeypatch.setattr(observe, "load_runtime_meta", lambda _workspace: {"solver_template_dir": str(workspace_root / "templates" / "game_ls20")})
-    monkeypatch.setattr(observe, "materialize_evidence_bundle", lambda *args, **kwargs: {"bundle_id": "bundle_x", "bundle_path": str(workspace_root / "flux" / "bundle_x")})
+    monkeypatch.setattr(observe, "materialize_attempt_snapshot", lambda *args, **kwargs: {"snapshot_id": "snap_x", "snapshot_path": str(workspace_root / "flux" / "attempt_snapshots" / "snap_x"), "workspace_dir": str(Path(kwargs["solver_dir"])), "arc_state_dir": str(Path(kwargs["state_dir"])), "solver_dir_name": kwargs["workspace_dir_name"]})
+    monkeypatch.setattr(observe, "materialize_evidence_bundle_from_snapshot", lambda *args, **kwargs: {"bundle_id": "bundle_x", "bundle_path": str(workspace_root / "flux" / "bundle_x"), "bundle_completeness": {"frontier_level": 1, "has_compare_surface": True, "status": "ready_for_compare"}})
     payloads: list[dict] = []
     monkeypatch.setattr(observe, "write_json_stdout", lambda payload: payloads.append(payload))
 
@@ -311,9 +261,10 @@ def test_observe_evidence_uses_canonical_game_artifacts_across_level_transition(
     materialized: list[dict] = []
     monkeypatch.setattr(
         observe,
-        "materialize_evidence_bundle",
-        lambda *args, **kwargs: materialized.append({"solver_dir": str(kwargs["solver_dir"]), "workspace_dir_name": kwargs["workspace_dir_name"]}) or {"bundle_id": "bundle_x", "bundle_path": str(workspace_root / "flux" / "bundle_x")},
+        "materialize_attempt_snapshot",
+        lambda *args, **kwargs: materialized.append({"solver_dir": str(kwargs["solver_dir"]), "workspace_dir_name": kwargs["workspace_dir_name"]}) or {"snapshot_id": "snap_x", "snapshot_path": str(workspace_root / "flux" / "attempt_snapshots" / "snap_x"), "workspace_dir": str(Path(kwargs["solver_dir"])), "arc_state_dir": str(Path(kwargs["state_dir"])), "solver_dir_name": kwargs["workspace_dir_name"]},
     )
+    monkeypatch.setattr(observe, "materialize_evidence_bundle_from_snapshot", lambda *args, **kwargs: {"bundle_id": "bundle_x", "bundle_path": str(workspace_root / "flux" / "bundle_x"), "bundle_completeness": {"frontier_level": 2, "has_compare_surface": True, "status": "ready_for_compare"}})
     payloads: list[dict] = []
     monkeypatch.setattr(observe, "write_json_stdout", lambda payload: payloads.append(payload))
 

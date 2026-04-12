@@ -279,3 +279,129 @@ def test_persist_current_compare_prunes_stale_sequence_reports(tmp_path: Path) -
     assert (game_dir / "level_1" / "sequence_compare" / "seq_0001.md").exists()
     assert not (game_dir / "level_current" / "sequence_compare" / "seq_0002.md").exists()
     assert not (game_dir / "level_1" / "sequence_compare" / "seq_0002.md").exists()
+
+
+def test_targeted_compare_does_not_overwrite_global_current_compare(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["00", "00"])
+    _write_hex(game_dir / "level_2" / "initial_state.hex", ["11", "11"])
+
+    # Seed an existing broad compare surface that should survive the targeted rerun.
+    (game_dir / "current_compare.json").write_text(
+        json.dumps(
+            {
+                "level": 1,
+                "all_match": False,
+                "compared_sequences": 2,
+                "diverged_sequences": 1,
+                "reports": [
+                    {"level": 1, "sequence_id": "seq_0001", "matched": True},
+                    {"level": 1, "sequence_id": "seq_0002", "matched": False, "divergence_step": 2, "divergence_reason": "intermediate_frame_mismatch"},
+                ],
+            },
+            indent=2,
+        ) + "\n",
+        encoding="utf-8",
+    )
+    (game_dir / "current_compare.md").write_text("# broad compare\n", encoding="utf-8")
+
+    # Sequence 1 matches; sequence 2 mismatches immediately.
+    step1_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
+    _write_hex(step1_dir / "before_state.hex", ["00", "00"])
+    _write_hex(step1_dir / "after_state.hex", ["00", "00"])
+    (step1_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
+    step2_dir = game_dir / "level_1" / "sequences" / "seq_0002" / "actions" / "step_0001_action_000002_action1"
+    _write_hex(step2_dir / "before_state.hex", ["00", "00"])
+    _write_hex(step2_dir / "after_state.hex", ["10", "00"])
+    (step2_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
+
+    seq_root = game_dir / "level_1" / "sequences"
+    seq_root.mkdir(parents=True, exist_ok=True)
+    (seq_root / "seq_0001.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "arc_repl.level_sequence.v1",
+                "game_id": "ls20",
+                "level": 1,
+                "sequence_id": "seq_0001",
+                "sequence_number": 1,
+                "start_action_index": 1,
+                "end_action_index": 1,
+                "end_reason": "open",
+                "action_count": 1,
+                "actions": [{
+                    "local_step": 1,
+                    "action_index": 1,
+                    "tool_turn": 1,
+                    "step_in_call": 1,
+                    "call_action": "exec",
+                    "action_name": "ACTION1",
+                    "action_data": {},
+                    "state_before": "NOT_FINISHED",
+                    "state_after": "NOT_FINISHED",
+                    "level_before": 1,
+                    "level_after": 1,
+                    "levels_completed_before": 0,
+                    "levels_completed_after": 0,
+                    "level_complete_before": False,
+                    "level_complete_after": False,
+                    "recorded_at_utc": "",
+                    "files": {
+                        "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
+                        "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
+                        "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
+                    },
+                }],
+            },
+            indent=2,
+        )
+    )
+    (seq_root / "seq_0002.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "arc_repl.level_sequence.v1",
+                "game_id": "ls20",
+                "level": 1,
+                "sequence_id": "seq_0002",
+                "sequence_number": 2,
+                "start_action_index": 2,
+                "end_action_index": 2,
+                "end_reason": "open",
+                "action_count": 1,
+                "actions": [{
+                    "local_step": 1,
+                    "action_index": 2,
+                    "tool_turn": 2,
+                    "step_in_call": 1,
+                    "call_action": "exec",
+                    "action_name": "ACTION1",
+                    "action_data": {},
+                    "state_before": "NOT_FINISHED",
+                    "state_after": "NOT_FINISHED",
+                    "level_before": 1,
+                    "level_after": 1,
+                    "levels_completed_before": 0,
+                    "levels_completed_after": 0,
+                    "level_complete_before": False,
+                    "level_complete_after": False,
+                    "recorded_at_utc": "",
+                    "files": {
+                        "before_state_hex": "sequences/seq_0002/actions/step_0001_action_000002_action1/before_state.hex",
+                        "after_state_hex": "sequences/seq_0002/actions/step_0001_action_000002_action1/after_state.hex",
+                        "meta_json": "sequences/seq_0002/actions/step_0001_action_000002_action1/meta.json",
+                    },
+                }],
+            },
+            indent=2,
+        )
+    )
+
+    proc = _run_model(game_dir, ["compare_sequences", "--game-id", "ls20", "--level", "1", "--sequence", "seq_0002"])
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["compared_sequences"] == 1
+    assert payload["reports"][0]["sequence_id"] == "seq_0002"
+    root_compare = json.loads((game_dir / "current_compare.json").read_text(encoding="utf-8"))
+    assert root_compare["compared_sequences"] == 2
+    assert [report["sequence_id"] for report in root_compare["reports"]] == ["seq_0001", "seq_0002"]

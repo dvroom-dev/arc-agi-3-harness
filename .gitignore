@@ -8,6 +8,8 @@ __pycache__/
 .mypy_cache/
 .ctxs/
 runs/
+!ui-flux/src/app/api/runs/
+!ui-flux/src/app/api/runs/**
 experiments/
 .ai-supervisor/
 environment_files/

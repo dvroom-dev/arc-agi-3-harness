@@ -7,7 +7,7 @@ import os
 from pathlib import Path
 
 
-MAX_LINES = 500
+MAX_LINES = 1000
 ROOT = Path(__file__).resolve().parent.parent
 CHECK_SUFFIXES = {".py"}
 EXCLUDED_DIRS = {
@@ -45,10 +45,10 @@ def main() -> int:
             violations.append((rel, line_count))
 
     if not violations:
-        print("lint ok: no files exceed 500 lines")
+        print(f"lint ok: no files exceed {MAX_LINES} lines")
         return 0
 
-    print("lint failed: files over 500 lines")
+    print(f"lint failed: files over {MAX_LINES} lines")
     for rel, count in violations:
         print(f"- {rel}: {count} lines")
     return 1

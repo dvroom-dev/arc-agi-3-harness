@@ -33,6 +33,62 @@ def test_rehearse_seed_on_model_resolves_agent_prefixed_paths(tmp_path: Path) ->
     assert resolved == target.resolve()
 
 
+def test_rehearse_seed_on_model_marks_compare_error_as_failed_rehearsal(tmp_path: Path, monkeypatch) -> None:
+    _load_module("common", "scripts/flux/common.py")
+    rehearse = _load_module("flux_rehearse_seed_compare_error_test", "scripts/flux/rehearse_seed_on_model.py")
+    workspace_root = tmp_path / "run"
+    model_workspace = workspace_root / "agent" / "game_ls20"
+    model_workspace.mkdir(parents=True, exist_ok=True)
+    (model_workspace / "model.py").write_text("# stub\n", encoding="utf-8")
+
+    monkeypatch.setattr(rehearse, "read_json_stdin", lambda: {
+        "workspaceRoot": str(workspace_root),
+        "seedBundle": {"replayPlan": []},
+        "seedHash": "seed_hash_x",
+    })
+    monkeypatch.setattr(rehearse, "load_runtime_meta", lambda _workspace: {
+        "model_workspace_dir": str(model_workspace),
+        "run_config_dir": str(workspace_root / "config"),
+        "run_bin_dir": str(workspace_root / "bin"),
+        "game_id": "ls20",
+    })
+    monkeypatch.setattr(rehearse, "copy_model_workspace", lambda _meta, destination: destination.mkdir(parents=True, exist_ok=True) or destination)
+
+    calls = {"count": 0}
+
+    def fake_run_model_command(_model_workspace, _env, args, stdin_text=None):
+        calls["count"] += 1
+        action = args[0]
+        if action == "shutdown":
+            return {"parsed": {"ok": True}}
+        if action == "status":
+            return {"parsed": {"ok": True, "action": "status", "current_level": 2 if calls["count"] >= 3 else 1, "levels_completed": 1 if calls["count"] >= 3 else 0}}
+        if action == "compare_sequences":
+            return {
+                "parsed": {
+                    "ok": False,
+                    "action": "compare_sequences",
+                    "error": {
+                        "type": "missing_sequences",
+                        "message": "missing sequences dir: /tmp/rehearsal/level_2/sequences",
+                    },
+                }
+            }
+        raise AssertionError(f"unexpected action: {args}")
+
+    monkeypatch.setattr(rehearse, "_run_model_command", fake_run_model_command)
+
+    payloads: list[dict] = []
+    monkeypatch.setattr(rehearse, "write_json_stdout", lambda payload: payloads.append(payload))
+
+    rehearse.main()
+
+    assert payloads
+    assert payloads[0]["rehearsal_ok"] is False
+    assert payloads[0]["error"]["type"] == "compare_failed"
+    assert payloads[0]["compare_payload"]["error"]["type"] == "missing_sequences"
+
+
 def test_replay_seed_on_real_game_resolves_agent_prefixed_paths(tmp_path: Path) -> None:
     _load_module("common", "scripts/flux/common.py")
     replay = _load_module("flux_replay_seed_real_test", "scripts/flux/replay_seed_on_real_game.py")
@@ -46,6 +102,53 @@ def test_replay_seed_on_real_game_resolves_agent_prefixed_paths(tmp_path: Path) 
         "agent/game_ls20/level_1/sequences/seq_0001.json",
     )
     assert resolved == target.resolve()
+
+
+def test_replay_seed_on_real_game_uses_evidence_bundle_sync(tmp_path: Path, monkeypatch) -> None:
+    _load_module("common", "scripts/flux/common.py")
+    replay = _load_module("flux_replay_seed_real_bundle_test", "scripts/flux/replay_seed_on_real_game.py")
+    workspace_root = tmp_path / "run"
+    working_directory = workspace_root / "agent" / "game_ls20"
+    state_dir = workspace_root / "supervisor" / "arc"
+    working_directory.mkdir(parents=True, exist_ok=True)
+    state_dir.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(replay, "read_json_stdin", lambda: {
+        "workspaceRoot": str(workspace_root),
+        "attemptId": "attempt_x",
+        "seedBundle": {"replayPlan": []},
+        "instance": {
+            "instance_id": "attempt_x",
+            "working_directory": str(working_directory),
+            "metadata": {"state_dir": str(state_dir)},
+            "env": {},
+        },
+    })
+    monkeypatch.setattr(replay, "load_runtime_meta", lambda _workspace: {"model_workspace_dir": str(workspace_root / "durable")})
+    monkeypatch.setattr(replay, "summarize_instance_state", lambda _state_dir: {"summary": "ok"})
+
+    calls: dict[str, object] = {}
+    monkeypatch.setattr(replay, "materialize_attempt_snapshot", lambda *args, **kwargs: {"snapshot_id": "snap", "workspace_dir": str(working_directory), "arc_state_dir": str(state_dir)})
+    monkeypatch.setattr(replay, "materialize_evidence_bundle_from_snapshot", lambda *_args, **_kwargs: {
+        "bundle_id": "bundle_x",
+        "bundle_path": str(workspace_root / "flux" / "evidence_bundles" / "bundle_x"),
+        "bundle_completeness": {"status": "ready_for_compare"},
+    })
+    def fake_sync(_meta, bundle_path):
+        calls["bundle_path"] = str(bundle_path)
+        return ["synced"]
+
+    monkeypatch.setattr(replay, "sync_evidence_bundle_to_model_workspace", fake_sync)
+
+    payloads: list[dict] = []
+    monkeypatch.setattr(replay, "write_json_stdout", lambda payload: payloads.append(payload))
+
+    replay.main()
+
+    assert calls["bundle_path"].endswith("bundle_x")
+    assert payloads
+    assert payloads[0]["evidence_bundle_id"] == "bundle_x"
+    assert payloads[0]["evidence_bundle_path"].endswith("bundle_x")
 
 
 def test_validate_replay_shell_cmd_rejects_shell_snippet_array() -> None:
@@ -87,45 +190,3 @@ def test_copy_model_workspace_ignores_transient_flux_artifacts(tmp_path: Path) -
     assert not (destination / ".level_6.flux-prev-deadbeef").exists()
     assert not (destination / ".level_current.tmp").exists()
     assert not (destination / ".workspace-tree.lock").exists()
-
-
-def test_sync_latest_attempt_to_model_workspace_preserves_richer_level_sequences(tmp_path: Path) -> None:
-    common = _load_module("flux_common_latest_instance_test", "scripts/flux/common.py")
-    workspace_root = tmp_path / "run"
-    attempts_root = workspace_root / "flux_instances"
-    solver_name = "game_ls20"
-
-    rich_attempt = attempts_root / "attempt_older"
-    sparse_seed = attempts_root / "seed_rev_newer"
-    rich_solver = rich_attempt / "agent" / solver_name
-    sparse_solver = sparse_seed / "agent" / solver_name
-    rich_level = rich_solver / "level_1"
-    sparse_level = sparse_solver / "level_1"
-    rich_sequences = rich_level / "sequences"
-    rich_sequences.mkdir(parents=True, exist_ok=True)
-    (rich_sequences / "seq_0001.json").write_text("{}\n", encoding="utf-8")
-    (rich_level / "initial_state.hex").write_text("0\n", encoding="utf-8")
-    (rich_level / "initial_state.meta.json").write_text("{}\n", encoding="utf-8")
-
-    sparse_level.mkdir(parents=True, exist_ok=True)
-    (sparse_level / "initial_state.hex").write_text("0\n", encoding="utf-8")
-    (sparse_level / "initial_state.meta.json").write_text("{}\n", encoding="utf-8")
-    (sparse_solver / "level_current").mkdir(parents=True, exist_ok=True)
-    (sparse_solver / "level_current" / "meta.json").write_text(json.dumps({"level": 1}), encoding="utf-8")
-    (sparse_solver / "level_current" / "initial_state.hex").write_text("0\n", encoding="utf-8")
-    (sparse_solver / "level_current" / "initial_state.meta.json").write_text("{}\n", encoding="utf-8")
-
-    model_workspace = workspace_root / "agent" / solver_name
-    meta = {
-        "model_workspace_dir": str(model_workspace),
-        "solver_template_dir": str(workspace_root / "flux_seed" / "agent" / solver_name),
-    }
-
-    rich_mtime = time.time() - 10
-    sparse_mtime = time.time()
-    os.utime(rich_attempt, (rich_mtime, rich_mtime))
-    os.utime(sparse_seed, (sparse_mtime, sparse_mtime))
-
-    common.sync_latest_attempt_to_model_workspace(str(workspace_root), meta)
-
-    assert (model_workspace / "level_1" / "sequences" / "seq_0001.json").exists()

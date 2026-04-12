@@ -2,6 +2,7 @@
 """Stateful ARC Python REPL tool for super shell usage."""
 from __future__ import annotations
 import argparse
+import datetime as dt
 import json
 import os
 import subprocess
@@ -65,6 +66,8 @@ from arc_repl_paths import meta_path, pid_path, send_ipc_request, session_dir
 from arc_repl_paths import session_key_from_env, socket_path, spawn_parent_identity_from_env
 SCHEMA_VERSION = "arc_repl.v1"
 SOCKET_WAIT_TIMEOUT_S = 90.0
+SOLVER_HANDOFF_REQUIREMENT_FILE = ".flux_solver_handoff_requirement.json"
+SOLVER_HANDOFF_THEORY_PATH = Path("solver_handoff") / "untrusted_theories.md"
 def _idle_keepalive_marker_for_call(cwd: Path, *, action: str, result: object) -> str | None:
     arc_state_dir = Path(str(os.getenv("ARC_STATE_DIR", "") or "")).expanduser()
     if not str(arc_state_dir).strip():
@@ -129,6 +132,46 @@ def _emit_json(payload: dict) -> None:
     sys.stdout.write(json.dumps(payload, indent=2))
     if not sys.stdout.isatty():
         sys.stdout.write("\n")
+
+
+def _load_solver_handoff_requirement(cwd: Path) -> dict | None:
+    requirement_path = cwd / SOLVER_HANDOFF_REQUIREMENT_FILE
+    if not requirement_path.exists():
+        return None
+    try:
+        payload = json.loads(requirement_path.read_text())
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _solver_handoff_requirement_status(cwd: Path) -> dict | None:
+    requirement = _load_solver_handoff_requirement(cwd)
+    if not requirement:
+        return None
+    required_at_raw = str(requirement.get("requested_at", "") or "").strip()
+    theory_path = cwd / SOLVER_HANDOFF_THEORY_PATH
+    fresh = False
+    if required_at_raw and theory_path.exists():
+        try:
+            required_ts = time.mktime(time.strptime(required_at_raw[:19], "%Y-%m-%dT%H:%M:%S"))
+        except Exception:
+            try:
+                required_ts = dt.datetime.fromisoformat(required_at_raw.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                required_ts = None
+        if required_ts is not None:
+            try:
+                fresh = theory_path.stat().st_mtime >= required_ts
+            except Exception:
+                fresh = False
+    return {
+        "required": not fresh,
+        "required_theory_level": int(requirement.get("required_theory_level", 0) or 0),
+        "frontier_level": int(requirement.get("frontier_level", 0) or 0),
+        "required_file": str(requirement.get("required_file") or SOLVER_HANDOFF_THEORY_PATH.as_posix()),
+        "requested_at": required_at_raw or None,
+    }
 def _session_key() -> str: return session_key_from_env()
 def _same_game_lineage(existing_game_id: str, requested_game_id: str) -> bool:
     return _same_game_lineage_impl(existing_game_id, requested_game_id, _make_id_candidates)
@@ -383,6 +426,28 @@ def main() -> int:
         )
         return 1
 
+    requirement_status = _solver_handoff_requirement_status(cwd)
+    if requirement_status and requirement_status.get("required") and action in {"exec", "reset_level"}:
+        theory_level = int(requirement_status.get("required_theory_level", 0) or 0)
+        frontier_level = int(requirement_status.get("frontier_level", 0) or 0)
+        required_file = str(requirement_status.get("required_file") or SOLVER_HANDOFF_THEORY_PATH.as_posix())
+        payload = _error(
+            action=action,
+            requested_game_id=requested_game_id,
+            message=f"write {required_file} before more real-game actions",
+            error_type="critical_instruction_required",
+        )
+        payload["critical_instruction"] = (
+            f"You reached frontier level {frontier_level}. Before more real-game actions, "
+            f"write {required_file} with what solved level {theory_level} taught you, what is likely to transfer, "
+            "and any cautious new-level hypotheses."
+        )
+        payload["required_file"] = required_file
+        payload["required_theory_level"] = theory_level
+        payload["frontier_level"] = frontier_level
+        _emit_json(payload)
+        return 1
+
     conversation_id = _session_key()
     request = {
         "action": action,
@@ -471,6 +536,17 @@ def main() -> int:
                 return 1
             return 0
         if isinstance(visible_result, dict):
+            if requirement_status and requirement_status.get("required"):
+                theory_level = int(requirement_status.get("required_theory_level", 0) or 0)
+                frontier_level = int(requirement_status.get("frontier_level", 0) or 0)
+                required_file = str(requirement_status.get("required_file") or SOLVER_HANDOFF_THEORY_PATH.as_posix())
+                visible_result["critical_instruction"] = (
+                    f"Before more real-game actions, write {required_file} for solved level {theory_level} "
+                    f"after reaching frontier level {frontier_level}."
+                )
+                visible_result["required_file"] = required_file
+                visible_result["required_theory_level"] = theory_level
+                visible_result["frontier_level"] = frontier_level
             intercept_lines: list[str] = []
             if reset_intercept_line:
                 intercept_lines.append(reset_intercept_line)

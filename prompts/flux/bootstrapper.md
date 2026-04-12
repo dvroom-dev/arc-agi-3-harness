@@ -17,6 +17,7 @@ Goals:
 - Do not edit the model itself.
 - Treat the seed as an ideal synthetic session from level 1 onward.
 - For every solved level, include the best known action sequence and explain the known mechanics and logic behind that sequence.
+- Read any `modeler_handoff/untrusted_theories_level_<n>.md` files available in the accepted model workspace and use them as untrusted mechanic candidates that must be validated or invalidated before they become seed guidance.
 - Carry forward useful mechanic knowledge cumulatively across levels. The next solver should inherit the confirmed rules from earlier solved levels as well as any confirmed new mechanics from later solved/frontier levels.
 - Do not treat solved levels as replay only. Their synthetic messages should explain the mechanics that remain relevant later, not just list the route.
 - Prefer this seed message structure:
@@ -44,6 +45,10 @@ Goals:
 - Do not write vague seed guidance like "keep exploring" or "make progress".
 - Do not anchor the seed on an older frontier if the accepted model already supports a better full-run opening from level 1.
 - Keep replay steps deterministic and minimal.
+- A useful seed requires real mechanic understanding, not just a route. Do not pass through unvalidated theories or one-route folklore as if they were trusted rules.
+- Before you state a mechanic in the seed, invalidate the main plausible alternatives using accepted model evidence, rehearsal output, or direct artifact checks.
+- Do explicit self-critique: if two explanations fit the same route, do not promote either one as trusted until you have ruled the other out.
+- The final seed must include the trusted game mechanics needed to replay solved levels and reason about the frontier. If the mechanics are still uncertain, say what is uncertain and keep the uncertain parts out of the trusted summary.
 - Reuse the previous seed only if it is still the best known full-run seed from the start of the game.
 - Replay steps must target only solver/game-workspace artifacts and actions.
 - Do not put `flux/*`, `.ai-flux/*`, `config/*`, `prompts/*`, or other run-control bookkeeping paths into `replayPlan`.

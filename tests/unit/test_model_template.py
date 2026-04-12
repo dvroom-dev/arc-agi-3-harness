@@ -24,6 +24,7 @@ def _copy_model_templates(game_dir: Path) -> None:
         "play_lib.py",
         "play.py",
         "artifact_helpers.py",
+        "inspect_model_sequence.py",
         "inspect_sequence.py",
         "inspect_components.py",
         "inspect_grid_slice.py",
@@ -35,11 +36,26 @@ def _copy_model_templates(game_dir: Path) -> None:
     shutil.copytree(runtime_src, runtime_dst)
 
 
-def _run_model(game_dir: Path, args: list[str]) -> subprocess.CompletedProcess[str]:
+def _run_model(game_dir: Path, args: list[str], *, extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    env = dict(os.environ)
+    env["ARC_CONFIG_DIR"] = str((game_dir.parent / "config").resolve())
+    if extra_env:
+        env.update(extra_env)
+    return subprocess.run(
+        [sys.executable, str(game_dir / "model.py"), *args],
+        cwd=game_dir,
+        text=True,
+        capture_output=True,
+        check=False,
+        env=env,
+    )
+
+
+def _run_helper(game_dir: Path, helper_name: str, args: list[str]) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
     env["ARC_CONFIG_DIR"] = str((game_dir.parent / "config").resolve())
     return subprocess.run(
-        [sys.executable, str(game_dir / "model.py"), *args],
+        [sys.executable, str(game_dir / helper_name), *args],
         cwd=game_dir,
         text=True,
         capture_output=True,
@@ -165,6 +181,373 @@ def test_model_compare_sequences_writes_markdown_report(tmp_path: Path) -> None:
     assert "available_actions" not in model_status["state"]
     assert "grid_hex_rows" not in payload
     assert "available_actions" not in payload
+
+
+def test_model_compare_sequences_no_persist_env_writes_only_stdout(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+
+    initial_rows = ["0000", "0000", "0000", "0000"]
+    _write_hex(game_dir / "level_1" / "initial_state.hex", initial_rows)
+    step_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
+    _write_hex(step_dir / "before_state.hex", initial_rows)
+    _write_hex(step_dir / "after_state.hex", initial_rows)
+    (step_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
+
+    seq_payload = {
+        "schema_version": "arc_repl.level_sequence.v1",
+        "game_id": "ls20",
+        "level": 1,
+        "sequence_id": "seq_0001",
+        "sequence_number": 1,
+        "start_action_index": 1,
+        "end_action_index": 1,
+        "start_recorded_at_utc": "",
+        "end_recorded_at_utc": "",
+        "end_reason": "open",
+        "action_count": 1,
+        "actions": [
+            {
+                "local_step": 1,
+                "action_index": 1,
+                "tool_turn": 1,
+                "step_in_call": 1,
+                "call_action": "exec",
+                "action_name": "ACTION1",
+                "action_data": {},
+                "state_before": "NOT_FINISHED",
+                "state_after": "NOT_FINISHED",
+                "level_before": 1,
+                "level_after": 1,
+                "levels_completed_before": 0,
+                "levels_completed_after": 0,
+                "recorded_at_utc": "",
+                "files": {
+                    "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
+                    "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
+                    "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
+                },
+            }
+        ],
+    }
+    seq_file = game_dir / "level_1" / "sequences" / "seq_0001.json"
+    seq_file.parent.mkdir(parents=True, exist_ok=True)
+    seq_file.write_text(json.dumps(seq_payload, indent=2))
+
+    proc = _run_model(
+        game_dir,
+        ["compare_sequences", "--game-id", "ls20", "--level", "1"],
+        extra_env={
+            "ARC_MODEL_COMPARE_NO_PERSIST": "1",
+            "ARC_MODEL_PERSIST_STATUS": "0",
+        },
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is True
+    assert payload["all_match"] is True
+    assert not (game_dir / "current_compare.json").exists()
+    assert not (game_dir / "current_compare.md").exists()
+    assert not (game_dir / "model_status.json").exists()
+    assert not (game_dir / "level_1" / "sequence_compare").exists()
+
+
+def test_model_diff_transition_reports_frame_diffs_without_writing_compare_artifacts(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+
+    initial_rows = ["0000", "0000", "0000", "0000"]
+    frame_rows = ["0100", "0000", "0000", "0000"]
+    after_rows = ["0100", "0200", "0000", "0000"]
+    _write_hex(game_dir / "level_1" / "initial_state.hex", initial_rows)
+    step_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
+    _write_hex(step_dir / "before_state.hex", initial_rows)
+    _write_hex(step_dir / "after_state.hex", after_rows)
+    _write_hex(step_dir / "frames" / "frame_0001.hex", frame_rows)
+    _write_hex(step_dir / "frames" / "frame_0002.hex", after_rows)
+    (step_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
+
+    seq_payload = {
+        "schema_version": "arc_repl.level_sequence.v1",
+        "game_id": "ls20",
+        "level": 1,
+        "sequence_id": "seq_0001",
+        "sequence_number": 1,
+        "start_action_index": 1,
+        "end_action_index": 1,
+        "start_recorded_at_utc": "",
+        "end_recorded_at_utc": "",
+        "end_reason": "open",
+        "action_count": 1,
+        "actions": [
+            {
+                "local_step": 1,
+                "action_index": 1,
+                "tool_turn": 1,
+                "step_in_call": 1,
+                "call_action": "exec",
+                "action_name": "ACTION1",
+                "action_data": {},
+                "state_before": "NOT_FINISHED",
+                "state_after": "NOT_FINISHED",
+                "level_before": 1,
+                "level_after": 1,
+                "levels_completed_before": 0,
+                "levels_completed_after": 0,
+                "recorded_at_utc": "",
+                "files": {
+                    "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
+                    "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
+                    "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
+                    "frame_sequence_hex": [
+                        "sequences/seq_0001/actions/step_0001_action_000001_action1/frames/frame_0001.hex",
+                        "sequences/seq_0001/actions/step_0001_action_000001_action1/frames/frame_0002.hex",
+                    ],
+                },
+            }
+        ],
+    }
+    seq_file = game_dir / "level_1" / "sequences" / "seq_0001.json"
+    seq_file.parent.mkdir(parents=True, exist_ok=True)
+    seq_file.write_text(json.dumps(seq_payload, indent=2))
+
+    proc = _run_model(game_dir, ["diff_transition", "--game-id", "ls20", "--level", "1", "--sequence", "seq_0001", "--step", "1"])
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is True
+    assert payload["action"] == "diff_transition"
+    assert payload["transition"]["action_name"] == "ACTION1"
+    assert payload["before_to_after_diff"]["changed_pixels"] == 2
+    assert payload["before_to_after_diff"]["changed_bbox"] == {"row_min": 0, "row_max": 1, "col_min": 1, "col_max": 1}
+    assert len(payload["frames"]) == 2
+    assert payload["frames"][0]["diff_from_previous"]["changed_pixels"] == 1
+    assert payload["frames"][1]["diff_from_previous"]["changed_pixels"] == 1
+    assert not (game_dir / "current_compare.json").exists()
+    assert not (game_dir / "current_compare.md").exists()
+    assert not (game_dir / "model_status.json").exists()
+
+
+def test_model_compare_transitions_reports_pre_post_and_frame_diffs_without_writes(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+
+    initial_rows = ["0000", "0000", "0000", "0000"]
+    _write_hex(game_dir / "level_1" / "initial_state.hex", initial_rows)
+
+    seq_specs = {
+        "seq_0001": {
+            "before": ["0000", "0000", "0000", "0000"],
+            "frame_1": ["0100", "0000", "0000", "0000"],
+            "after": ["0100", "0200", "0000", "0000"],
+        },
+        "seq_0002": {
+            "before": ["0000", "0030", "0000", "0000"],
+            "frame_1": ["0000", "0130", "0000", "0000"],
+            "after": ["0000", "0130", "0040", "0000"],
+        },
+    }
+    for sequence_id, spec in seq_specs.items():
+        step_dir = game_dir / "level_1" / "sequences" / sequence_id / "actions" / "step_0001_action_000001_action1"
+        _write_hex(step_dir / "before_state.hex", spec["before"])
+        _write_hex(step_dir / "after_state.hex", spec["after"])
+        _write_hex(step_dir / "frames" / "frame_0001.hex", spec["frame_1"])
+        (step_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
+        seq_payload = {
+            "schema_version": "arc_repl.level_sequence.v1",
+            "game_id": "ls20",
+            "level": 1,
+            "sequence_id": sequence_id,
+            "sequence_number": int(sequence_id.split("_")[-1]),
+            "start_action_index": 1,
+            "end_action_index": 1,
+            "start_recorded_at_utc": "",
+            "end_recorded_at_utc": "",
+            "end_reason": "open",
+            "action_count": 1,
+            "actions": [
+                {
+                    "local_step": 1,
+                    "action_index": 1,
+                    "tool_turn": 1,
+                    "step_in_call": 1,
+                    "call_action": "exec",
+                    "action_name": "ACTION1",
+                    "action_data": {},
+                    "state_before": "NOT_FINISHED",
+                    "state_after": "NOT_FINISHED",
+                    "level_before": 1,
+                    "level_after": 1,
+                    "levels_completed_before": 0,
+                    "levels_completed_after": 0,
+                    "recorded_at_utc": "",
+                    "files": {
+                        "before_state_hex": f"sequences/{sequence_id}/actions/step_0001_action_000001_action1/before_state.hex",
+                        "after_state_hex": f"sequences/{sequence_id}/actions/step_0001_action_000001_action1/after_state.hex",
+                        "meta_json": f"sequences/{sequence_id}/actions/step_0001_action_000001_action1/meta.json",
+                        "frame_sequence_hex": [
+                            f"sequences/{sequence_id}/actions/step_0001_action_000001_action1/frames/frame_0001.hex",
+                        ],
+                    },
+                }
+            ],
+        }
+        seq_file = game_dir / "level_1" / "sequences" / f"{sequence_id}.json"
+        seq_file.parent.mkdir(parents=True, exist_ok=True)
+        seq_file.write_text(json.dumps(seq_payload, indent=2))
+
+    proc = _run_model(
+        game_dir,
+        [
+            "compare_transitions",
+            "--game-id", "ls20",
+            "--a-level", "1", "--a-sequence", "seq_0001", "--a-step", "1",
+            "--b-level", "1", "--b-sequence", "seq_0002", "--b-step", "1",
+        ],
+    )
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["ok"] is True
+    assert payload["action"] == "compare_transitions"
+    assert payload["same_action_name"] is True
+    assert payload["pre_state_diff"]["changed_pixels"] == 1
+    assert payload["post_state_diff"]["changed_pixels"] == 4
+    assert payload["frame_count_a"] == 1
+    assert payload["frame_count_b"] == 1
+    assert len(payload["paired_frames"]) == 1
+    assert payload["paired_frames"][0]["between_frame_diff"]["changed_pixels"] == 3
+    assert not (game_dir / "current_compare.json").exists()
+    assert not (game_dir / "current_compare.md").exists()
+    assert not (game_dir / "model_status.json").exists()
+
+
+def test_inspect_model_sequence_reports_replay_semantics_explicitly(tmp_path: Path) -> None:
+    game_dir = tmp_path / "game_ls20"
+    _copy_model_templates(game_dir)
+    _write_hex(game_dir / "level_1" / "initial_state.hex", ["00", "00"])
+    _write_hex(game_dir / "level_2" / "initial_state.hex", ["33", "33"])
+    (game_dir / "model_lib.py").write_text(
+        (game_dir / "model_lib.py").read_text()
+        + "\n\ndef init_level(env, level: int, *, cfg=None):\n"
+        + "    import numpy as np\n"
+        + "    env.current_level = int(level)\n"
+        + "    env.grid = np.array([[0, 0], [0, 0]], dtype=np.int8)\n"
+        + "    env._step_n = 0\n"
+        + "\n\ndef apply_level_1(env, action, *, data=None, reasoning=None):\n"
+        + "    import numpy as np\n"
+        + "    _ = action, data, reasoning\n"
+        + "    env._step_n += 1\n"
+        + "    if env._step_n == 1:\n"
+        + "        env.grid = np.array([[1, 0], [0, 0]], dtype=np.int8)\n"
+        + "        env.last_step_frames = [np.array([[1, 0], [0, 0]], dtype=np.int8)]\n"
+        + "    else:\n"
+        + "        env.grid = np.array([[3, 3], [3, 3]], dtype=np.int8)\n"
+        + "        env.level_complete = True\n"
+        + "        env.last_step_level_complete = True\n"
+        + "        env.last_step_frames = [np.array([[1, 0], [0, 0]], dtype=np.int8), np.array([[3, 3], [3, 3]], dtype=np.int8)]\n"
+        + "\n\ndef is_level_complete(env):\n"
+        + "    return int(getattr(env, '_step_n', 0)) >= 2\n"
+    )
+
+    step1_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0001_action_000001_action1"
+    _write_hex(step1_dir / "before_state.hex", ["00", "00"])
+    _write_hex(step1_dir / "after_state.hex", ["10", "00"])
+    _write_hex(step1_dir / "frames" / "frame_0001.hex", ["10", "00"])
+    (step1_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
+
+    step2_dir = game_dir / "level_1" / "sequences" / "seq_0001" / "actions" / "step_0002_action_000002_action1"
+    _write_hex(step2_dir / "before_state.hex", ["10", "00"])
+    _write_hex(step2_dir / "after_state.hex", ["33", "33"])
+    _write_hex(step2_dir / "frames" / "frame_0001.hex", ["10", "00"])
+    _write_hex(step2_dir / "frames" / "frame_0002.hex", ["33", "33"])
+    (step2_dir / "meta.json").write_text(json.dumps({"schema_version": "arc_repl.sequence_action.v1"}, indent=2))
+
+    seq_payload = {
+        "schema_version": "arc_repl.level_sequence.v1",
+        "game_id": "ls20",
+        "level": 1,
+        "sequence_id": "seq_0001",
+        "sequence_number": 1,
+        "start_action_index": 1,
+        "end_action_index": 2,
+        "start_recorded_at_utc": "",
+        "end_recorded_at_utc": "",
+        "end_reason": "level_change",
+        "action_count": 2,
+        "actions": [
+            {
+                "local_step": 1,
+                "action_index": 1,
+                "tool_turn": 1,
+                "step_in_call": 1,
+                "call_action": "exec",
+                "action_name": "ACTION1",
+                "action_data": {},
+                "state_before": "NOT_FINISHED",
+                "state_after": "NOT_FINISHED",
+                "level_before": 1,
+                "level_after": 1,
+                "levels_completed_before": 0,
+                "levels_completed_after": 0,
+                "files": {
+                    "before_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/before_state.hex",
+                    "after_state_hex": "sequences/seq_0001/actions/step_0001_action_000001_action1/after_state.hex",
+                    "meta_json": "sequences/seq_0001/actions/step_0001_action_000001_action1/meta.json",
+                    "frame_sequence_hex": [
+                        "sequences/seq_0001/actions/step_0001_action_000001_action1/frames/frame_0001.hex"
+                    ],
+                },
+            },
+            {
+                "local_step": 2,
+                "action_index": 2,
+                "tool_turn": 2,
+                "step_in_call": 1,
+                "call_action": "exec",
+                "action_name": "ACTION1",
+                "action_data": {},
+                "state_before": "NOT_FINISHED",
+                "state_after": "NOT_FINISHED",
+                "level_before": 1,
+                "level_after": 2,
+                "levels_completed_before": 0,
+                "levels_completed_after": 1,
+                "level_complete_before": False,
+                "level_complete_after": True,
+                "files": {
+                    "before_state_hex": "sequences/seq_0001/actions/step_0002_action_000002_action1/before_state.hex",
+                    "after_state_hex": "sequences/seq_0001/actions/step_0002_action_000002_action1/after_state.hex",
+                    "meta_json": "sequences/seq_0001/actions/step_0002_action_000002_action1/meta.json",
+                    "frame_sequence_hex": [
+                        "sequences/seq_0001/actions/step_0002_action_000002_action1/frames/frame_0001.hex",
+                        "sequences/seq_0001/actions/step_0002_action_000002_action1/frames/frame_0002.hex"
+                    ],
+                },
+            },
+        ],
+    }
+    seq_root = game_dir / "level_1" / "sequences"
+    seq_root.mkdir(parents=True, exist_ok=True)
+    (seq_root / "seq_0001.json").write_text(json.dumps(seq_payload, indent=2))
+    (game_dir / "current_compare.json").write_text(
+        json.dumps(
+            {
+                "level": 1,
+                "reports": [
+                    {"level": 1, "sequence_id": "seq_0001", "matched": False, "divergence_step": 2, "divergence_reason": "intermediate_frame_mismatch"}
+                ],
+            },
+            indent=2,
+        )
+    )
+
+    proc = _run_helper(game_dir, "inspect_model_sequence.py", ["--game-id", "ls20", "--current-mismatch"])
+    assert proc.returncode == 0, proc.stderr
+    payload = json.loads(proc.stdout)
+    assert payload["replay_mode"] == "cumulative_sequence_replay"
+    assert payload["transient_step_state_reset"] is True
+    semantics = payload["compare_frame_count_semantics"]
+    assert semantics["completion_boundary_excludes_terminal_post_level_change_frame"] is True
+    assert semantics["game_frame_files_present_does_not_imply_compare_counts_all_of_them"] is True
 
 
 def test_model_compare_sequences_includes_reset_ended_sequences_by_default(tmp_path: Path) -> None:

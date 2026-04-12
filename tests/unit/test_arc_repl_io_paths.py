@@ -220,3 +220,37 @@ def test_main_exec_redacts_frontier_level_while_analysis_pin_is_active(
     assert '"levels_completed": 0' in out
     assert '"analysis_level_boundary_redacted": true' in out
     assert '"after_state_hex"' not in out
+
+
+def test_main_blocks_real_game_actions_until_required_solver_handoff_exists(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".flux_solver_handoff_requirement.json").write_text(
+        json.dumps(
+            {
+                "schema_version": "flux.solver_handoff_requirement.v1",
+                "required_theory_level": 1,
+                "frontier_level": 2,
+                "required_file": "solver_handoff/untrusted_theories.md",
+                "requested_at": "2026-04-12T12:00:00Z",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "argv", ["arc_repl"])
+    monkeypatch.setattr(
+        arc_repl,
+        "_read_args",
+        lambda: {"action": "exec", "game_id": "ls20", "script": "print('x')"},
+    )
+    rc = arc_repl.main()
+    assert rc == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["error"]["type"] == "critical_instruction_required"
+    assert payload["required_file"] == "solver_handoff/untrusted_theories.md"
+    assert "critical_instruction" in payload

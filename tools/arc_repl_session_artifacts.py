@@ -212,19 +212,15 @@ def _materialize_level_current_view(
         _remove_path(level_current)
         temp.rename(level_current)
 
-        for child in agent_game_dir.iterdir():
-            if child.name == "level_current":
-                continue
-            if child.name.startswith("level_"):
-                _remove_path(child)
-
         compat_level = agent_game_dir / f"level_{int(visible_level)}"
-        _remove_path(compat_level)
-        try:
-            compat_level.symlink_to(level_current.name, target_is_directory=True)
-        except Exception:
+        if compat_level.is_symlink():
             _remove_path(compat_level)
-            copytree_stable(level_current, compat_level)
+        if not compat_level.exists():
+            try:
+                compat_level.symlink_to(level_current.name, target_is_directory=True)
+            except Exception:
+                _remove_path(compat_level)
+                copytree_stable(level_current, compat_level)
 
     stale_turn_index = agent_game_dir / "turn_index.jsonl"
     if stale_turn_index.exists():

@@ -32,6 +32,19 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="include sequences that contain levels_completed regression events",
     )
+    diff_cmd = sub.add_parser("diff_transition")
+    diff_cmd.add_argument("--game-id", default="game")
+    diff_cmd.add_argument("--level", type=int, required=True)
+    diff_cmd.add_argument("--sequence", required=True)
+    diff_cmd.add_argument("--step", type=int, required=True)
+    compare_transitions_cmd = sub.add_parser("compare_transitions")
+    compare_transitions_cmd.add_argument("--game-id", default="game")
+    compare_transitions_cmd.add_argument("--a-level", type=int, required=True)
+    compare_transitions_cmd.add_argument("--a-sequence", required=True)
+    compare_transitions_cmd.add_argument("--a-step", type=int, required=True)
+    compare_transitions_cmd.add_argument("--b-level", type=int, required=True)
+    compare_transitions_cmd.add_argument("--b-sequence", required=True)
+    compare_transitions_cmd.add_argument("--b-step", type=int, required=True)
     file_cmd = sub.add_parser("exec_file")
     file_cmd.add_argument("--game-id", default="game")
     file_cmd.add_argument(
@@ -94,6 +107,23 @@ def run_model_cli(hooks: ModelHooks, *, game_dir: Path, argv: list[str] | None =
             include_level_regressions=bool(args.include_level_regressions),
         )
         return _emit(payload, session=session, action_name="compare_sequences", code=code)
+    if args.action == "diff_transition":
+        payload, code = session.do_diff_transition(
+            level=int(args.level),
+            sequence_id=str(args.sequence),
+            local_step=int(args.step),
+        )
+        return _emit(payload, session=session, action_name="diff_transition", code=code, persist_status=False)
+    if args.action == "compare_transitions":
+        payload, code = session.do_compare_transitions(
+            a_level=int(args.a_level),
+            a_sequence_id=str(args.a_sequence),
+            a_local_step=int(args.a_step),
+            b_level=int(args.b_level),
+            b_sequence_id=str(args.b_sequence),
+            b_local_step=int(args.b_step),
+        )
+        return _emit(payload, session=session, action_name="compare_transitions", code=code, persist_status=False)
     if args.action == "exec":
         payload, code = session.do_exec(sys.stdin.read())
         return _emit(payload, session=session, action_name="exec", code=code)

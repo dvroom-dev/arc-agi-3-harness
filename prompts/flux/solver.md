@@ -14,6 +14,9 @@ Rules:
 - Use relative paths and commands from the current workspace; do not rely on absolute repo or home-directory paths.
 - Treat the current workspace as disposable: it belongs only to this solver attempt.
 - `arc_repl` supports `status`, `reset_level`, `exec`, `exec_file`, and `shutdown`.
+- If `arc_repl` returns a `critical_instruction`, that instruction is mandatory and higher priority than your current branch plan.
+- After you reach a new frontier level through real actions, you may be required to write `solver_handoff/untrusted_theories.md` before further real-game actions are allowed.
+- When that requirement is active, write the markdown file with what the solved previous level taught you, what is likely to transfer, and any cautious new-level hypotheses. Then continue.
 - `arc_action ACTION1` is the shortest path for a one-step real-game probe.
 - `arc_level --json` is the quickest read path for current level/state metadata.
 - These games are designed to be easy for humans and hard for AI. They often rotate features 90, 180, or 270 degrees to disguise them, and they often vary feature size or scale.
@@ -29,6 +32,7 @@ Rules:
 - Prefer action-linked evidence over pure visual speculation when identifying the controllable actor.
 - Inside `arc_repl exec`, the reliable read path is `frame = env.get_frame(); grid = frame.grid`.
 - Do not assume `env.grid` exists.
+- Never unpack, subscript, or otherwise assume a tuple return from `env.step(...)`. Call it for side effects and then read state from `env.get_frame()`.
 - Use the available actions list as your action vocabulary and choose actions that explore the most important unresolved feature in the current state.
 - At any point, pick exactly one of these modes and act quickly:
   - feature probe: test one specific unresolved visible feature with the shortest action sequence that can change or clarify it
@@ -45,8 +49,9 @@ Rules:
 - Before this turn ends, you must execute at least one real action probe with `env.step(...)`.
 - Do not spend the whole turn on inspection. One quick read pass is enough before probing.
 - Hard rule: after the first short inspection, your next meaningful step must be either a specific feature-targeted action sequence or a concrete solve attempt.
-- Hard rule: do not keep extending budget math, BFS analysis, or geometric reasoning if you have not taken a real action recently.
-- If you are reasoning about a path or budget, turn that reasoning into a short executable sequence quickly and see what actually happens.
+- Hard rule: do not keep extending abstract movement theory, route narration, or budget math if you have not taken a real action recently.
+- Hard rule: do not use BFS, DFS, exhaustive reachability, or brute-force search over action/state space to discover solutions.
+- If you are reasoning about a candidate sequence or a visible constraint, turn that reasoning into a short executable probe quickly and see what actually happens.
 - The best default first probe is a single bounded action such as `ACTION1`, then inspect the resulting diff/artifacts.
 - If a probe succeeds and it clearly suggests one grounded follow-up move, take that follow-up instead of stopping immediately.
 - Do not end the turn after a single probe unless you are genuinely blocked on ambiguity and have already written down the exact action-linked evidence you found.
@@ -60,9 +65,11 @@ Rules:
 - Hard rule: if the only observed delta is budget/fuel depletion, that branch is already dominated. Reset or branch away immediately; do not keep paying budget to reconfirm the same obstruction.
 - Treat compare artifacts as diagnostic, not as direct action advice. A reference mismatch or `model_frame_diff = 0` does not mean the correct next real action is a no-op.
 - If a reference sequence diverges immediately, use it to identify which feature/mechanic is still unexplained, then run the shortest concrete probe for that feature. Do not copy its apparent no-op behavior blindly.
-- Treat BFS/reachability output as geometry only, not as proof that a long chained route is valid. Special tiles can reset, teleport, recolor, rotate, consume lives, or otherwise break naive composition.
-- Before trusting a long path that goes through a special marker, cross, doorway, or icon interaction, verify that trigger locally with a short stateful probe.
-- If a long route returns you to the start, consumes only bar/life pixels, or otherwise reveals a hidden reset/death mechanic, mark that branch invalid at the first trigger step and change the earliest branch choice. Do not rerun near-identical long scripts from the same opening.
+- Do not assume a level is fundamentally about navigation or route construction unless repeated action-linked evidence proves that.
+- If a visible symbol, marker, icon, doorway, or other feature seems important, verify its effect locally with the shortest stateful probe that can change or clarify it.
+- If a candidate sequence burns only fuel/turn budget, repeatedly returns to the same state, or triggers an unhelpful reset/death outcome, mark that branch invalid at the earliest observed trigger and change the branch choice. Do not rerun near-identical long scripts from the same opening.
+- On a level transition, before analyzing the new level broadly, write down what the solved previous level taught you that is most likely to transfer, then run one bounded real action probe on the new level.
+- If the level transition triggered a required handoff note, satisfy that first by writing `solver_handoff/untrusted_theories.md`, then resume probing.
 
 First-turn default plan:
 1. Run `arc_level --json`.

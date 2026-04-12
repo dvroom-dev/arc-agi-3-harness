@@ -16,6 +16,34 @@ def _load_module(name: str, relative_path: str):
     return module
 
 
+def _ready_evidence_bundle(tmp_path: Path, workspace_name: str) -> Path:
+    bundle_root = tmp_path / "flux" / "evidence_bundles" / "bundle_x"
+    bundle_workspace = bundle_root / "workspace" / workspace_name
+    bundle_state_dir = bundle_root / "arc_state"
+    bundle_workspace.mkdir(parents=True, exist_ok=True)
+    bundle_state_dir.mkdir(parents=True, exist_ok=True)
+    (bundle_root / "manifest.json").write_text(
+        json.dumps(
+            {
+                "workspace_dir": str(bundle_workspace),
+                "arc_state_dir": str(bundle_state_dir),
+                "bundle_completeness": {
+                    "frontier_level": 2,
+                    "has_level_sequences": True,
+                    "has_frontier_initial_state": True,
+                    "has_frontier_sequences": True,
+                    "has_compare_surface": True,
+                    "status": "ready_for_compare",
+                },
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return bundle_root
+
+
 def test_check_model_accepts_frontier_discovery_when_prior_levels_match(tmp_path: Path, monkeypatch) -> None:
     _load_module("common", "scripts/flux/common.py")
     check_model = _load_module("flux_check_model_frontier_discovery_test", "scripts/flux/check_model.py")
@@ -38,7 +66,8 @@ def test_check_model_accepts_frontier_discovery_when_prior_levels_match(tmp_path
     (level1_sequences / "seq_0001.json").write_text(json.dumps({"level": 1, "sequence_id": "seq_0001"}, indent=2) + "\n", encoding="utf-8")
     (level2_sequences / "seq_0001.json").write_text(json.dumps({"level": 2, "sequence_id": "seq_0001"}, indent=2) + "\n", encoding="utf-8")
 
-    monkeypatch.setattr(check_model, "read_json_stdin", lambda: {"workspaceRoot": str(tmp_path), "modelOutput": {}})
+    bundle_root = _ready_evidence_bundle(tmp_path, "game_ls20")
+    monkeypatch.setattr(check_model, "read_json_stdin", lambda: {"workspaceRoot": str(tmp_path), "modelOutput": {}, "evidenceBundlePath": str(bundle_root)})
     monkeypatch.setattr(check_model, "load_runtime_meta", lambda _workspace: {
         "model_workspace_dir": str(model_workspace),
         "run_config_dir": str(tmp_path / "config"),
@@ -105,7 +134,8 @@ def test_check_model_accepts_frontier_discovery_when_level_current_meta_is_stale
     (level2_sequences / "seq_0001.json").write_text(json.dumps({"level": 2, "sequence_id": "seq_0001", "end_reason": "open"}, indent=2) + "\n", encoding="utf-8")
     (level2_sequences / "seq_0003.json").write_text(json.dumps({"level": 2, "sequence_id": "seq_0003", "end_reason": "level_change"}, indent=2) + "\n", encoding="utf-8")
 
-    monkeypatch.setattr(check_model, "read_json_stdin", lambda: {"workspaceRoot": str(tmp_path), "modelOutput": {}})
+    bundle_root = _ready_evidence_bundle(tmp_path, "game_ls20")
+    monkeypatch.setattr(check_model, "read_json_stdin", lambda: {"workspaceRoot": str(tmp_path), "modelOutput": {}, "evidenceBundlePath": str(bundle_root)})
     monkeypatch.setattr(check_model, "load_runtime_meta", lambda _workspace: {
         "model_workspace_dir": str(model_workspace),
         "run_config_dir": str(tmp_path / "config"),
