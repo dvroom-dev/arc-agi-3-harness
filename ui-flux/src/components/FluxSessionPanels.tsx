@@ -14,6 +14,45 @@ export function SessionsView({
 }) {
   return (
     <div className="space-y-4">
+      <section className="rounded-[24px] border border-white/10 bg-[var(--panel)] p-4">
+        <div className="mb-3 text-xs uppercase tracking-[0.16em] text-white/40">Model Coverage</div>
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="rounded-xl border border-white/8 bg-black/15 p-3">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-white/45">Generated Sequences</div>
+            <div className="mt-2 text-2xl font-semibold text-white">{detail.generatedSequenceCount ?? "n/a"}</div>
+          </div>
+          <div className="rounded-xl border border-white/8 bg-black/15 p-3">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-white/45">Matched By Model</div>
+            <div className="mt-2 text-sm font-semibold text-white">
+              {detail.acceptedCoverageMatchedSequences ?? "n/a"} accepted
+            </div>
+            <div className="mt-2 text-[11px] text-white/60">
+              of {detail.generatedSequenceCount ?? "n/a"} generated sequences
+            </div>
+          </div>
+          <div className="rounded-xl border border-white/8 bg-black/15 p-3">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-white/45">Accepted Head</div>
+            <div className="mt-2 text-sm font-semibold text-white">
+              {detail.acceptedCoverageHighestSequenceId
+                ? `level ${detail.acceptedCoverageLevel ?? "?"} · ${detail.acceptedCoverageHighestSequenceId}`
+                : "none"}
+            </div>
+            <div className="mt-2 text-[11px] text-white/55">accepted model coverage</div>
+          </div>
+          <div className="rounded-xl border border-white/8 bg-black/15 p-3">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-white/45">Current Working On</div>
+            <div className="mt-2 text-sm font-semibold text-white">
+              {detail.currentModelerTargetSequenceId
+                ? `level ${detail.currentModelerTargetLevel ?? "?"} · ${detail.currentModelerTargetSequenceId}`
+                : "none"}
+            </div>
+            <div className="mt-2 text-[11px] text-white/60">
+              {detail.currentModelerTargetStep ? `step ${detail.currentModelerTargetStep}` : "n/a"}
+              {detail.currentModelerTargetReason ? ` · ${detail.currentModelerTargetReason}` : ""}
+            </div>
+          </div>
+        </div>
+      </section>
       {SESSION_TYPES.map((sessionType) => (
         <section key={sessionType} className="rounded-[24px] border border-white/10 bg-[var(--panel)] p-4">
           <div className="mb-3 flex items-center justify-between gap-3">
@@ -52,12 +91,19 @@ export function SessionsView({
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <SessionStatusBadge status={session.status} />
                     <span className="text-[10px] uppercase tracking-[0.14em] text-white/45">
-                      prompts {session.promptCount}
+                      history turns {session.promptCount}
                     </span>
                     <span className="text-[10px] uppercase tracking-[0.14em] text-white/45">
-                      replies {session.assistantMessageCount}
+                      history replies {session.assistantMessageCount}
                     </span>
                   </div>
+                  {sessionType === "modeler" && detail.currentModelerTargetSequenceId ? (
+                    <div className="mt-2 text-[11px] text-white/70">
+                      current target level {detail.currentModelerTargetLevel ?? "?"} · {detail.currentModelerTargetSequenceId}
+                      {detail.currentModelerTargetStep ? ` step ${detail.currentModelerTargetStep}` : ""}
+                      {detail.currentModelerTargetReason ? ` · ${detail.currentModelerTargetReason}` : ""}
+                    </div>
+                  ) : null}
                   {session.stopReason ? (
                     <div className="mt-2 line-clamp-2 text-[11px] text-white/55">{session.stopReason}</div>
                   ) : null}
@@ -80,13 +126,13 @@ export function SessionDetailView({ sessionDetail }: { sessionDetail: FluxSessio
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <SessionStatusBadge status={sessionDetail.session?.status ?? "unknown"} />
           <span className="text-[10px] uppercase tracking-[0.14em] text-white/45">
-            prompts {sessionDetail.session?.promptCount ?? 0}
+            history turns {sessionDetail.session?.promptCount ?? 0}
           </span>
           <span className="text-[10px] uppercase tracking-[0.14em] text-white/45">
-            user msgs {sessionDetail.session?.userMessageCount ?? 0}
+            history user msgs {sessionDetail.session?.userMessageCount ?? 0}
           </span>
           <span className="text-[10px] uppercase tracking-[0.14em] text-white/45">
-            replies {sessionDetail.session?.assistantMessageCount ?? 0}
+            history replies {sessionDetail.session?.assistantMessageCount ?? 0}
           </span>
         </div>
         {sessionDetail.session?.stopReason ? (
@@ -95,9 +141,14 @@ export function SessionDetailView({ sessionDetail }: { sessionDetail: FluxSessio
           </div>
         ) : null}
       </section>
-      <section className="rounded-[24px] border border-white/10 bg-[var(--panel)] p-4">
-        <div className="mb-3 text-xs uppercase tracking-[0.16em] text-white/45">Messages</div>
-        <div className="space-y-3">
+      <details className="rounded-[24px] border border-white/10 bg-[var(--panel)] p-4">
+        <summary className="cursor-pointer list-none select-none">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs uppercase tracking-[0.16em] text-white/45">Messages</div>
+            <div className="text-[11px] text-white/45">{sessionDetail.messages.length} entries</div>
+          </div>
+        </summary>
+        <div className="mt-4 space-y-3">
           {sessionDetail.messages.map((message, index) => (
             <div key={index} className="rounded-xl border border-white/8 bg-white/4 p-3">
               <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--accent)]">{String(message.kind ?? "message")}</div>
@@ -105,10 +156,15 @@ export function SessionDetailView({ sessionDetail }: { sessionDetail: FluxSessio
             </div>
           ))}
         </div>
-      </section>
-      <section className="rounded-[24px] border border-white/10 bg-[var(--panel)] p-4">
-        <div className="mb-3 text-xs uppercase tracking-[0.16em] text-white/45">Tool Calls</div>
-        <div className="space-y-3">
+      </details>
+      <details className="rounded-[24px] border border-white/10 bg-[var(--panel)] p-4">
+        <summary className="cursor-pointer list-none select-none">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs uppercase tracking-[0.16em] text-white/45">Tool Calls</div>
+            <div className="text-[11px] text-white/45">{sessionDetail.toolEvents.length} entries</div>
+          </div>
+        </summary>
+        <div className="mt-4 space-y-3">
           {sessionDetail.toolEvents.map((event, index) => (
             <div key={index} className="rounded-xl border border-white/8 bg-white/4 p-3">
               <div className="text-[10px] uppercase tracking-[0.14em] text-[var(--accent-2)]">{event.kind}</div>
@@ -117,10 +173,15 @@ export function SessionDetailView({ sessionDetail }: { sessionDetail: FluxSessio
             </div>
           ))}
         </div>
-      </section>
-      <section className="rounded-[24px] border border-white/10 bg-[var(--panel)] p-4">
-        <div className="mb-3 text-xs uppercase tracking-[0.16em] text-white/45">Prompt Inputs</div>
-        <div className="space-y-3">
+      </details>
+      <details className="rounded-[24px] border border-white/10 bg-[var(--panel)] p-4">
+        <summary className="cursor-pointer list-none select-none">
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-xs uppercase tracking-[0.16em] text-white/45">Prompt Inputs</div>
+            <div className="text-[11px] text-white/45">{sessionDetail.prompts.length} entries</div>
+          </div>
+        </summary>
+        <div className="mt-4 space-y-3">
           {sessionDetail.prompts.map((prompt) => (
             <div key={prompt.fileName} className="rounded-xl border border-white/8 bg-white/4 p-3">
               <div className="font-mono text-xs text-white">{prompt.fileName}</div>
@@ -128,7 +189,7 @@ export function SessionDetailView({ sessionDetail }: { sessionDetail: FluxSessio
             </div>
           ))}
         </div>
-      </section>
+      </details>
     </div>
   );
 }

@@ -191,6 +191,25 @@ function StateView({
             <div className="mt-3 text-[10px] uppercase tracking-[0.14em] text-white/45">Seed Delta</div>
             <div className="mt-2 text-sm text-white/80">{detail.lastSeedDeltaKind ?? "none"}</div>
           </div>
+          <div className="rounded-2xl border border-white/10 bg-white/4 p-4">
+            <div className="text-[10px] uppercase tracking-[0.14em] text-white/45">Generated Sequences</div>
+            <div className="mt-2 text-2xl font-semibold text-white">{detail.generatedSequenceCount ?? "n/a"}</div>
+            <div className="mt-3 text-[10px] uppercase tracking-[0.14em] text-white/45">Matched By Model</div>
+            <div className="mt-2 text-sm text-white/80">
+              {detail.acceptedCoverageMatchedSequences ?? "n/a"} accepted / {detail.generatedSequenceCount ?? "n/a"} generated
+            </div>
+            {detail.currentModelerTargetSequenceId ? (
+              <div className="mt-3 text-[11px] text-white/70">
+                working on level {detail.currentModelerTargetLevel ?? "?"} · {detail.currentModelerTargetSequenceId}
+                {detail.currentModelerTargetStep ? ` step ${detail.currentModelerTargetStep}` : ""}
+                {detail.currentModelerTargetReason ? ` · ${detail.currentModelerTargetReason}` : ""}
+              </div>
+            ) : (
+              <div className="mt-3 text-[11px] text-white/55">
+                no current modeler target
+              </div>
+            )}
+          </div>
         </div>
       </section>
       <section className="rounded-[24px] border border-white/10 bg-[var(--panel)] p-4">

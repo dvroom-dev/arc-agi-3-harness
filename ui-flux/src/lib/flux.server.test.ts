@@ -352,4 +352,361 @@ describe("flux UI server helpers", () => {
       await fs.rm(tmpRoot, { recursive: true, force: true });
     }
   });
+
+  test("uses durable model workspace for coverage counts even when the active attempt surface is thin", async () => {
+    const runId = `ui-flux-coverage-${Date.now()}`;
+    createdRuns.push(runId);
+    const runRoot = path.join(RUNS_DIR, runId);
+    const attemptRoot = path.join(runRoot, "flux_instances", "attempt_live");
+    const attemptGame = path.join(attemptRoot, "agent", "game_ls20");
+    const durableGame = path.join(runRoot, "agent", "game_ls20");
+
+    await fs.mkdir(path.join(runRoot, "flux"), { recursive: true });
+    await fs.mkdir(path.join(runRoot, "flux", "model", "current"), { recursive: true });
+    await fs.mkdir(path.join(runRoot, ".ai-flux", "sessions", "solver", "solver_attempt_live"), { recursive: true });
+    await fs.mkdir(path.join(attemptRoot, "supervisor", "arc"), { recursive: true });
+    await fs.mkdir(path.join(attemptGame, "level_current", "sequence_compare"), { recursive: true });
+    await fs.mkdir(path.join(attemptGame, "level_current", "sequences"), { recursive: true });
+    await fs.mkdir(path.join(durableGame, "level_1", "sequences"), { recursive: true });
+
+    await fs.writeFile(path.join(runRoot, "flux_runtime.json"), JSON.stringify({ game_id: "ls20" }, null, 2), "utf8");
+    await fs.writeFile(
+      path.join(runRoot, "flux", "state.json"),
+      JSON.stringify({
+        version: 1,
+        workspaceRoot: runRoot,
+        configPath: path.join(runRoot, "flux.yaml"),
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: "running",
+        stopRequested: false,
+        active: {
+          solver: {
+            sessionId: "solver_attempt_live",
+            status: "running",
+            attemptId: "attempt_live",
+            instanceId: "attempt_live",
+          },
+          modeler: { status: "idle" },
+          bootstrapper: { status: "idle" },
+        },
+      }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(runRoot, ".ai-flux", "sessions", "solver", "solver_attempt_live", "session.json"),
+      JSON.stringify({
+        sessionId: "solver_attempt_live",
+        sessionType: "solver",
+        status: "running",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        provider: "claude",
+        model: "claude-opus-4-6",
+      }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(attemptRoot, "supervisor", "arc", "state.json"),
+      JSON.stringify({
+        current_level: 1,
+        levels_completed: 0,
+        state: "NOT_FINISHED",
+        win_levels: 7,
+      }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(path.join(attemptGame, "level_current", "meta.json"), JSON.stringify({ level: 1 }, null, 2), "utf8");
+    await fs.writeFile(path.join(attemptGame, "level_current", "initial_state.hex"), "0\n", "utf8");
+    await fs.writeFile(path.join(attemptGame, "level_current", "current_state.hex"), "1\n", "utf8");
+    await fs.writeFile(
+      path.join(attemptGame, "level_current", "sequence_compare", "current_compare.json"),
+      JSON.stringify({
+        level: 1,
+        all_match: true,
+        requested_sequences: 1,
+        compared_sequences: 1,
+        diverged_sequences: 0,
+        reports: [{ level: 1, sequence_id: "seq_0001", matched: true }],
+      }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(attemptGame, "level_current", "sequences", "seq_0001.json"),
+      JSON.stringify({ level: 1, sequence_id: "seq_0001" }, null, 2),
+      "utf8",
+    );
+
+    await fs.writeFile(
+      path.join(durableGame, "level_1", "sequences", "seq_0001.json"),
+      JSON.stringify({ level: 1, sequence_id: "seq_0001" }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(durableGame, "level_1", "sequences", "seq_0002.json"),
+      JSON.stringify({ level: 1, sequence_id: "seq_0002" }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(durableGame, "current_compare.json"),
+      JSON.stringify({
+        level: 1,
+        all_match: false,
+        requested_sequences: 2,
+        compared_sequences: 2,
+        diverged_sequences: 1,
+        reports: [
+          { level: 1, sequence_id: "seq_0001", matched: true },
+          { level: 1, sequence_id: "seq_0002", matched: false, divergence_step: 3, divergence_reason: "intermediate_frame_mismatch" },
+        ],
+      }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(runRoot, "flux", "model", "current", "meta.json"),
+      JSON.stringify({
+        revisionId: "rev_accepted",
+        summary: {
+          level: 1,
+          allMatch: false,
+          coveredSequenceIds: ["level_1:seq_0001", "level_1:seq_0002"],
+          contiguousMatchedSequences: 2,
+          firstFailingSequenceId: "seq_0003",
+          firstFailingStep: 1,
+          firstFailingReason: "intermediate_frame_mismatch",
+          frontierDiscovered: false,
+          compareKind: "accepted",
+        },
+      }, null, 2),
+      "utf8",
+    );
+
+    const detail = await readFluxRunDetail(runId);
+    expect(detail).not.toBeNull();
+    expect(detail?.selectedGameDir?.includes("attempt_live")).toBe(true);
+    expect(detail?.generatedSequenceCount).toBe(2);
+    expect(detail?.acceptedCoverageLevel).toBe(1);
+    expect(detail?.acceptedCoverageMatchedSequences).toBe(2);
+    expect(detail?.acceptedCoverageHighestSequenceId).toBe("seq_0002");
+  });
+
+  test("prefers active modeler evidence bundle for generated sequence counts and active slot status over stale session status", async () => {
+    const runId = `ui-flux-modeler-active-${Date.now()}`;
+    createdRuns.push(runId);
+    const runRoot = path.join(RUNS_DIR, runId);
+    const durableGame = path.join(runRoot, "agent", "game_ls20");
+    const activeBundle = path.join(runRoot, "flux", "evidence_bundles", "bundle_live");
+
+    await fs.mkdir(path.join(runRoot, "flux", "model", "current"), { recursive: true });
+    await fs.mkdir(path.join(runRoot, "flux", "invocations", "q_model_live"), { recursive: true });
+    await fs.mkdir(path.join(runRoot, "flux", "queues"), { recursive: true });
+    await fs.mkdir(path.join(runRoot, ".ai-flux", "sessions", "modeler", "modeler_run"), { recursive: true });
+    await fs.mkdir(path.join(durableGame, "level_1", "sequences"), { recursive: true });
+    await fs.mkdir(path.join(activeBundle, "workspace", "game_ls20", "level_1", "sequences"), { recursive: true });
+    await fs.mkdir(path.join(activeBundle, "workspace", "game_ls20", "level_2", "sequences"), { recursive: true });
+
+    await fs.writeFile(path.join(runRoot, "flux_runtime.json"), JSON.stringify({ game_id: "ls20" }, null, 2), "utf8");
+    await fs.writeFile(
+      path.join(runRoot, "flux", "state.json"),
+      JSON.stringify({
+        version: 1,
+        workspaceRoot: runRoot,
+        configPath: path.join(runRoot, "flux.yaml"),
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: "running",
+        stopRequested: false,
+        active: {
+          solver: { status: "idle" },
+          modeler: {
+            sessionId: "modeler_run",
+            invocationId: "q_model_live",
+            status: "running",
+          },
+          bootstrapper: { status: "idle" },
+        },
+      }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(runRoot, ".ai-flux", "sessions", "modeler", "modeler_run", "session.json"),
+      JSON.stringify({
+        sessionId: "modeler_run",
+        sessionType: "modeler",
+        status: "idle",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        provider: "codex",
+        model: "gpt-5.4",
+      }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(runRoot, "flux", "invocations", "q_model_live", "input.json"),
+      JSON.stringify({
+        invocationId: "q_model_live",
+        payload: {
+          evidenceBundlePath: activeBundle,
+          evidenceWatermark: "wm_live",
+        },
+      }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(runRoot, "flux", "queues", "modeler.json"),
+      JSON.stringify({ sessionType: "modeler", updatedAt: new Date().toISOString(), items: [] }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(runRoot, "flux", "model", "current", "meta.json"),
+      JSON.stringify({
+        revisionId: "model_rev_live",
+        summary: {
+          level: 1,
+          allMatch: true,
+          coveredSequenceIds: ["level_1:seq_0001", "level_1:seq_0002"],
+          contiguousMatchedSequences: 2,
+          firstFailingSequenceId: null,
+          firstFailingStep: null,
+          firstFailingReason: null,
+          frontierDiscovered: false,
+          compareKind: "accepted",
+        },
+      }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(path.join(durableGame, "level_1", "sequences", "seq_0001.json"), JSON.stringify({ level: 1, sequence_id: "seq_0001" }, null, 2), "utf8");
+    await fs.writeFile(path.join(durableGame, "level_1", "sequences", "seq_0002.json"), JSON.stringify({ level: 1, sequence_id: "seq_0002" }, null, 2), "utf8");
+    await fs.writeFile(path.join(activeBundle, "workspace", "game_ls20", "level_1", "sequences", "seq_0001.json"), JSON.stringify({ level: 1, sequence_id: "seq_0001" }, null, 2), "utf8");
+    await fs.writeFile(path.join(activeBundle, "workspace", "game_ls20", "level_1", "sequences", "seq_0002.json"), JSON.stringify({ level: 1, sequence_id: "seq_0002" }, null, 2), "utf8");
+    await fs.writeFile(path.join(activeBundle, "workspace", "game_ls20", "level_1", "sequences", "seq_0003.json"), JSON.stringify({ level: 1, sequence_id: "seq_0003" }, null, 2), "utf8");
+    await fs.writeFile(path.join(activeBundle, "workspace", "game_ls20", "level_2", "sequences", "seq_0001.json"), JSON.stringify({ level: 2, sequence_id: "seq_0001" }, null, 2), "utf8");
+
+    const detail = await readFluxRunDetail(runId);
+    expect(detail).not.toBeNull();
+    expect(detail?.generatedSequenceCount).toBe(4);
+    expect(detail?.acceptedCoverageMatchedSequences).toBe(2);
+    expect(detail?.sessionHistory.modeler[0]?.status).toBe("running");
+    expect(detail?.currentModelerTargetLevel).toBe(1);
+    expect(detail?.currentModelerTargetSequenceId).toBe("seq_0003");
+    expect(detail?.currentModelerTargetReason).toBe("awaiting compare");
+  });
+
+  test("hides queued work and current modeler target once the run is stopped", async () => {
+    const runId = `ui-flux-stopped-${Date.now()}`;
+    createdRuns.push(runId);
+    const runRoot = path.join(RUNS_DIR, runId);
+
+    await fs.mkdir(path.join(runRoot, "flux", "queues"), { recursive: true });
+    await fs.mkdir(path.join(runRoot, "flux", "model", "current"), { recursive: true });
+    await fs.mkdir(path.join(runRoot, ".ai-flux", "sessions", "modeler", "modeler_run"), { recursive: true });
+
+    await fs.writeFile(path.join(runRoot, "flux_runtime.json"), JSON.stringify({ game_id: "ls20" }, null, 2), "utf8");
+    await fs.writeFile(
+      path.join(runRoot, "flux", "state.json"),
+      JSON.stringify({
+        version: 1,
+        workspaceRoot: runRoot,
+        configPath: path.join(runRoot, "flux.yaml"),
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: "stopped",
+        stopRequested: true,
+        active: {
+          solver: { status: "idle" },
+          modeler: { sessionId: "modeler_run", invocationId: "q_old", status: "idle" },
+          bootstrapper: { status: "idle" },
+        },
+      }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(runRoot, "flux", "queues", "modeler.json"),
+      JSON.stringify({
+        sessionType: "modeler",
+        updatedAt: new Date().toISOString(),
+        items: [{ id: "q_stale", sessionType: "modeler", createdAt: new Date().toISOString(), reason: "solver_stopped", payload: { evidenceBundleId: "bundle_x" } }],
+      }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(runRoot, ".ai-flux", "sessions", "modeler", "modeler_run", "session.json"),
+      JSON.stringify({
+        sessionId: "modeler_run",
+        sessionType: "modeler",
+        status: "idle",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        provider: "codex",
+        model: "gpt-5.4",
+      }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(runRoot, "flux", "events.jsonl"),
+      JSON.stringify({
+        kind: "modeler.acceptance_failed",
+        summary: "compare mismatch at level 1 sequence seq_0005 step 13: state_transition_mismatch",
+      }) + "\n",
+      "utf8",
+    );
+
+    const detail = await readFluxRunDetail(runId);
+    expect(detail).not.toBeNull();
+    expect(detail?.queues.modeler.length).toBe(0);
+    expect(detail?.queues.modeler.reason).toBeNull();
+    expect(detail?.currentModelerTargetSequenceId).toBeNull();
+    expect(detail?.currentModelerTargetLevel).toBeNull();
+  });
+
+  test("preserves failed session status and normalizes JSON stop reasons", async () => {
+    const runId = `ui-flux-failed-session-${Date.now()}`;
+    createdRuns.push(runId);
+    const runRoot = path.join(RUNS_DIR, runId);
+
+    await fs.mkdir(path.join(runRoot, "flux"), { recursive: true });
+    await fs.mkdir(path.join(runRoot, ".ai-flux", "sessions", "bootstrapper", "bootstrapper_run"), { recursive: true });
+    await fs.writeFile(path.join(runRoot, "flux_runtime.json"), JSON.stringify({ game_id: "ls20" }, null, 2), "utf8");
+    await fs.writeFile(
+      path.join(runRoot, "flux", "state.json"),
+      JSON.stringify({
+        version: 1,
+        workspaceRoot: runRoot,
+        configPath: path.join(runRoot, "flux.yaml"),
+        pid: process.pid,
+        startedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        status: "running",
+        stopRequested: false,
+        active: {
+          solver: { status: "idle" },
+          modeler: { status: "idle" },
+          bootstrapper: { sessionId: "bootstrapper_run", invocationId: "q_boot", status: "idle" },
+        },
+      }, null, 2),
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(runRoot, ".ai-flux", "sessions", "bootstrapper", "bootstrapper_run", "session.json"),
+      JSON.stringify({
+        sessionId: "bootstrapper_run",
+        sessionType: "bootstrapper",
+        status: "failed",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        provider: "codex",
+        model: "gpt-5.4",
+        stopReason: "{\"detail\":\"Bad Request\"}",
+      }, null, 2),
+      "utf8",
+    );
+
+    const detail = await readFluxRunDetail(runId);
+    expect(detail).not.toBeNull();
+    expect(detail?.sessionHistory.bootstrapper[0]?.status).toBe("failed");
+    expect(detail?.sessionHistory.bootstrapper[0]?.stopReason).toBe("Bad Request");
+  });
 });

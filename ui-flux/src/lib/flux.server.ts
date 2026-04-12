@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { readFrameSnapshots } from "@/lib/flux.frames";
-import { HARNESS_FLUX_ENTRYPOINT, RUNS_DIR, SUPER_FLUX_ENTRYPOINT, runDir } from "@/lib/paths";
+import { HARNESS_FLUX_ENTRYPOINT, HARNESS_VENV_PYTHON, RUNS_DIR, SUPER_FLUX_ENTRYPOINT, runDir } from "@/lib/paths";
 import type {
   FluxPromptPayload,
   FluxQueuePreview,
@@ -153,6 +153,16 @@ function isPidAlive(pid: number | null): boolean {
 }
 
 function normalizeSessionSummary(payload: JsonRecord | null, sessionType: FluxSessionType, sessionId: string): FluxSessionSummary {
+  const rawStopReason = typeof payload?.stopReason === "string" ? String(payload.stopReason) : null;
+  let stopReason = rawStopReason;
+  if (rawStopReason && rawStopReason.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(rawStopReason) as JsonRecord;
+      if (typeof parsed.detail === "string" && parsed.detail.trim()) {
+        stopReason = String(parsed.detail);
+      }
+    } catch {}
+  }
   return {
     sessionId,
     sessionType,
@@ -161,7 +171,7 @@ function normalizeSessionSummary(payload: JsonRecord | null, sessionType: FluxSe
     updatedAt: typeof payload?.updatedAt === "string" ? String(payload.updatedAt) : null,
     provider: typeof payload?.provider === "string" ? String(payload.provider) : null,
     model: typeof payload?.model === "string" ? String(payload.model) : null,
-    stopReason: typeof payload?.stopReason === "string" ? String(payload.stopReason) : null,
+    stopReason,
     latestAssistantText: typeof payload?.latestAssistantText === "string" ? String(payload.latestAssistantText) : null,
     promptCount: 0,
     userMessageCount: 0,
@@ -288,6 +298,277 @@ async function pickGameDirForRun(runId: string, state: JsonRecord | null): Promi
   return { gameDir: null, attemptId: null, attemptRoot: null };
 }
 
+async function pickDurableGameDirForRun(runId: string): Promise<string | null> {
+  const root = runDir(runId);
+  const durableAgentDir = path.join(root, "agent");
+  const durableEntries = await fs.readdir(durableAgentDir, { withFileTypes: true }).catch(() => []);
+  const durableGame = durableEntries.find((entry) => entry.isDirectory() && entry.name.startsWith("game_"));
+  return durableGame ? path.join(durableAgentDir, durableGame.name) : null;
+}
+
+async function pickGameDirUnder(rootDir: string | null): Promise<string | null> {
+  if (!rootDir) return null;
+  const entries = await fs.readdir(rootDir, { withFileTypes: true }).catch(() => []);
+  const game = entries.find((entry) => entry.isDirectory() && entry.name.startsWith("game_"));
+  return game ? path.join(rootDir, game.name) : null;
+}
+
+async function countGeneratedSequences(gameDir: string | null): Promise<number | null> {
+  if (!gameDir) return null;
+  const entries = await fs.readdir(gameDir, { withFileTypes: true }).catch(() => []);
+  let count = 0;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (!entry.name.startsWith("level_") || entry.name === "level_current") continue;
+    const seqDir = path.join(gameDir, entry.name, "sequences");
+    const seqEntries = await fs.readdir(seqDir, { withFileTypes: true }).catch(() => []);
+    count += seqEntries.filter((candidate) => candidate.isFile() && candidate.name.startsWith("seq_") && candidate.name.endsWith(".json")).length;
+  }
+  return count;
+}
+
+async function readInvocationPayload(root: string, invocationId: string | null): Promise<JsonRecord | null> {
+  if (!invocationId) return null;
+  const input = await readJson<JsonRecord>(path.join(root, "flux", "invocations", invocationId, "input.json"));
+  const payload = input?.payload;
+  return payload && typeof payload === "object" && !Array.isArray(payload) ? payload as JsonRecord : null;
+}
+
+async function resolveEvidenceCoverageGameDir(root: string, state: JsonRecord | null): Promise<string | null> {
+  const activeModeler = (state?.active as JsonRecord | undefined)?.modeler as JsonRecord | undefined;
+  const activeInvocationId = typeof activeModeler?.invocationId === "string" ? String(activeModeler.invocationId) : null;
+  const activePayload = await readInvocationPayload(root, activeInvocationId);
+  const activeBundlePath = typeof activePayload?.evidenceBundlePath === "string" ? String(activePayload.evidenceBundlePath) : null;
+  const activeBundleGameDir = await pickGameDirUnder(activeBundlePath ? path.join(activeBundlePath, "workspace") : null);
+  if (activeBundleGameDir) return activeBundleGameDir;
+
+  const modelerQueue = await readJson<{ items?: unknown[] }>(path.join(root, "flux", "queues", "modeler.json"));
+  const queueItems = Array.isArray(modelerQueue?.items) ? modelerQueue.items : [];
+  const head = queueItems[0];
+  const payload = head && typeof head === "object" && !Array.isArray(head)
+    && (head as JsonRecord).payload && typeof (head as JsonRecord).payload === "object" && !Array.isArray((head as JsonRecord).payload)
+    ? (head as JsonRecord).payload as JsonRecord
+    : null;
+  const queuedBundlePath = typeof payload?.evidenceBundlePath === "string" ? String(payload.evidenceBundlePath) : null;
+  const queuedBundleGameDir = await pickGameDirUnder(queuedBundlePath ? path.join(queuedBundlePath, "workspace") : null);
+  if (queuedBundleGameDir) return queuedBundleGameDir;
+
+  return null;
+}
+
+async function readLastCompareSummary(gameDir: string | null): Promise<{
+  level: number | null;
+  requestedSequences: number | null;
+  comparedSequences: number | null;
+  matchedSequences: number | null;
+  divergedSequences: number | null;
+  allMatch: boolean | null;
+  highestMatchedLevel: number | null;
+  highestMatchedSequenceId: string | null;
+  firstFailingSequenceId: string | null;
+  firstFailingStep: number | null;
+  firstFailingReason: string | null;
+}> {
+  if (!gameDir) {
+    return {
+      level: null,
+      requestedSequences: null,
+      comparedSequences: null,
+      matchedSequences: null,
+      divergedSequences: null,
+      allMatch: null,
+      highestMatchedLevel: null,
+      highestMatchedSequenceId: null,
+      firstFailingSequenceId: null,
+      firstFailingStep: null,
+      firstFailingReason: null,
+    };
+  }
+  const comparePayload = await readJson<JsonRecord>(path.join(gameDir, "current_compare.json"));
+  if (!comparePayload) {
+    return {
+      level: null,
+      requestedSequences: null,
+      comparedSequences: null,
+      matchedSequences: null,
+      divergedSequences: null,
+      allMatch: null,
+      highestMatchedLevel: null,
+      highestMatchedSequenceId: null,
+      firstFailingSequenceId: null,
+      firstFailingStep: null,
+      firstFailingReason: null,
+    };
+  }
+  const reports = Array.isArray(comparePayload.reports) ? comparePayload.reports : [];
+  const matchedSequences = reports.filter((report) => report && typeof report === "object" && !Array.isArray(report) && Boolean((report as JsonRecord).matched)).length;
+  const highestMatchedReport = reports
+    .filter((report) => report && typeof report === "object" && !Array.isArray(report) && Boolean((report as JsonRecord).matched))
+    .map((report) => report as JsonRecord)
+    .sort((left, right) => {
+      const leftLevel = typeof left.level === "number" ? Number(left.level) : 0;
+      const rightLevel = typeof right.level === "number" ? Number(right.level) : 0;
+      if (leftLevel !== rightLevel) return rightLevel - leftLevel;
+      return String(right.sequence_id ?? "").localeCompare(String(left.sequence_id ?? ""));
+    })[0] ?? null;
+  const firstFailingReport = reports.find((report) =>
+    report && typeof report === "object" && !Array.isArray(report) && !Boolean((report as JsonRecord).matched),
+  ) as JsonRecord | undefined;
+  return {
+    level: typeof comparePayload.level === "number" ? Number(comparePayload.level) : null,
+    requestedSequences: typeof comparePayload.requested_sequences === "number" ? Number(comparePayload.requested_sequences) : null,
+    comparedSequences: typeof comparePayload.compared_sequences === "number" ? Number(comparePayload.compared_sequences) : null,
+    matchedSequences,
+    divergedSequences: typeof comparePayload.diverged_sequences === "number" ? Number(comparePayload.diverged_sequences) : null,
+    allMatch: typeof comparePayload.all_match === "boolean" ? Boolean(comparePayload.all_match) : null,
+    highestMatchedLevel: typeof highestMatchedReport?.level === "number" ? Number(highestMatchedReport.level) : null,
+    highestMatchedSequenceId: typeof highestMatchedReport?.sequence_id === "string" ? String(highestMatchedReport.sequence_id) : null,
+    firstFailingSequenceId: typeof firstFailingReport?.sequence_id === "string" ? String(firstFailingReport.sequence_id) : null,
+    firstFailingStep: typeof firstFailingReport?.divergence_step === "number" ? Number(firstFailingReport.divergence_step) : null,
+    firstFailingReason: typeof firstFailingReport?.divergence_reason === "string" ? String(firstFailingReport.divergence_reason) : null,
+  };
+}
+
+function parseCompareMismatch(text: string | null | undefined): {
+  level: number | null;
+  sequenceId: string | null;
+  step: number | null;
+  reason: string | null;
+} {
+  const source = String(text ?? "");
+  const match = source.match(/compare mismatch at level\s+(\d+)\s+sequence\s+(\S+)\s+step\s+(\d+):\s+([^\n]+)/i);
+  if (!match) {
+    return { level: null, sequenceId: null, step: null, reason: null };
+  }
+  return {
+    level: Number(match[1] ?? 0) || null,
+    sequenceId: match[2] ? String(match[2]) : null,
+    step: Number(match[3] ?? 0) || null,
+    reason: match[4] ? String(match[4]).trim() : null,
+  };
+}
+
+async function readLatestModelerTarget(root: string): Promise<{
+  level: number | null;
+  sequenceId: string | null;
+  step: number | null;
+  reason: string | null;
+}> {
+  const eventsPath = path.join(root, "flux", "events.jsonl");
+  const lines = await fs.readFile(eventsPath, "utf8").catch(() => "");
+  let latestFailure: JsonRecord | null = null;
+  for (const line of lines.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const row = JSON.parse(line) as JsonRecord;
+      if (row.kind === "modeler.acceptance_failed") latestFailure = row;
+    } catch {}
+  }
+  if (!latestFailure) {
+    return { level: null, sequenceId: null, step: null, reason: null };
+  }
+  const payload = latestFailure.payload && typeof latestFailure.payload === "object" && !Array.isArray(latestFailure.payload)
+    ? latestFailure.payload as JsonRecord
+    : {};
+  const candidateText = typeof payload.acceptanceMessage === "string"
+    ? String(payload.acceptanceMessage)
+    : (typeof latestFailure.summary === "string" ? String(latestFailure.summary) : "");
+  return parseCompareMismatch(candidateText);
+}
+
+function summarizeAcceptedCoverage(currentModelMeta: JsonRecord | null): {
+  level: number | null;
+  highestSequenceId: string | null;
+  matchedSequences: number | null;
+  coveredSequenceIds: string[];
+} {
+  const summary = currentModelMeta?.summary;
+  if (!summary || typeof summary !== "object" || Array.isArray(summary)) {
+    return { level: null, highestSequenceId: null, matchedSequences: null, coveredSequenceIds: [] };
+  }
+  const record = summary as JsonRecord;
+  const level = typeof record.level === "number" ? Number(record.level) : null;
+  const covered = Array.isArray(record.coveredSequenceIds) ? record.coveredSequenceIds.filter((value): value is string => typeof value === "string") : [];
+  const highest = covered
+    .filter((value): value is string => typeof value === "string")
+    .sort((left, right) => {
+      const parse = (value: string): { level: number; seq: number } => {
+        const match = value.match(/^level_(\d+):(seq_(\d+))$/i);
+        return {
+          level: Number(match?.[1] ?? 0) || 0,
+          seq: Number(match?.[3] ?? 0) || 0,
+        };
+      };
+      const leftParsed = parse(left);
+      const rightParsed = parse(right);
+      if (leftParsed.level !== rightParsed.level) return leftParsed.level - rightParsed.level;
+      if (leftParsed.seq !== rightParsed.seq) return leftParsed.seq - rightParsed.seq;
+      return left.localeCompare(right);
+    })
+    .at(-1) ?? null;
+  const highestSequenceId = highest?.includes(":") ? highest.split(":").at(-1) ?? null : highest;
+  return { level, highestSequenceId, matchedSequences: covered.length, coveredSequenceIds: covered };
+}
+
+async function listSequenceRefs(gameDir: string | null): Promise<Array<{ level: number; sequenceId: string }>> {
+  if (!gameDir) return [];
+  const entries = await fs.readdir(gameDir, { withFileTypes: true }).catch(() => []);
+  const refs: Array<{ level: number; sequenceId: string }> = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const match = entry.name.match(/^level_(\d+)$/);
+    if (!match || entry.name === "level_current") continue;
+    const level = Number(match[1] ?? 0) || 0;
+    if (!level) continue;
+    const seqDir = path.join(gameDir, entry.name, "sequences");
+    const seqEntries = await fs.readdir(seqDir, { withFileTypes: true }).catch(() => []);
+    for (const seqEntry of seqEntries) {
+      if (!seqEntry.isFile() || !seqEntry.name.startsWith("seq_") || !seqEntry.name.endsWith(".json")) continue;
+      refs.push({ level, sequenceId: seqEntry.name.replace(/\.json$/i, "") });
+    }
+  }
+  refs.sort((left, right) => {
+    if (left.level !== right.level) return left.level - right.level;
+    const leftSeq = Number((left.sequenceId.match(/seq_(\d+)/i)?.[1] ?? 0)) || 0;
+    const rightSeq = Number((right.sequenceId.match(/seq_(\d+)/i)?.[1] ?? 0)) || 0;
+    return leftSeq - rightSeq;
+  });
+  return refs;
+}
+
+async function readFallbackModelerTarget(args: {
+  root: string;
+  state: JsonRecord | null;
+  acceptedCoverage: { level: number | null; coveredSequenceIds: string[] };
+  coverageGameDir: string | null;
+}): Promise<{
+  level: number | null;
+  sequenceId: string | null;
+  step: number | null;
+  reason: string | null;
+}> {
+  const activeModeler = (args.state?.active as JsonRecord | undefined)?.modeler as JsonRecord | undefined;
+  const activeStatus = typeof activeModeler?.status === "string" ? String(activeModeler.status) : "";
+  const queue = await readJson<{ items?: unknown[] }>(path.join(args.root, "flux", "queues", "modeler.json"));
+  const hasQueuedModeler = Array.isArray(queue?.items) && queue.items.length > 0;
+  if (activeStatus !== "running" && !hasQueuedModeler) {
+    return { level: null, sequenceId: null, step: null, reason: null };
+  }
+  const maxLevel = (args.acceptedCoverage.level ?? 0) > 0 ? (args.acceptedCoverage.level ?? 0) + 1 : 1;
+  const covered = new Set(args.acceptedCoverage.coveredSequenceIds);
+  const refs = await listSequenceRefs(args.coverageGameDir);
+  const nextRef = refs.find((ref) => ref.level <= maxLevel && !covered.has(`level_${ref.level}:${ref.sequenceId}`));
+  if (!nextRef) {
+    return { level: null, sequenceId: null, step: null, reason: hasQueuedModeler ? "queued evidence" : "running" };
+  }
+  return {
+    level: nextRef.level,
+    sequenceId: nextRef.sequenceId,
+    step: null,
+    reason: hasQueuedModeler ? "queued evidence" : "awaiting compare",
+  };
+}
+
 
 function summarizeQueueItem(queue: { items?: unknown[] } | null): FluxQueuePreview {
   const items = Array.isArray(queue?.items) ? queue.items : [];
@@ -328,9 +609,9 @@ function toRunSummary(
     SESSION_TYPES.map((sessionType) => {
       const payload = (activeRaw[sessionType] as JsonRecord | undefined) ?? {};
       const sessionRecord = activeSessionRecords[sessionType] ?? null;
-      const sessionStatus = typeof sessionRecord?.status === "string"
-        ? String(sessionRecord.status)
-        : (typeof payload.status === "string" ? String(payload.status) : "unknown");
+      const activePayloadStatus = typeof payload.status === "string" ? String(payload.status) : null;
+      const sessionStatus = activePayloadStatus
+        ?? (typeof sessionRecord?.status === "string" ? String(sessionRecord.status) : "unknown");
       const latestRunningSession = (latestSessionSummaries[sessionType] ?? []).find((session) => session.status === "running") ?? null;
       const resolvedSessionId = latestRunningSession && sessionStatus !== "running"
         ? latestRunningSession.sessionId
@@ -379,23 +660,87 @@ export async function readFluxRunDetail(runId: string): Promise<FluxRunDetail | 
   const seedMeta = await readJson<JsonRecord>(path.join(root, "flux", "seed", "current_meta.json"));
   const currentModelMeta = await readJson<JsonRecord>(path.join(root, "flux", "model", "current", "meta.json"));
   const activeSessionRecords = await readActiveSessionRecords(root, state);
-  const sessionHistory = Object.fromEntries(await Promise.all(SESSION_TYPES.map(async (sessionType) => {
+  const rawSessionHistory = Object.fromEntries(await Promise.all(SESSION_TYPES.map(async (sessionType) => {
     return [sessionType, await listSessionSummaries(root, sessionType)];
   }))) as FluxRunDetail["sessionHistory"];
   const { gameDir, attemptId, attemptRoot } = await pickGameDirForRun(runId, state);
+  const durableGameDir = await pickDurableGameDirForRun(runId);
+  const evidenceCoverageGameDir = await resolveEvidenceCoverageGameDir(root, state);
+  const coverageGameDir = evidenceCoverageGameDir ?? durableGameDir ?? gameDir;
   const currentState = await readAttemptArcState(attemptRoot)
     ?? await readJson<JsonRecord>(path.join(root, "supervisor", "arc", "state.json"));
-  const summary = toRunSummary(runId, state, runtimeMeta, currentState, activeSessionRecords, sessionHistory);
+  const summary = toRunSummary(runId, state, runtimeMeta, currentState, activeSessionRecords, rawSessionHistory);
+  const sessionHistory = Object.fromEntries(SESSION_TYPES.map((sessionType) => {
+    const activeSessionId = summary.active[sessionType].sessionId;
+    const activeStatus = summary.active[sessionType].status;
+    return [sessionType, (rawSessionHistory[sessionType] ?? []).map((session) => (
+      activeSessionId && session.sessionId === activeSessionId && session.status !== "failed"
+        ? { ...session, status: activeStatus }
+        : session
+    ))];
+  })) as FluxRunDetail["sessionHistory"];
   const queues = Object.fromEntries(await Promise.all(SESSION_TYPES.map(async (sessionType) => {
     const queue = await readJson<{ items?: unknown[] }>(path.join(root, "flux", "queues", `${sessionType}.json`));
     return [sessionType, summarizeQueueItem(queue)];
   }))) as FluxRunDetail["queues"];
   const timeline = gameDir ? await readFrameSnapshots(gameDir) : { frames: [], actions: [], currentLevel: null };
+  const generatedSequenceCount = await countGeneratedSequences(coverageGameDir);
+  const lastCompareSummary = await readLastCompareSummary(coverageGameDir);
+  const acceptedCoverage = summarizeAcceptedCoverage(currentModelMeta);
+  const latestModelerTarget = await readLatestModelerTarget(root);
+  const modelerTarget = latestModelerTarget.sequenceId
+    ? latestModelerTarget
+    : await readFallbackModelerTarget({
+        root,
+        state,
+        acceptedCoverage: {
+          level: acceptedCoverage.level,
+          coveredSequenceIds: acceptedCoverage.coveredSequenceIds,
+        },
+        coverageGameDir,
+      });
+  const runIsLive = summary.liveStatus === "running";
+  const visibleQueues = runIsLive
+    ? queues
+    : Object.fromEntries(SESSION_TYPES.map((sessionType) => [sessionType, {
+        ...queues[sessionType],
+        length: 0,
+        reason: null,
+        dedupeKey: null,
+        interruptPolicy: null,
+        baselineModelRevisionId: null,
+        modelRevisionId: null,
+        seedRevisionId: null,
+        seedDeltaKind: null,
+        evidenceBundleId: null,
+      }])) as FluxRunDetail["queues"];
+  const visibleModelerTarget = runIsLive
+    ? modelerTarget
+    : { level: null, sequenceId: null, step: null, reason: null };
   return {
     ...summary,
-    queues,
+    queues: visibleQueues,
     selectedGameDir: gameDir,
     currentState,
+    generatedSequenceCount,
+    acceptedCoverageLevel: acceptedCoverage.level,
+    acceptedCoverageHighestSequenceId: acceptedCoverage.highestSequenceId,
+    acceptedCoverageMatchedSequences: acceptedCoverage.matchedSequences,
+    lastCompareLevel: lastCompareSummary.level,
+    lastCompareRequestedSequences: lastCompareSummary.requestedSequences,
+    lastCompareComparedSequences: lastCompareSummary.comparedSequences,
+    lastCompareMatchedSequences: lastCompareSummary.matchedSequences,
+    lastCompareDivergedSequences: lastCompareSummary.divergedSequences,
+    lastCompareAllMatch: lastCompareSummary.allMatch,
+    lastCompareHighestMatchedLevel: lastCompareSummary.highestMatchedLevel,
+    lastCompareHighestMatchedSequenceId: lastCompareSummary.highestMatchedSequenceId,
+    lastCompareFirstFailingSequenceId: lastCompareSummary.firstFailingSequenceId,
+    lastCompareFirstFailingStep: lastCompareSummary.firstFailingStep,
+    lastCompareFirstFailingReason: lastCompareSummary.firstFailingReason,
+    currentModelerTargetLevel: visibleModelerTarget.level,
+    currentModelerTargetSequenceId: visibleModelerTarget.sequenceId,
+    currentModelerTargetStep: visibleModelerTarget.step,
+    currentModelerTargetReason: visibleModelerTarget.reason,
     currentLevel: timeline.currentLevel,
     currentAttemptId: attemptId,
     currentModelRevisionId: typeof currentModelMeta?.revisionId === "string" ? String(currentModelMeta.revisionId) : null,
@@ -454,6 +799,18 @@ function spawnDetached(command: string, args: string[], cwd: string, env?: Recor
   child.unref();
 }
 
+async function resolveHarnessPython(): Promise<string> {
+  if (process.env.PYTHON && process.env.PYTHON.trim()) {
+    return process.env.PYTHON.trim();
+  }
+  try {
+    await fs.access(HARNESS_VENV_PYTHON);
+    return HARNESS_VENV_PYTHON;
+  } catch {
+    return "python3";
+  }
+}
+
 function safeRunIdPrefix(value: string): string {
   const normalized = String(value || "")
     .trim()
@@ -470,7 +827,7 @@ function uniqueRunId(prefix: string): string {
 export async function startFluxRun(input: FluxRunStartRequest): Promise<{ runId: string }> {
   await cleanupLaunchTempArtifacts();
   const runId = uniqueRunId(input.sessionName);
-  spawnDetached("python", [
+  spawnDetached(await resolveHarnessPython(), [
     HARNESS_FLUX_ENTRYPOINT,
     "--game-id",
     input.gameId,
