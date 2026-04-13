@@ -72,18 +72,17 @@ def _component_boxes(mask: np.ndarray) -> list[tuple[int, int, int, int]]:
     return boxes
 
 
-def _boxes_close(a: tuple[int, int, int, int], b: tuple[int, int, int, int], *, gap: int) -> bool:
+def _boxes_intersect(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> bool:
     a_r0, a_c0, a_r1, a_c1 = a
     b_r0, b_c0, b_r1, b_c1 = b
-    return not (
-        a_r1 + gap < b_r0
-        or b_r1 + gap < a_r0
-        or a_c1 + gap < b_c0
-        or b_c1 + gap < a_c0
-    )
+    return not (a_r1 < b_r0 or b_r1 < a_r0 or a_c1 < b_c0 or b_c1 < a_c0)
 
 
-def _merge_box_group(boxes: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int]:
+def _box_area(box: tuple[int, int, int, int]) -> int:
+    return (box[2] - box[0] + 1) * (box[3] - box[1] + 1)
+
+
+def _merge_boxes(boxes: list[tuple[int, int, int, int]]) -> tuple[int, int, int, int]:
     return (
         min(box[0] for box in boxes),
         min(box[1] for box in boxes),
@@ -92,26 +91,48 @@ def _merge_box_group(boxes: list[tuple[int, int, int, int]]) -> tuple[int, int, 
     )
 
 
-def _cluster_boxes(boxes: list[tuple[int, int, int, int]], *, gap: int) -> list[tuple[int, int, int, int]]:
-    remaining = list(boxes)
-    merged: list[tuple[int, int, int, int]] = []
-    while remaining:
-        seed = remaining.pop(0)
-        group = [seed]
-        changed = True
-        while changed:
-            changed = False
-            next_remaining: list[tuple[int, int, int, int]] = []
-            group_box = _merge_box_group(group)
-            for candidate in remaining:
-                if _boxes_close(group_box, candidate, gap=gap):
-                    group.append(candidate)
-                    changed = True
-                else:
-                    next_remaining.append(candidate)
-            remaining = next_remaining
-        merged.append(_merge_box_group(group))
-    return merged
+def _overlap_ratio(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    ar0, ac0, ar1, ac1 = a
+    br0, bc0, br1, bc1 = b
+    ir0 = max(ar0, br0)
+    ic0 = max(ac0, bc0)
+    ir1 = min(ar1, br1)
+    ic1 = min(ac1, bc1)
+    if ir1 < ir0 or ic1 < ic0:
+        return 0.0
+    inter = (ir1 - ir0 + 1) * (ic1 - ic0 + 1)
+    return inter / float(min(_box_area(a), _box_area(b)))
+
+
+def _cluster_boxes(
+    boxes: list[tuple[int, int, int, int]],
+    *,
+    overlap_threshold: float = 0.5,
+    max_growth_factor: float = 8.0,
+) -> list[tuple[int, int, int, int]]:
+    clusters: list[dict[str, object]] = []
+    for box in boxes:
+        placed = False
+        for cluster in clusters:
+            representative = cluster["box"]
+            assert isinstance(representative, tuple)
+            if _overlap_ratio(box, representative) < overlap_threshold:
+                continue
+            members = list(cluster["members"])
+            assert isinstance(members, list)
+            candidate_members = [*members, box]
+            merged_box = _merge_boxes(candidate_members)
+            areas = sorted(_box_area(member) for member in candidate_members)
+            median_area = areas[len(areas) // 2]
+            if _box_area(merged_box) > int(median_area * max_growth_factor):
+                continue
+            cluster["members"] = candidate_members
+            cluster["box"] = merged_box
+            placed = True
+            break
+        if not placed:
+            clusters.append({"box": box, "members": [box]})
+    return [cluster["box"] for cluster in clusters]
 
 
 def _expand_box(box: tuple[int, int, int, int], *, height: int, width: int, margin: int) -> tuple[int, int, int, int]:
@@ -137,7 +158,7 @@ def _iter_level_sequences(level_dir: Path) -> list[dict]:
     return payloads
 
 
-def generate_feature_boxes(level_dir: Path, *, dilation_radius: int = 1, merge_gap: int = 2, margin: int = 1) -> dict:
+def generate_feature_boxes(level_dir: Path, *, dilation_radius: int = 1, margin: int = 1) -> dict:
     if not level_dir.exists():
         raise RuntimeError(f"missing level dir for feature boxes: {level_dir}")
     level_name = level_dir.name
@@ -181,25 +202,27 @@ def generate_feature_boxes(level_dir: Path, *, dilation_radius: int = 1, merge_g
                     step_mask |= _diff_mask(frame, after)
             if not bool(np.any(step_mask)):
                 continue
+            board_area = before.shape[0] * before.shape[1]
+            changed_pixels = int(np.count_nonzero(step_mask))
+            if changed_pixels >= int(board_area * 0.8):
+                # Whole-screen or near-whole-screen transition surfaces are not useful local feature evidence.
+                # They tend to be level/room wipes or large animations that collapse the boxing phase.
+                continue
             dilated = _dilate(step_mask, radius=dilation_radius)
-            boxes = _component_boxes(dilated)
+            boxes = [_expand_box(box, height=before.shape[0], width=before.shape[1], margin=margin) for box in _component_boxes(dilated)]
             all_step_boxes.extend(boxes)
             stats.append({
                 "sequence_id": sequence_id,
                 "local_step": int(action.get("local_step", 0) or 0),
                 "action_name": str(action.get("action_name", "") or ""),
-                "changed_pixels": int(np.count_nonzero(step_mask)),
+                "changed_pixels": changed_pixels,
                 "boxes": boxes,
             })
     if grid_shape is None:
         raise RuntimeError(f"could not determine grid shape for feature boxes under {level_dir}")
-    merged_boxes = _cluster_boxes(all_step_boxes, gap=merge_gap)
-    expanded_boxes = [
-        _expand_box(box, height=grid_shape[0], width=grid_shape[1], margin=margin)
-        for box in merged_boxes
-    ]
+    clustered_boxes = _cluster_boxes(all_step_boxes)
     deduped_boxes: list[tuple[int, int, int, int]] = []
-    for box in sorted(expanded_boxes):
+    for box in sorted(clustered_boxes):
         if box not in deduped_boxes:
             deduped_boxes.append(box)
     payload_boxes = []
@@ -209,13 +232,13 @@ def generate_feature_boxes(level_dir: Path, *, dilation_radius: int = 1, merge_g
             item["sequence_id"]
             for item in stats
             for step_box in item["boxes"]
-            if _boxes_close(box, step_box, gap=0)
+            if _boxes_intersect(box, step_box)
         })
         touched_actions = sorted({
             item["action_name"]
             for item in stats
             for step_box in item["boxes"]
-            if _boxes_close(box, step_box, gap=0) and item["action_name"]
+            if _boxes_intersect(box, step_box) and item["action_name"]
         })
         payload_boxes.append({
             "box_id": f"box_{index:02d}",
