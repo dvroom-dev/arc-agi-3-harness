@@ -89,6 +89,58 @@ def test_rehearse_seed_on_model_marks_compare_error_as_failed_rehearsal(tmp_path
     assert payloads[0]["compare_payload"]["error"]["type"] == "missing_sequences"
 
 
+def test_rehearse_seed_on_model_stops_when_expected_frontier_is_reached(tmp_path: Path, monkeypatch) -> None:
+    _load_module("common", "scripts/flux/common.py")
+    rehearse = _load_module("flux_rehearse_seed_frontier_test", "scripts/flux/rehearse_seed_on_model.py")
+    workspace_root = tmp_path / "run"
+    model_workspace = workspace_root / "agent" / "game_ls20"
+    model_workspace.mkdir(parents=True, exist_ok=True)
+    (model_workspace / "model.py").write_text("# stub\n", encoding="utf-8")
+
+    monkeypatch.setattr(rehearse, "read_json_stdin", lambda: {
+        "workspaceRoot": str(workspace_root),
+        "seedBundle": {"replayPlan": [{"tool": "shell", "args": {"cmd": ["arc_action", "ACTION1"]}}, {"tool": "shell", "args": {"cmd": ["arc_action", "ACTION1"]}}]},
+        "seedHash": "seed_hash_x",
+        "expectedFrontierLevel": 2,
+    })
+    monkeypatch.setattr(rehearse, "load_runtime_meta", lambda _workspace: {
+        "model_workspace_dir": str(model_workspace),
+        "run_config_dir": str(workspace_root / "config"),
+        "run_bin_dir": str(workspace_root / "bin"),
+        "game_id": "ls20",
+    })
+    monkeypatch.setattr(rehearse, "copy_model_workspace", lambda _meta, destination: destination.mkdir(parents=True, exist_ok=True) or destination)
+
+    calls: list[tuple[str, list[str]]] = []
+
+    def fake_run_model_command(_model_workspace, _env, args, stdin_text=None):
+        action = args[0]
+        calls.append((action, list(args)))
+        if action == "shutdown":
+            return {"parsed": {"ok": True}}
+        if action == "status":
+            return {"parsed": {"ok": True, "action": "status", "current_level": 2, "levels_completed": 1}}
+        if action == "exec":
+            return {"returncode": 0, "parsed": {"ok": True, "action": "exec", "current_level": 2, "levels_completed": 1}}
+        if action == "compare_sequences":
+            return {"parsed": {"ok": True, "action": "compare_sequences", "level": 2, "all_match": True, "compared_sequences": 1, "eligible_sequences": 1}}
+        raise AssertionError(f"unexpected action: {args}")
+
+    monkeypatch.setattr(rehearse, "_run_model_command", fake_run_model_command)
+
+    payloads: list[dict] = []
+    monkeypatch.setattr(rehearse, "write_json_stdout", lambda payload: payloads.append(payload))
+
+    rehearse.main()
+
+    exec_calls = [entry for entry in calls if entry[0] == "exec"]
+    assert len(exec_calls) == 1
+    compare_calls = [entry for entry in calls if entry[0] == "compare_sequences"]
+    assert compare_calls
+    assert compare_calls[0][1][compare_calls[0][1].index("--level") + 1] == "2"
+    assert payloads[0]["rehearsal_ok"] is True
+
+
 def test_replay_seed_on_real_game_resolves_agent_prefixed_paths(tmp_path: Path) -> None:
     _load_module("common", "scripts/flux/common.py")
     replay = _load_module("flux_replay_seed_real_test", "scripts/flux/replay_seed_on_real_game.py")

@@ -132,12 +132,23 @@ def _translated_model_step(model_workspace: Path, env: dict[str, str], cmd: list
     return result
 
 
+def _reached_expected_frontier(parsed: dict | None, expected_frontier_level: int | None) -> bool:
+    if not isinstance(parsed, dict):
+        return False
+    if not expected_frontier_level or expected_frontier_level <= 0:
+        return False
+    current_level = int(parsed.get("current_level", 0) or 0)
+    levels_completed = int(parsed.get("levels_completed", 0) or 0)
+    return current_level >= expected_frontier_level or levels_completed >= expected_frontier_level
+
+
 def main() -> None:
     payload = read_json_stdin()
     workspace_root = str(payload["workspaceRoot"])
     meta = load_runtime_meta(workspace_root)
     seed_bundle = payload.get("seedBundle") if isinstance(payload.get("seedBundle"), dict) else {}
     model_revision_id = str(payload.get("modelRevisionId") or "").strip()
+    expected_frontier_level = int(payload.get("expectedFrontierLevel", 0) or 0) or None
     seed_key = safe_instance_name(str(payload.get("seedRevisionId") or payload.get("seedHash") or "seed"))
     rehearsal_root = Path(workspace_root) / "flux_model_rehearsals" / seed_key
     model_workspace = rehearsal_root / Path(str(meta["model_workspace_dir"])).name
@@ -183,6 +194,8 @@ def main() -> None:
                 rehearsal_ok = False
                 error = {"type": "shell_step_failed", "cmd": cmd, "result": result}
                 break
+            if _reached_expected_frontier(parsed, expected_frontier_level):
+                break
             continue
         if tool == "write_file":
             target = _resolve_rehearsal_path(model_workspace, str(args.get("path", "")))
@@ -205,6 +218,8 @@ def main() -> None:
     status_after = _run_model_command(model_workspace, env, ["status", "--game-id", str(meta["game_id"])])
     status_payload = status_after.get("parsed") if isinstance(status_after.get("parsed"), dict) else {}
     compare_level = int(status_payload.get("current_level", 1) or 1)
+    if expected_frontier_level and expected_frontier_level > 0:
+        compare_level = expected_frontier_level
     compare_result = _run_model_command(
         model_workspace,
         env,
