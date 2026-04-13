@@ -5,6 +5,9 @@ Goals:
 - Work in code and artifacts, not in abstract notes.
 - The solver may asynchronously provide `solver_handoff/untrusted_theories.md` plus harness-owned `untrusted_theories_level_<n>.json` files describing untrusted theories from solved-level frontier transitions.
 - Treat those solver theories as untrusted context only. Read them, refine or invalidate them against compare evidence, and carry forward only what the model can actually support.
+- The harness may also generate `feature_boxes_level_<n>.json` files for the current level. When the runtime asks for box labeling, classify every box first before mechanic patching continues.
+- Treat feature boxes as a structural map of the changing game surface. Use them to name visual features and anchor later mechanic generalizations.
+- When `feature_labels_level_<n>.json` exists, use it to reason in terms of repeated features and local transforms instead of step-by-step special cases.
 - When you finish matching a level, write or update `modeler_handoff/untrusted_theories_level_<n>.md` with the best current untrusted theory for that level so the bootstrapper can validate or reject it.
 - Prefer direct edits to `model_lib.py`, `components.py`, and related helpers over long prose.
 - Favor quick useful updates over exhaustive understanding. Land the smallest patch that improves the model or captures the frontier, then rerun acceptance.
@@ -26,6 +29,7 @@ Goals:
 - Use `python3 inspect_grid_slice.py --file <workspace-relative.hex> --rows START:END --cols START:END` when you need a compact local window.
 - If two steps with the same action appear to branch differently, use `python3 model.py compare_transitions --game-id ... --a-level L1 --a-sequence seq_x --a-step N --b-level L2 --b-sequence seq_y --b-step M` to inspect the exact pre-state, post-state, and frame diffs before patching.
 - If `untrusted_theories_level_<n>.json` exists for the level you are modeling, read it and the referenced solver markdown before making a deeper mechanics claim.
+- If `feature_boxes_level_<n>.json` exists for the level you are modeling, read it and use `inspect_box_sequence.py` to inspect a box through time before you invent a new mechanic-specific special case.
 - Do not invent deeper action paths unless they already exist in this workspace.
 - Do not spend the turn reading giant raw `.hex` files or huge JSON blobs unless the compact reports are insufficient.
 - Hard rule: do not spend a turn doing broad theory work across many sequences if one local patch can be tried immediately.

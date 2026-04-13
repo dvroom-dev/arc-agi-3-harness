@@ -21,6 +21,7 @@ def test_launch_flux_mocked_end_to_end_flow_retries_bootstrap_until_seed_rev_sol
 
     (prompts_dir / "solver.md").write_text("SOLVER_PROMPT", encoding="utf-8")
     (prompts_dir / "modeler.md").write_text("MODELER_PROMPT", encoding="utf-8")
+    (prompts_dir / "modeler_boxes.md").write_text("MODELER_BOXES_PROMPT", encoding="utf-8")
     (prompts_dir / "bootstrapper.md").write_text("BOOTSTRAP_PROMPT", encoding="utf-8")
     (prompts_dir / "modeler_continue.md").write_text("Continue model.", encoding="utf-8")
     (prompts_dir / "bootstrapper_continue.md").write_text("Continue bootstrap.", encoding="utf-8")
@@ -377,6 +378,7 @@ def test_launch_flux_mocked_end_to_end_flow_retries_modeler_then_bootstraps_and_
 
     (prompts_dir / "solver.md").write_text("SOLVER_PROMPT", encoding="utf-8")
     (prompts_dir / "modeler.md").write_text("MODELER_PROMPT", encoding="utf-8")
+    (prompts_dir / "modeler_boxes.md").write_text("MODELER_BOXES_PROMPT", encoding="utf-8")
     (prompts_dir / "bootstrapper.md").write_text("BOOTSTRAP_PROMPT", encoding="utf-8")
     (prompts_dir / "modeler_continue.md").write_text("Continue model: {{acceptance_message}}", encoding="utf-8")
     (prompts_dir / "bootstrapper_continue.md").write_text("Continue bootstrap.", encoding="utf-8")

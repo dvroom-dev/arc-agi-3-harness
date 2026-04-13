@@ -204,6 +204,14 @@ def current_compare_markdown_path(game_dir: str | Path) -> Path:
     return coerce_path(game_dir) / "current_compare.md"
 
 
+def feature_boxes_path(game_dir: str | Path, level: int) -> Path:
+    return coerce_path(game_dir) / f"feature_boxes_level_{int(level)}.json"
+
+
+def load_feature_boxes(game_dir: str | Path, level: int) -> dict[str, Any]:
+    return load_json(feature_boxes_path(game_dir, level))
+
+
 def coverage_report_paths(game_dir: str | Path, level: int) -> dict[str, Path]:
     game_dir = coerce_path(game_dir)
     canonical_dir = level_dir(game_dir, int(level))

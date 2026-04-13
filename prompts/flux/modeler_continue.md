@@ -7,6 +7,7 @@ Use `python3 inspect_sequence.py --current-mismatch` for a compact summary, make
 If two same-action steps seem to branch differently, use `python3 model.py compare_transitions --game-id ... --a-level L1 --a-sequence seq_x --a-step N --b-level L2 --b-sequence seq_y --b-step M` to inspect the exact pre-state, post-state, and frame diffs before patching.
 If the feedback is `no_eligible_sequences` for the newest visible level, model the frontier start state instead of retrying the same compare loop.
 If a new `untrusted_theories_level_<n>.json` file or updated solver `solver_handoff/untrusted_theories.md` appears, read it, treat it as untrusted context, and refine or invalidate it against compare evidence as part of your next patch.
+If `feature_boxes_level_<n>.json` and `feature_labels_level_<n>.json` exist for this level, use them to reason about repeated feature-local deltas before adding another step-specific patch.
 When your compare target for a level is fully matched, write or update `modeler_handoff/untrusted_theories_level_<n>.md` before handing off.
 Do not start a long investigation pass here. Make one quick model change or one quick frontier update, rerun acceptance, and report the result.
 If multiple sequences exist, resume from the earliest failing sequence in order.

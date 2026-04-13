@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from arc_model_runtime.io_utils import copytree_stable, workspace_tree_lock
+from scripts.flux.feature_boxes import generate_feature_boxes
 
 
 def read_json_stdin() -> dict:
@@ -408,4 +409,20 @@ def sync_evidence_bundle_to_model_workspace(meta: dict, bundle_path: Path, *, ta
             }
             theory_json_path.write_text(json.dumps(theory_payload, indent=2) + "\n", encoding="utf-8")
             synced.append(str(theory_json_path))
+        for level_dir in sorted(model_workspace.glob("level_*")):
+            if not level_dir.is_dir():
+                continue
+            name = level_dir.name
+            if name == "level_current" or name == "analysis_level" or not name.startswith("level_"):
+                continue
+            try:
+                feature_boxes = generate_feature_boxes(level_dir)
+            except Exception:
+                continue
+            level_num = int(feature_boxes.get("level", 0) or 0)
+            if level_num <= 0:
+                continue
+            feature_boxes_path = model_workspace / f"feature_boxes_level_{level_num}.json"
+            feature_boxes_path.write_text(json.dumps(feature_boxes, indent=2) + "\n", encoding="utf-8")
+            synced.append(str(feature_boxes_path))
     return synced
