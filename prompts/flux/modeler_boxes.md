@@ -12,6 +12,11 @@ Goals:
   - `transient`
   - `ui_like`
   - `unknown`
+- Use this exact JSON shape for each box entry:
+  - `box_id`
+  - `features`
+  - `tags`
+- Do not use `feature_names`; the key must be exactly `features`.
 - Cover every box exactly once.
 - Do not patch `model_lib.py` in this phase.
 - Do not skip boxes because they seem unimportant. The point is to build a reusable structural map before mechanic modeling.
