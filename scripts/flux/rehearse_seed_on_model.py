@@ -139,7 +139,7 @@ def _reached_expected_frontier(parsed: dict | None, expected_frontier_level: int
         return False
     current_level = int(parsed.get("current_level", 0) or 0)
     levels_completed = int(parsed.get("levels_completed", 0) or 0)
-    return current_level >= expected_frontier_level or levels_completed >= expected_frontier_level
+    return levels_completed >= expected_frontier_level or current_level > expected_frontier_level
 
 
 def main() -> None:
